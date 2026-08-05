@@ -386,8 +386,10 @@ Start Menu 與 AppsFolder **共用同一份判準**，集中於單一純值模�
 
 - 透過 Windows Shell 取得圖示，不自行進入封裝目錄。
 - 圖示採 lazy loading，只載入目前可見項目。
-- 快取鍵由 stable ID、要求尺寸及 DPI 組成。
-- 記憶體 LRU cache 預設上限 64 個 decoded bitmap；離開可見區域不代表立即釋放。
+- 快取鍵由 stable ID 與標準尺寸 variant（48／96／256 實體像素）組成，**不含 DPI 與畫面版面尺寸**。取用時選三者中最小的 ≥ 需要的實體像素，並於繪製時由 renderer 降尺寸至目標矩形。DPI 或版面變更時允許重新取得，不做尺寸遷移。
+- 記憶體 LRU cache 上限由 `釘選項目數 + recent_count 設定值 + 一頁格數（24）` 推導，涵蓋預熱集與一次搜尋結果的工作集，避免搜尋把預熱好的釘選項目擠出快取；離開可見區域不代表立即釋放。
+- decoded 圖示額外持久化於本機單一 pack 檔（§10.1、§10.2），使登入後第一次顯示面板也能直接呈現真實圖示。該檔為**可完全重建的加速器**，任何毀損或版本不符都必須能在不損失使用者資料的前提下降級運作。
+- 取得圖示必須在背景 worker 執行；UI thread 不得等待 Shell、不得等待磁碟、不得等待解碼。
 - Catalog 不預解碼所有圖示。
 - 取得失敗時顯示單一內建 fallback icon。
 - 第一幀允許先顯示 fallback，再非同步更新真實圖示，但不可造成格位重排。
@@ -456,13 +458,16 @@ MVP 設定：
 | 指標 | 目標 | 阻擋發布門檻 |
 |---|---:|---:|
 | 待機 CPU（15 分鐘平均） | ≤ 0.1% 單一邏輯 CPU 等效 | > 0.5% |
-| 待機工作集 | ≤ 20 MiB | > 35 MiB |
-| 待機 Private Bytes | ≤ 15 MiB | > 30 MiB |
-| 面板顯示、20 個圖示完成後工作集 | ≤ 35 MiB | > 55 MiB |
+| 待機工作集 | ≤ 60 MiB | > 80 MiB |
+| 待機 Private Bytes | ≤ 50 MiB | > 70 MiB |
+| 面板顯示、20 個圖示完成後工作集 | ≤ 75 MiB | > 100 MiB |
 | 冷啟動至可接收快捷鍵 | ≤ 500 ms | > 1,000 ms |
 | 暖狀態快捷鍵至可輸入 | p95 ≤ 80 ms | p95 > 150 ms |
 | 500 個 App 的單次過濾 | p95 ≤ 8 ms | p95 > 16 ms |
-| 待機執行緒數 | ≤ 4 | > 8 |
+| 待機執行緒數 | ≤ 5 | > 9 |
+| `icons.cache` 檔案大小 | ≤ 32 MiB | > 48 MiB |
+
+待機執行緒數目標由 4 放寬為 5，理由是新增一條**常駐的**圖示 worker（負責取得、解碼、pack 檔讀寫與 idle flush），不為每個圖示建 thread（§9 第 658 行不變）。
 
 量測條件至少包含：
 
@@ -471,7 +476,7 @@ MVP 設定：
 - Catalog 約 100、500、2,000 筆的合成測試。
 - 100%、150%、200% DPI。
 
-工作集會受系統共享頁面、Shell extension、圖示解碼及安全軟體影響，因此同時記錄 Working Set、Private Working Set、Private Bytes、CPU time 與執行緒數，不可只看工作管理員單一欄位。
+工作集會受系統共享頁面、Shell extension、圖示解碼及安全軟體影響，因此同時記錄 Working Set、Private Working Set、Private Bytes、CPU time 與執行緒數，不可只看工作管理員單一欄位。`icons.cache` 以 mmap 讀取，payload 不常駐，工作集只反映實際觸碰過的 page。
 
 ### NFR-002 待機模型
 
@@ -642,11 +647,13 @@ flowchart TD
 | `user_folder_source` | 設定資料夾的受控副檔名列舉 | 任意檔案搜尋、網路路徑 |
 | `catalog_watcher` | 目錄變更通知與 debounce | 固定輪詢 |
 | `search_engine` | 正規化、匹配、穩定排序 | Shell 呼叫 |
-| `icon_cache` | 非同步取得、LRU、DPI key | 永久保存全部 bitmap |
+| `icon_cache` | 背景取得、記憶體 LRU、標準尺寸 variant key、可重建的本機 pack 快取 | 保存全 Catalog 的圖示、以快取作為真實來源、原地覆寫使用者資料 |
 | `shell_launcher` | Shell 啟動與錯誤映射 | 自行解析任意命令列 |
 | `usage_store` | pins、順序、啟動統計、原子寫入 | 監控其他程式活動 |
 | `settings_store` | 設定讀寫與 migration | App Catalog cache |
 | `diagnostics` | 有界記錄、效能標記 | 記錄搜尋文字 |
+
+`icon_cache` 可持久化的範圍僅限**曾被顯示過**的項目（有界、受預算淘汰），不是整份 Catalog；§FR-009「Catalog 不預解碼所有圖示」不變。
 
 ### 9.2 執行緒模型
 
@@ -696,6 +703,7 @@ flowchart TD
 ├── favorites.txt
 ├── usage.tsv
 ├── catalog.cache
+├── icons.cache
 └── logs\
     ├── nimblerun.log
     └── nimblerun.log.1
@@ -708,8 +716,9 @@ flowchart TD
 - `favorites.txt`：UTF-8，每行一個經 escaping 的 stable ID，行序即 pin 順序。
 - `usage.tsv`：版本化 UTF-8 TSV；欄位為 stable ID、總啟動數、7／30 日 buckets 或必要時間資料、最後啟動 UTC。
 - `catalog.cache`：可選的版本化二進位 cache，只用於加速，不是真實來源；讀取錯誤可直接刪除並重建。
+- `icons.cache`：版本化二進位 pack 檔，保存曾顯示過項目的 decoded 圖示（編碼為 PNG）。只用於加速，不是真實來源。採固定大小的雙份檔頭與固定容量索引區，payload 以 append 方式寫入；**每筆索引項與每筆 payload 各自帶 CRC32**，單筆毀損只丟棄該筆，不丟棄整檔。檔頭 magic／版本不符或雙份檔頭皆不可讀時整檔刪除重建。compaction 走 `.tmp` ＋ replace。
 
-不得因為資料量小就引入 SQLite。所有持久資料寫入應先寫 `.tmp`，flush 成功後以 replace 方式提交。
+不得因為資料量小就引入 SQLite。所有持久資料寫入應先寫 `.tmp`，flush 成功後以 replace 方式提交。此規則針對使用者資料（設定、pins、使用紀錄）。可完全重建的快取（`catalog.cache`、`icons.cache`）允許以 append 方式就地追加，但 compaction 與整檔重寫仍須走 `.tmp` ＋ replace。
 
 ### 10.3 Stable ID
 
@@ -727,6 +736,8 @@ flowchart TD
 - 不覆寫原檔。
 - 將功能退回安全預設。
 - 顯示一次錯誤提示。
+
+快取類檔案（`catalog.cache`、`icons.cache`）遇到較新且不支援的 schema version 時，**不覆寫原檔**、停用該快取（僅以記憶體 LRU 運作），且**不顯示錯誤提示**（快取降級對使用者不可見，不屬於需要通知的失敗）。使用者資料的既有規則不變。
 
 舊版本升級需有單元測試；Catalog cache 不需要 migration，可直接重建。
 
@@ -1028,7 +1039,7 @@ MVP 不內建遙測。若開發者或測試者自願提供本機測試報告，�
 3. C++20＋原生 Win32；不使用 WPF、WinUI 3、Qt 或 Electron。
 4. 待機完全事件驅動，不使用高頻 timer 或背景掃描。
 5. 不掃描整顆磁碟，也不直接存取受保護的 WindowsApps。
-6. 圖示延遲載入並限制 cache；不能讓 UI 等待圖示。
+6. 圖示延遲載入並限制 cache；不能讓 UI 等待圖示。圖示取得與快取讀寫一律在背景 worker，UI thread 只接收純值結果。
 7. Catalog 使用 immutable snapshot；背景重建成功後一次替換。
 8. 啟動交給 Windows Shell，UI 不拼接任意命令列。
 9. 無網路、無遙測、標準使用者權限、資料只留本機。

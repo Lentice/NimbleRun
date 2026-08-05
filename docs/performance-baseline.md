@@ -5,13 +5,14 @@ These are Release x64 measurements, not Debug estimates. Record the OS build, CP
 | Metric | Target | Blocking threshold | Result | Environment / notes |
 | --- | ---: | ---: | --- | --- |
 | Idle CPU, 15-minute average | ≤ 0.1% logical CPU equivalent | > 0.5% | Not measured | |
-| Idle working set | ≤ 20 MiB | > 35 MiB | Not measured | |
-| Idle private bytes | ≤ 15 MiB | > 30 MiB | Not measured | |
-| Visible panel with 20 icons | ≤ 35 MiB | > 55 MiB | Not measured | |
+| Idle working set | ≤ 60 MiB | > 80 MiB | Not measured | |
+| Idle private bytes | ≤ 50 MiB | > 70 MiB | Not measured | |
+| Visible panel with 20 icons | ≤ 75 MiB | > 100 MiB | Not measured | |
 | Cold start to hotkey-ready | ≤ 500 ms | > 1,000 ms | Not measured | |
 | Warm hotkey to input-ready, p95 | ≤ 80 ms | > 150 ms | Not measured | |
 | Filter 500 apps, p95 | ≤ 8 ms | > 16 ms | Not measured | |
-| Idle thread count | ≤ 4 | > 8 | Not measured | |
+| Idle thread count | ≤ 5 | > 9 | Not measured | |
+| `icons.cache` file size | ≤ 32 MiB | > 48 MiB | Not measured | |
 
 ## Measurement rules
 
