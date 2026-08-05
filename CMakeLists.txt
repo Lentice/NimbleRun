@@ -191,6 +191,7 @@ target_link_libraries(nimblerun_pins
 add_library(nimblerun_icons STATIC
     src/icons/icon_cache.cpp
     src/icons/icon_pack_format.cpp
+    src/icons/png_codec.cpp
     src/icons/shell_icon_provider.cpp
 )
 
@@ -215,6 +216,7 @@ target_link_libraries(nimblerun_icons
         ole32
         uuid
         gdi32
+        windowscodecs
 )
 
 add_library(nimblerun_ui STATIC
