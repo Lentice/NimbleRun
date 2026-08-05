@@ -41,13 +41,26 @@ IconBitmap IconCache::Resolve(const AppEntry& entry, const IconKey& key, IconPro
         return {};  // failure is not cached; caller keeps the fallback
     }
 
-    order_.push_front(encoded);
-    map_.emplace(encoded, std::make_pair(std::move(loaded), order_.begin()));
+    Insert(encoded, std::move(loaded));
+    return map_.at(encoded).first;
+}
+
+void IconCache::Insert(const std::wstring& encoded_key, IconBitmap bitmap) {
+    if (bitmap.Empty()) {
+        return;
+    }
+    const auto it = map_.find(encoded_key);
+    if (it != map_.end()) {
+        it->second.first = std::move(bitmap);
+        order_.splice(order_.begin(), order_, it->second.second);  // refresh recency
+        return;
+    }
+    order_.push_front(encoded_key);
+    map_.emplace(encoded_key, std::make_pair(std::move(bitmap), order_.begin()));
     while (order_.size() > max_items_) {
         map_.erase(order_.back());
         order_.pop_back();
     }
-    return map_.at(encoded).first;
 }
 
 void IconCache::SetMaxItems(std::size_t max_items) {

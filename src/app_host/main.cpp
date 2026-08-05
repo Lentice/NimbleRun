@@ -17,6 +17,7 @@
 #include "catalog/user_folder_catalog.h"
 #include "diagnostics/diagnostic_log.h"
 #include "icons/icon_cache.h"
+#include "icons/icon_worker.h"
 #include "icons/shell_icon_provider.h"
 #include "launch/shell_launch.h"
 #include "pins/pin_store.h"
@@ -35,6 +36,7 @@
 #include <cmath>
 #include <ctime>
 #include <cwchar>
+#include <memory>
 #include <set>
 #include <string>
 #include <utility>
@@ -54,14 +56,15 @@ constexpr UINT kRefreshMessage = WM_APP + 2;
 constexpr UINT kSettingsMessage = WM_APP + 3;
 constexpr UINT kAboutMessage = WM_APP + 4;
 constexpr UINT kExitMessage = WM_APP + 5;
-// NR-012: deferred visible-set icon load (see LoadVisibleIcons).
-constexpr UINT kIconRequestMessage = WM_APP + 6;
 // NR-011: a watched directory changed. wParam = 1-based watch index, lParam = 1
 // for a full rescan (buffer overflow / ERROR_NOTIFY_ENUM_DIR), 0 for a change.
 constexpr UINT kWatchChangedMessage = WM_APP + 7;
 // NR-011: a background enumeration finished. wParam = generation, lParam =
 // pointer to a heap RebuildResult the UI thread takes ownership of.
 constexpr UINT kRebuildDoneMessage = WM_APP + 8;
+// NR-032: one decoded icon finished on the worker thread. lParam = pointer to a
+// heap IconResult the UI thread takes ownership of (empty bitmap = failure).
+constexpr UINT kIconReadyMessage = WM_APP + 9;
 // NR-011: debounce timer id (500 ms, see FR-008).
 constexpr UINT_PTR kRebuildTimerId = 2;
 
@@ -160,12 +163,19 @@ nimblerun::Theme g_theme = nimblerun::Theme::System;
 nimblerun::palette::PanelColors g_colors{};
 nimblerun::palette::PanelColors g_brush_colors{};
 
-// NR-012 icon state. The cache is the pure core; the provider is the only Shell
-// COM toucher and is kept behind the cache so tests can inject a fake.
+// NR-012/NR-032 icon state. The cache is the pure core; the Shell provider
+// lives behind the worker, so the UI thread never calls Shell
+// (design-spec §FR-009).
 nimblerun::IconCache* g_icon_cache = nullptr;
-nimblerun::ShellIconProvider* g_icon_provider = nullptr;
+// NR-032: one background thread owns Shell COM; the UI thread only posts
+// requests and receives decoded bitmaps through kIconReadyMessage.
+nimblerun::IconWorker* g_icon_worker = nullptr;
+// Encoded keys with a request already in flight; a Render() miss on one of
+// these does not re-post. UI-thread owned, never cleared on show (those
+// requests are still flying).
+std::set<std::wstring> g_pending_icon_keys;
 // Encoded keys already handed to the provider this panel session, so a failed
-// or loaded icon is not re-requested on every paint. Cleared on each show so a
+// icon is not re-requested on every paint. Cleared on each show so a
 // transient failure is retried the next time the panel opens.
 std::set<std::wstring> g_requested_icon_keys;
 
@@ -599,18 +609,18 @@ nimblerun::IconKey IconKeyFor(const nimblerun::AppEntry& entry, int needed_px) {
     return {entry.stable_id, nimblerun::IconVariantForPixels(needed_px)};
 }
 
-// Number of model items that intersect the list/grid viewport, for icon
-// loading. Only these items get their icons requested (design-spec §FR-009
-// lazy loading); items outside the viewport stay unrequested until scrolling or
-// a query narrows the list. One page holds ViewportRows() * Columns() items.
-int VisibleItemCount() {
-    if (!g_model) {
-        return 0;
+// NR-032: posts a request for a key the renderer just missed, at most once per
+// key while a result is in flight (pending) or already failed this panel
+// session (requested). Called from Render() only, so requests are visible=true
+// and the work stays off the UI thread; the cache hit path never posts.
+void RequestVisibleIcon(const nimblerun::AppEntry& entry, const nimblerun::IconKey& key,
+                        const std::wstring& encoded) {
+    if (!g_icon_worker || g_pending_icon_keys.count(encoded) != 0 ||
+        g_requested_icon_keys.count(encoded) != 0) {
+        return;
     }
-    const auto& rows = g_model->Rows();
-    const int first = g_model->FirstVisibleRow();
-    const int capacity = g_model->ViewportRows() * g_model->Columns();
-    return std::min(capacity, static_cast<int>(rows.size()) - first);
+    g_pending_icon_keys.insert(encoded);
+    g_icon_worker->Post({entry, key, /*visible=*/true});
 }
 
 void DrawDecodedIcon(const nimblerun::IconBitmap& icon,
@@ -636,46 +646,6 @@ void DrawDecodedIcon(const nimblerun::IconBitmap& icon,
     g_render_target->DrawBitmap(
         bitmap, tile, 1.0f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
     bitmap->Release();
-}
-
-// Loads the visible rows' missing icons through the cache. Runs on the UI
-// thread but is dispatched from a posted message, i.e. at the tail of the
-// message queue, so keystrokes already queued are processed before any Shell
-// call; the set is bounded to the visible rows. A failing key is marked so the
-// fallback stays and the Shell is not re-queried every frame.
-// ponytail: synchronous visible-set load on the UI thread. Bounded (~8 rows),
-// event-driven (posted, not in an input handler) and reuses the UI thread's STA
-// COM, so it satisfies "icon loading does not block input state processing"
-// without thread lifecycle or COM marshaling. If Shell lookups ever stall the
-// panel measurably, move the load to a worker thread that CoInitializeEx's STA
-// itself and posts the plain IconBitmap back in a message. Moving the load to
-// that worker thread is NR-032, deliberately NOT done by this item.
-void LoadVisibleIcons(HWND window) {
-    if (!g_model || !g_icon_cache || !g_icon_provider) {
-        return;
-    }
-    // NR-031: the physical-pixel need comes from the shared LayoutForDpi()
-    // geometry, not a render-loop scale; the layout state picks the icon size
-    // (40 DIP grid cell vs 30 DIP list tile, design-spec §4.2/§4.3).
-    const nimblerun::layout::LayoutPx layout =
-        nimblerun::layout::LayoutForDpi(GetDpiForWindow(window));
-    const int needed_px = g_model->Columns() > 1
-        ? static_cast<int>(std::lround(nimblerun::layout::kIconSizeDip * layout.scale))
-        : layout.tile_size;
-    const auto& rows = g_model->Rows();
-    const int first = g_model->FirstVisibleRow();
-    const int count = VisibleItemCount();
-    for (int i = 0; i < count; ++i) {
-        const auto& entry = rows[static_cast<std::size_t>(first + i)];
-        const nimblerun::IconKey key = IconKeyFor(entry, needed_px);
-        const std::wstring encoded = key.Encode();
-        if (g_icon_cache->Peek(encoded) != nullptr || g_requested_icon_keys.count(encoded) != 0) {
-            continue;
-        }
-        g_requested_icon_keys.insert(encoded);
-        g_icon_cache->Resolve(entry, key, *g_icon_provider);
-    }
-    InvalidateRect(window, nullptr, FALSE);
 }
 
 // NR-018: reload pins from the store, reconcile them against the current
@@ -872,7 +842,6 @@ void Render(HWND window) {
     float dpi_x = 96.0f;
     float dpi_y = 96.0f;
     g_render_target->GetDpi(&dpi_x, &dpi_y);
-    bool need_icon_request = false;
     // NR-031: the icon need per layout state comes from the shared
     // LayoutForDpi() geometry (40 DIP grid cell / 30 DIP list tile in physical
     // pixels), never a scale inline in the render loop.
@@ -955,6 +924,10 @@ void Render(HWND window) {
                 if (const nimblerun::IconBitmap* icon = g_icon_cache ? g_icon_cache->Peek(encoded) : nullptr) {
                     DrawDecodedIcon(*icon, tile, dpi_x, dpi_y);
                 } else {
+                    // NR-032: fallback-first (design-spec §FR-009). The real
+                    // icon is requested from the worker right here; the paint
+                    // never waits on Shell, and the key is deduplicated by the
+                    // pending set until its result arrives.
                     g_render_target->FillRectangle(tile, g_dim_brush);
                     const std::wstring initial =
                         rows[i].display_name.empty()
@@ -963,9 +936,7 @@ void Render(HWND window) {
                     g_render_target->DrawText(
                         initial.c_str(), static_cast<UINT32>(initial.size()), g_text_format,
                         tile, g_text_brush);
-                    if (g_icon_cache && g_requested_icon_keys.count(encoded) == 0) {
-                        need_icon_request = true;
-                    }
+                    RequestVisibleIcon(rows[i], key, encoded);
                 }
 
                 // NR-029: single-line centered name in the lower half. The grid
@@ -1073,9 +1044,7 @@ void Render(HWND window) {
                         initial.c_str(), static_cast<UINT32>(initial.size()), g_text_format,
                         tile,
                         g_text_brush);
-                    if (g_icon_cache && g_requested_icon_keys.count(encoded) == 0) {
-                        need_icon_request = true;
-                    }
+                    RequestVisibleIcon(rows[i], key, encoded);
                 }
     
                 // NR-020: name in the upper half of the row, source path in the
@@ -1263,14 +1232,6 @@ void Render(HWND window) {
         DiscardDeviceResources();
     }
     EndPaint(window, &paint);
-
-    // NR-012: fallback-first. Deferring the icon load to a posted message runs
-    // it at the tail of the message queue: input already queued is dispatched
-    // before any (bounded, synchronous) Shell call, so the panel keeps
-    // responding. The next paint draws the real icons.
-    if (need_icon_request && IsWindowVisible(window)) {
-        PostMessageW(window, kIconRequestMessage, 0, 0);
-    }
 }
 
 void ShowPanel(HWND window) {
@@ -1327,7 +1288,9 @@ void ShowPanel(HWND window) {
     // swallow the WM_MOUSELEAVE that would otherwise clear the flag).
     g_grid_hover_index = -1;
     g_tracking_mouse_leave = false;
-    // NR-012: allow a retry of transient icon failures on this open.
+    // NR-012/NR-032: allow a retry of transient icon failures on this open.
+    // The pending set is deliberately NOT cleared: those requests are still in
+    // flight and their results keep landing in the LRU (that is the prewarm).
     g_requested_icon_keys.clear();
     // NR-011: AppsFolder is on-demand — when the panel is shown and the last
     // successful enumeration is older than 10 minutes, rebuild it in the
@@ -1724,9 +1687,29 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
     case kExitMessage:
         DestroyWindow(window);
         return 0;
-    case kIconRequestMessage:
-        LoadVisibleIcons(window);
+    case kIconReadyMessage: {
+        // NR-032: one decoded icon finished on the worker thread. The heap
+        // IconResult is owned by this window and deleted here; a failed load
+        // still reports (empty bitmap) so the pending set is cleared and the
+        // key is never re-requested this panel session.
+        std::unique_ptr<nimblerun::IconResult> result(
+            reinterpret_cast<nimblerun::IconResult*>(l_param));
+        g_pending_icon_keys.erase(result->encoded_key);
+        if (!result->bitmap.Empty() && g_icon_cache) {
+            // Late results still land in the LRU even when the panel is hidden
+            // or the query changed (that is the prewarm effect); only a visible
+            // window needs a repaint.
+            g_icon_cache->Insert(result->encoded_key, std::move(result->bitmap));
+            if (IsWindowVisible(window)) {
+                InvalidateRect(window, nullptr, FALSE);
+            }
+        } else if (result->bitmap.Empty()) {
+            // NR-012: remember the failure so the fallback stays and the Shell
+            // is not re-queried every frame, until the next ShowPanel.
+            g_requested_icon_keys.insert(result->encoded_key);
+        }
         return 0;
+    }
     case WM_HOTKEY:
         if (w_param == static_cast<WPARAM>(g_hotkey.ActiveId())) {
             if (IsWindowVisible(window)) {
@@ -1915,6 +1898,18 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
     case WM_DESTROY:
         RemoveTrayIcon(window);
         g_hotkey.Shutdown();
+        // NR-032: stop the icon worker before the D2D resources are released
+        // (that happens below the message loop), so no kIconReadyMessage can
+        // arrive after teardown. Drain results already queued so no heap
+        // IconResult leaks.
+        if (g_icon_worker) {
+            g_icon_worker->Stop();
+            MSG leftover{};
+            while (PeekMessageW(&leftover, window, kIconReadyMessage,
+                                kIconReadyMessage, PM_REMOVE)) {
+                delete reinterpret_cast<nimblerun::IconResult*>(leftover.lParam);
+            }
+        }
         if (g_search_font) {
             DeleteObject(g_search_font);
             g_search_font = nullptr;
@@ -2036,12 +2031,20 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     model.SetGridColumns(nimblerun::layout::kGridColumns);
     RefreshPanelSnapshot();
 
-    // NR-012: bounded decoded-bitmap cache + Shell-backed provider. The UI
-    // thread's STA COM covers the provider's Shell calls.
+    // NR-012: bounded decoded-bitmap cache + Shell-backed provider. NR-032: the
+    // provider is owned by a dedicated worker thread (which CoInitializeEx's
+    // its own STA); the UI thread only posts requests and receives results
+    // through kIconReadyMessage.
     nimblerun::IconCache icon_cache;
     nimblerun::ShellIconProvider shell_icon_provider;
     g_icon_cache = &icon_cache;
-    g_icon_provider = &shell_icon_provider;
+
+    // NR-032: one persistent icon worker. Both it and the provider are function
+    // locals destroyed after the message loop exits; WM_DESTROY stops the worker
+    // while both are still alive.
+    nimblerun::IconWorker icon_worker(window, kIconReadyMessage, shell_icon_provider);
+    g_icon_worker = &icon_worker;
+    icon_worker.Start();
 
     // NR-011: directory watchers over Programs + configured user folders.
     nimblerun::CatalogWatcher watcher(window, kWatchChangedMessage);

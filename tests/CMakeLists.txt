@@ -349,6 +349,32 @@ endif()
 
 add_test(NAME nimblerun_png_codec_test COMMAND nimblerun_png_codec_test)
 
+# NR-032. Named nimblerun_icon_worker_test so `ctest -R icons` matches.
+add_executable(nimblerun_icon_worker_test
+    unit/icon_worker_test.cpp
+)
+
+target_link_libraries(nimblerun_icon_worker_test PRIVATE nimblerun_icons)
+
+target_compile_definitions(nimblerun_icon_worker_test
+    PRIVATE
+        UNICODE
+        _UNICODE
+        WIN32_LEAN_AND_MEAN
+        NOMINMAX
+        WINVER=0x0A00
+        _WIN32_WINNT=0x0A00
+)
+
+if(MSVC OR CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
+    target_compile_options(nimblerun_icon_worker_test PRIVATE /W4 /permissive- /EHsc)
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    target_compile_options(nimblerun_icon_worker_test PRIVATE -Wall -Wextra -Wpedantic)
+    target_link_options(nimblerun_icon_worker_test PRIVATE -municode -static)
+endif()
+
+add_test(NAME nimblerun_icon_worker_test COMMAND nimblerun_icon_worker_test)
+
 add_executable(nimblerun_dpi_theme_accessibility_test
     unit/ui_palette_layout_test.cpp
 )

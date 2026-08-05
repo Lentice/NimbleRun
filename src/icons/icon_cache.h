@@ -79,8 +79,13 @@ public:
 
     // Cached bitmap for the key, or ask the provider on a miss and insert it
     // on success. Returns empty only when the key is uncached and the provider
-    // failed.
+    // failed. Internally routes through Insert(), so eviction is defined once.
     IconBitmap Resolve(const AppEntry& entry, const IconKey& key, IconProvider& provider);
+
+    // Insert an already-decoded bitmap (produced off-thread). Empty bitmaps are
+    // rejected, matching Resolve's "failures are not cached" rule. A non-empty
+    // insert for an existing key replaces the payload and refreshes recency.
+    void Insert(const std::wstring& encoded_key, IconBitmap bitmap);
 
     // Re-derives the LRU cap (design-spec §FR-009). Raising the cap never
     // evicts; lowering it evicts from the LRU tail (least recently used) until

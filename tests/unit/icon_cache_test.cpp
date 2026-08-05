@@ -229,6 +229,52 @@ void TestSetMaxItemsGrow() {
     Expect(cache.Peek(Key(L"b").Encode()) != nullptr, "grow keeps all existing entries");
 }
 
+// NR-032: IconCache::Insert is the worker-side entry point; eviction matches
+// Resolve's LRU rule and empty bitmaps are rejected.
+void TestInsertRejectsEmpty() {
+    IconCache cache(2);
+    cache.Insert(L"a|48", {});
+    Expect(cache.Size() == 0, "empty bitmap insert is rejected");
+    Expect(cache.Peek(L"a|48") == nullptr, "rejected insert leaves no entry");
+}
+
+void TestInsertAddsAndEvictsLikeResolve() {
+    IconCache cache(2);
+    IconBitmap icon;
+    icon.width = 2;
+    icon.height = 2;
+    icon.pixels.assign(4, 0xFF112233u);
+
+    cache.Insert(L"a|48", icon);
+    Expect(cache.Size() == 1, "non-empty insert grows the cache");
+    Expect(cache.Peek(L"a|48") != nullptr, "inserted key is peek-able");
+    Expect(cache.Peek(L"a|48")->pixels[0] == 0xFF112233u, "inserted payload round-trips");
+
+    cache.Insert(L"b|48", icon);
+    cache.Insert(L"c|48", icon);
+    Expect(cache.Size() == 2, "insert enforces the cap");
+    Expect(cache.Peek(L"a|48") == nullptr, "oldest inserted key is evicted");
+    Expect(cache.Peek(L"b|48") != nullptr, "newer key survives");
+    Expect(cache.Peek(L"c|48") != nullptr, "newest key survives");
+}
+
+void TestInsertRefreshesRecency() {
+    IconCache cache(2);
+    IconBitmap icon;
+    icon.width = 2;
+    icon.height = 2;
+    icon.pixels.assign(4, 0xFF112233u);
+
+    cache.Insert(L"a|48", icon);
+    cache.Insert(L"b|48", icon);
+    cache.Insert(L"a|48", icon);  // re-insert refreshes recency
+    cache.Insert(L"c|48", icon);
+    Expect(cache.Size() == 2, "re-insert keeps the cache bounded");
+    Expect(cache.Peek(L"a|48") != nullptr, "re-inserted key stays fresh");
+    Expect(cache.Peek(L"b|48") == nullptr, "least recently used key is evicted");
+    Expect(cache.Peek(L"c|48") != nullptr, "newest key survives");
+}
+
 } // namespace
 
 int wmain() {
@@ -245,6 +291,9 @@ int wmain() {
     TestSetMaxItemsShrink();
     TestSetMaxItemsZero();
     TestSetMaxItemsGrow();
-    std::printf("NR-031 icon cache check PASSED\n");
+    TestInsertRejectsEmpty();
+    TestInsertAddsAndEvictsLikeResolve();
+    TestInsertRefreshesRecency();
+    std::printf("NR-032 icon cache check PASSED\n");
     return 0;
 }
