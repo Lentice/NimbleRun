@@ -30,6 +30,7 @@ struct PanelColors {
     Rgb input_border = 0;  // NR-023: 1 DIP search box border
     Rgb selected_fill = 0;
     Rgb selected_border = 0;  // non-color selection signal (design-spec §NFR-006)
+    Rgb hover_fill = 0;       // NR-029: grid hover cell fill (card-level)
     Rgb text = 0;
     Rgb dim = 0;
     Rgb error = 0;

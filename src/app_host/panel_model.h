@@ -55,6 +55,14 @@ public:
     void SetViewportRows(int rows);
     int ViewportRows() const { return viewport_rows_; }
 
+    // NR-029: sets the empty-query grid column count (clamped to >= 1). The
+    // list state is simply "columns == 1": Columns() returns grid_columns_ only
+    // while the query is empty, otherwise 1, so both layouts share the same
+    // viewport/scroll/selection code (design-spec §4.2/§4.3). One page holds
+    // ViewportRows() * Columns() items.
+    void SetGridColumns(int columns);
+    int Columns() const { return query_.empty() ? grid_columns_ : 1; }
+
     // First row currently visible in the viewport; clamped to
     // [0, max(0, RowCount() - viewport)] so the window never runs past the
     // list ends.
@@ -117,6 +125,9 @@ private:
     int selected_ = -1;
     int viewport_rows_ = 7;
     int first_visible_ = 0;
+    // NR-029: empty-query grid columns; 1 means the model behaves like the
+    // original single-column list until the host opts into the grid.
+    int grid_columns_ = 1;
 };
 
 } // namespace nimblerun

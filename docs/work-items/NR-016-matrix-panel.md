@@ -1,6 +1,7 @@
 # NR-016 — Matrix panel and grid navigation
 
 - Status: `superseded`（2026-08-05，由 [NR-020](NR-020-list-panel-restore.md) 取代；產品決策改為單欄清單，本文件與交接紀錄保留作為決策軌跡）
+- 後續（2026-08-05）：[NR-029](NR-029-empty-state-grid.md) 恢復「空白查詢用 icon grid」這一項意圖，但**不恢復本 item 的 `MatrixModel` 實作**（改為 `PanelModel` 的欄數參數，兩種版面共用同一份選取／捲動邏輯）。搜尋狀態維持 NR-020 的單欄清單。本 item 維持 `superseded`。
 - Phase: 3
 - Depends on: NR-010、NR-012、NR-015
 - Source: `docs/design-spec.md` §4.2、§4.3、§4.7、§7、AC-001、AC-004

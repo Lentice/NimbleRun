@@ -406,6 +406,119 @@ void TestRowForVisibleSlotIsConst() {
            "repeated RowForVisibleSlot calls leave the selection untouched");
 }
 
+// NR-029: the empty-query icon grid reuses the same viewport/scroll/selection
+// state as the list; the only difference is Columns(). Columns() is 1 whenever
+// a query is active, so the list behavior above is untouched. The empty query
+// shows pins + recent, so each grid test feeds the catalog as the recent list
+// to get rows.
+
+void TestGridColumnsClampAndQuerySwitch() {
+    const std::vector<AppEntry> catalog = CatalogOf(40);
+    PanelModel model(&catalog, catalog);
+    Expect(model.Columns() == 1, "default grid columns is the single-column list");
+    model.SetGridColumns(6);
+    Expect(model.Columns() == 6, "empty query uses the grid columns");
+    model.SetQuery(L"App");
+    Expect(model.Columns() == 1, "non-empty query forces single column");
+    model.SetGridColumns(0);
+    Expect(model.Columns() == 1, "grid columns clamp to >= 1");
+    model.SetGridColumns(-3);
+    Expect(model.Columns() == 1, "negative grid columns clamp to 1");
+    model.SetQuery(L"");
+    Expect(model.Columns() == 1, "clamped grid columns = 1 on empty query");
+    model.SetGridColumns(6);
+    Expect(model.Columns() == 6, "grid columns restored");
+}
+
+void TestGridFirstVisibleAlignedToColumns() {
+    const std::vector<AppEntry> catalog = CatalogOf(50);
+    PanelModel model(&catalog, catalog);
+    model.SetGridColumns(6);
+    model.SetViewportRows(4);  // 4 grid rows -> 24-cell page
+    model.ScrollBy(1);  // one row -> 6 items
+    Expect(model.FirstVisibleRow() == 6 && model.FirstVisibleRow() % 6 == 0,
+           "one-row scroll stays aligned to whole grid rows");
+    model.ScrollBy(100);  // past the tail; 50 is not a multiple of 6
+    Expect(model.FirstVisibleRow() == 24, "tail window clamps to RowCount - page");
+    Expect(model.FirstVisibleRow() % 6 == 0,
+           "tail window is floored to a whole grid row");
+}
+
+void TestGridMoveSelectionRows() {
+    const std::vector<AppEntry> catalog = CatalogOf(30);
+    PanelModel model(&catalog, catalog);
+    model.SetGridColumns(6);
+    model.SetViewportRows(4);
+    Expect(model.SelectionIndex() == 0, "grid starts at item 0");
+    model.MoveSelection(6);
+    Expect(model.SelectionIndex() == 6, "down by Columns() moves one grid row");
+    model.MoveSelection(6);
+    Expect(model.SelectionIndex() == 12, "down again moves to the third row");
+    model.SelectRow(29);  // last item of the last row
+    model.MoveSelection(6);
+    Expect(model.SelectionIndex() == 5, "down past the last row wraps to the top");
+}
+
+void TestGridScrollByPages() {
+    const std::vector<AppEntry> catalog = CatalogOf(60);
+    PanelModel model(&catalog, catalog);
+    model.SetGridColumns(6);
+    model.SetViewportRows(4);
+    model.ScrollBy(4);  // one page of 4 rows
+    Expect(model.FirstVisibleRow() == 24, "PgDn advances a full grid page (24 items)");
+    Expect(model.SelectionIndex() == 24, "selection follows the new first visible item");
+    model.ScrollBy(100);
+    Expect(model.FirstVisibleRow() == 36, "scroll past the tail clamps to RowCount - page");
+    Expect(model.FirstVisibleRow() % 6 == 0, "clamped tail stays row-aligned");
+}
+
+void TestGridFewerThanPageNoScroll() {
+    const std::vector<AppEntry> catalog = CatalogOf(10);
+    PanelModel model(&catalog, catalog);
+    model.SetGridColumns(6);
+    model.SetViewportRows(4);  // 24-cell page, more than the 10 items
+    model.ScrollBy(4);
+    Expect(model.FirstVisibleRow() == 0, "fewer items than a page never scrolls down");
+    model.ScrollBy(-4);
+    Expect(model.FirstVisibleRow() == 0, "negative page scroll keeps first visible 0");
+    model.ScrollBy(1);
+    Expect(model.FirstVisibleRow() == 0, "single-row scroll keeps first visible 0");
+}
+
+void TestGridQueryTransitionResetsViewport() {
+    const std::vector<AppEntry> catalog = CatalogOf(60);
+    PanelModel model(&catalog, catalog);
+    model.SetGridColumns(6);
+    model.SetViewportRows(4);
+    model.ScrollBy(4);
+    Expect(model.FirstVisibleRow() == 24, "grid scrolled down one page");
+    Expect(model.Columns() == 6, "grid columns active before search");
+    model.SetQuery(L"App");
+    Expect(model.Columns() == 1, "search switches to the single-column list");
+    Expect(model.FirstVisibleRow() == 0, "search resets the viewport to the top");
+    model.SetQuery(L"");
+    Expect(model.Columns() == 6, "clearing the query restores the grid");
+    Expect(model.FirstVisibleRow() == 0, "back to the grid resets the viewport to the top");
+}
+
+void TestGridRowForVisibleSlot() {
+    const std::vector<AppEntry> catalog = CatalogOf(30);
+    PanelModel model(&catalog, catalog);
+    model.SetGridColumns(6);
+    model.SetViewportRows(4);
+    for (int slot = 0; slot < 10; ++slot) {
+        Expect(model.RowForVisibleSlot(slot) == slot,
+               "grid slot maps to the matching visible cell");
+    }
+    Expect(model.RowForVisibleSlot(24) == -1, "slot at the page capacity is invalid");
+    model.ScrollBy(4);
+    const int first = model.FirstVisibleRow();
+    for (int slot = 0; slot < 10; ++slot) {
+        Expect(model.RowForVisibleSlot(slot) == first + slot,
+               "after a page, slots map to the new first visible cells");
+    }
+}
+
 } // namespace
 
 int wmain() {
@@ -437,6 +550,13 @@ int wmain() {
     TestRowForVisibleSlotPastListEnd();
     TestRowForVisibleSlotEmptyList();
     TestRowForVisibleSlotIsConst();
-    std::printf("NR-010/NR-020/NR-021/NR-024 panel model check PASSED\n");
+    TestGridColumnsClampAndQuerySwitch();
+    TestGridFirstVisibleAlignedToColumns();
+    TestGridMoveSelectionRows();
+    TestGridScrollByPages();
+    TestGridFewerThanPageNoScroll();
+    TestGridQueryTransitionResetsViewport();
+    TestGridRowForVisibleSlot();
+    std::printf("NR-010/NR-020/NR-021/NR-024/NR-029 panel model check PASSED\n");
     return 0;
 }

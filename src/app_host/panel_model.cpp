@@ -75,20 +75,36 @@ void PanelModel::SetViewportRows(int rows) {
     ClampFirstVisible();
 }
 
+void PanelModel::SetGridColumns(int columns) {
+    grid_columns_ = std::max(1, columns);
+    ClampFirstVisible();
+}
+
 void PanelModel::ClampFirstVisible() {
     const int count = static_cast<int>(rows_.size());
-    first_visible_ = std::clamp(first_visible_, 0, std::max(0, count - viewport_rows_));
+    const int columns = Columns();
+    // One page holds ViewportRows() * Columns() items (NR-029); the window is
+    // clamped to the list ends and then floored down to a whole-row boundary so
+    // the grid never shows a partial row (design-spec §4.2/§4.9).
+    first_visible_ = std::clamp(first_visible_, 0,
+                                std::max(0, count - viewport_rows_ * columns));
+    first_visible_ -= first_visible_ % columns;
 }
 
 void PanelModel::EnsureSelectionVisible() {
     if (!HasSelection()) {
         return;
     }
-    // Minimal shift: one row per one-row selection step (design-spec §4.2).
+    // Minimal shift, in whole rows: one Columns()-wide row per one-row
+    // selection step (design-spec §4.2). With Columns() == 1 this reduces to
+    // the original one-row list rule.
+    const int columns = Columns();
+    const int visible_capacity = viewport_rows_ * columns;
     if (selected_ < first_visible_) {
-        first_visible_ = selected_;
-    } else if (selected_ >= first_visible_ + viewport_rows_) {
-        first_visible_ = selected_ - viewport_rows_ + 1;
+        first_visible_ = selected_ - (selected_ % columns);
+    } else if (selected_ >= first_visible_ + visible_capacity) {
+        first_visible_ =
+            (selected_ - (selected_ % columns)) + columns - visible_capacity;
     }
     ClampFirstVisible();
 }
@@ -113,13 +129,18 @@ void PanelModel::ScrollBy(int delta_rows) {
     if (rows_.empty()) {
         return;
     }
-    first_visible_ += delta_rows;
+    // The argument stays in row units; each grid row spans Columns() items
+    // (NR-029), so the scroll distance is scaled here.
+    first_visible_ += delta_rows * Columns();
     ClampFirstVisible();
     selected_ = first_visible_;
 }
 
 int PanelModel::RowForVisibleSlot(int slot) const {
-    if (slot < 0 || slot >= viewport_rows_) {
+    // slot is the visible-item ordinal (NR-024): one page holds
+    // ViewportRows() * Columns() items (NR-029).
+    const int capacity = viewport_rows_ * Columns();
+    if (slot < 0 || slot >= capacity) {
         return -1;
     }
     const int row = first_visible_ + slot;

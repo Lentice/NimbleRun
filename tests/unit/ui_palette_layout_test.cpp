@@ -15,8 +15,14 @@ using nimblerun::PanelModel;
 using nimblerun::Theme;
 using nimblerun::layout::ClampWindowSize;
 using nimblerun::layout::LayoutForDpi;
+using nimblerun::layout::kCellHeightDip;
+using nimblerun::layout::kCellWidthDip;
+using nimblerun::layout::kFooterTopDip;
+using nimblerun::layout::kGridColumns;
+using nimblerun::layout::kGridLeftDip;
 using nimblerun::layout::kListLeftDip;
 using nimblerun::layout::kListRightDip;
+using nimblerun::layout::kListTopDip;
 using nimblerun::layout::kRowHintReserveDip;
 using nimblerun::layout::kRowKeyBoxWidthDip;
 using nimblerun::layout::kRowKeyGapDip;
@@ -324,6 +330,37 @@ void TestRowHintReserveWidth() {
            "app name still has positive width beside the key hint");
 }
 
+// NR-029: the empty-query grid must fit the list area and the result area must
+// hold exactly 4 grid rows (6 x 4 = 24 cells per page, design-spec §4.9).
+void TestGridGeometryFits() {
+    Expect(kGridColumns * kCellWidthDip <= kListRightDip - kListLeftDip,
+           "six 101-DIP cells fit in the list area");
+    Expect(kGridLeftDip >= kListLeftDip &&
+               kGridLeftDip + kGridColumns * kCellWidthDip <= kListRightDip,
+           "grid is centered and stays inside the list area");
+    Expect(static_cast<int>((kFooterTopDip - kListTopDip) / kCellHeightDip) == 4,
+           "result area holds exactly 4 grid rows");
+}
+
+// NR-029: grid hover needs a visible fill in every theme. Light/dark use the
+// card-level fill; high contrast collapses card to the window background, so
+// the palette resolves hover to the system highlight there (the selection
+// border is what separates a hovered cell from the selected cell).
+void TestGridHoverFillVisible() {
+    const PanelColors light = ResolveColors(Theme::Light, false, false, {});
+    Expect(light.hover_fill == light.card && light.hover_fill != light.background,
+           "light hover fill is the card-level fill, visible on the background");
+    const PanelColors dark = ResolveColors(Theme::Dark, false, false, {});
+    Expect(dark.hover_fill == dark.card && dark.hover_fill != dark.background,
+           "dark hover fill is the card-level fill, visible on the background");
+    const SystemColors system = InjectedSystem();
+    const PanelColors hc = ResolveColors(Theme::Dark, false, true, system);
+    Expect(hc.hover_fill == system.highlight && hc.hover_fill != hc.background,
+           "high contrast hover fill is the system highlight, visible");
+    Expect(hc.selected_border != hc.selected_fill,
+           "selection border keeps hover distinct from selected in high contrast");
+}
+
 }  // namespace
 
 int wmain() {
@@ -345,6 +382,8 @@ int wmain() {
     TestQuickSelectLabelForSlot();
     TestQuickSelectDigitsUnique();
     TestRowHintReserveWidth();
-    std::printf("NR-015/NR-024 dpi/theme/accessibility check PASSED\n");
+    TestGridGeometryFits();
+    TestGridHoverFillVisible();
+    std::printf("NR-015/NR-024/NR-029 dpi/theme/accessibility check PASSED\n");
     return 0;
 }

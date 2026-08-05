@@ -210,15 +210,26 @@ ID2D1SolidColorBrush* g_dim_brush = nullptr;
 ID2D1SolidColorBrush* g_card_brush = nullptr;
 ID2D1SolidColorBrush* g_selected_brush = nullptr;
 ID2D1SolidColorBrush* g_selected_border_brush = nullptr;
+ID2D1SolidColorBrush* g_hover_brush = nullptr;  // NR-029: grid hover cell fill
 ID2D1SolidColorBrush* g_search_fill_brush = nullptr;
 ID2D1SolidColorBrush* g_search_border_brush = nullptr;
 IDWriteFactory* g_write_factory = nullptr;
 IDWriteTextFormat* g_title_format = nullptr;
 IDWriteTextFormat* g_text_format = nullptr;
 IDWriteTextFormat* g_small_format = nullptr;
+// NR-029: centered single-line format for grid cell names.
+IDWriteTextFormat* g_grid_name_format = nullptr;
 // NR-020: character-granularity ellipsis for single-line row text; kept alive
 // as long as the text formats above (see SetTrimming lifetime requirements).
 IDWriteInlineObject* g_ellipsis_sign = nullptr;
+
+// NR-029: window-layer grid hover state (pure visual; not model state). -1
+// means the pointer is not over a cell. Only re-invalidated when the hit cell
+// changes, and cleared on WM_MOUSELEAVE and layout switches; no timers.
+int g_grid_hover_index = -1;
+// True between a successful TrackMouseEvent(TME_LEAVE) and its WM_MOUSELEAVE,
+// so leave-tracking is re-armed only after the leave actually fires.
+bool g_tracking_mouse_leave = false;
 
 template <typename T>
 void Release(T*& resource) {
@@ -235,6 +246,7 @@ void DiscardDeviceResources() {
     Release(g_card_brush);
     Release(g_selected_brush);
     Release(g_selected_border_brush);
+    Release(g_hover_brush);
     Release(g_search_fill_brush);
     Release(g_search_border_brush);
 }
@@ -305,9 +317,10 @@ nimblerun::palette::PanelColors ResolveCurrentColors() {
 
 bool CreateDeviceResources(HWND window) {
     if (g_render_target && g_text_brush && g_dim_brush && g_card_brush &&
-        g_selected_brush && g_selected_border_brush &&
+        g_selected_brush && g_selected_border_brush && g_hover_brush &&
         g_search_fill_brush && g_search_border_brush &&
-        g_title_format && g_text_format && g_small_format) {
+        g_title_format && g_text_format && g_small_format &&
+        g_grid_name_format) {
         return true;
     }
     if (g_render_target) {
@@ -360,7 +373,12 @@ bool CreateDeviceResources(HWND window) {
     const HRESULT small = g_write_factory->CreateTextFormat(
         L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
         DWRITE_FONT_STRETCH_NORMAL, nimblerun::layout::kSmallFontDip, L"en-US", &g_small_format);
-    if (FAILED(title) || FAILED(text) || FAILED(small)) {
+    // NR-029: grid cell names use the same face/size as list row names but are
+    // centered in the cell; alignment is set below with the trimming.
+    const HRESULT grid_name = g_write_factory->CreateTextFormat(
+        L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+        DWRITE_FONT_STRETCH_NORMAL, nimblerun::layout::kTextFontDip, L"en-US", &g_grid_name_format);
+    if (FAILED(title) || FAILED(text) || FAILED(small) || FAILED(grid_name)) {
         return false;
     }
 
@@ -378,6 +396,13 @@ bool CreateDeviceResources(HWND window) {
         g_text_format->SetTrimming(&trimming, g_ellipsis_sign);
         g_small_format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
         g_small_format->SetTrimming(&trimming, g_ellipsis_sign);
+        // NR-029: the grid name format follows the same single-line + ellipsis
+        // rule, centered inside its cell; name length never changes cell
+        // geometry (design-spec §4.2/§4.9).
+        g_grid_name_format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+        g_grid_name_format->SetTrimming(&trimming, g_ellipsis_sign);
+        g_grid_name_format->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+        g_grid_name_format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
     }
 
     // Brushes are built from the palette resolved for this frame; when the
@@ -395,6 +420,8 @@ bool CreateDeviceResources(HWND window) {
         SUCCEEDED(g_render_target->CreateSolidColorBrush(
             D2D1::ColorF(c.selected_border), &g_selected_border_brush)) &&
         SUCCEEDED(g_render_target->CreateSolidColorBrush(
+            D2D1::ColorF(c.hover_fill), &g_hover_brush)) &&
+        SUCCEEDED(g_render_target->CreateSolidColorBrush(
             D2D1::ColorF(c.input_fill), &g_search_fill_brush)) &&
         SUCCEEDED(g_render_target->CreateSolidColorBrush(
             D2D1::ColorF(c.input_border), &g_search_border_brush));
@@ -404,16 +431,36 @@ bool CreateDeviceResources(HWND window) {
     return brushes;
 }
 
-// NR-020: model row index for a physical client point, or -1 when it is not on
-// any visible row. The y offset is mapped through the current first visible row
-// (design-spec §4.8); rows beyond RowCount() are a miss.
-int RowAtPoint(HWND window, int x, int y) {
+// NR-020/NR-029: model item index for a physical client point, or -1 when it
+// is not on any visible row (list) or cell (grid). Grid cells map through
+// FirstVisibleRow() + row_index * Columns() + col_index; cells past RowCount()
+// are a miss (design-spec §4.8).
+int CellAtPoint(HWND window, int x, int y) {
     if (!g_model) {
         return -1;
     }
     const nimblerun::layout::LayoutPx layout =
         nimblerun::layout::LayoutForDpi(GetDpiForWindow(window));
-    if (x < layout.list_left || y < layout.list_top) {
+    if (y < layout.list_top) {
+        return -1;
+    }
+    const int columns = g_model->Columns();
+    if (columns > 1) {
+        const int cell_width = static_cast<int>(std::lround(
+            nimblerun::layout::kCellWidthDip * layout.scale));
+        const int cell_height = static_cast<int>(std::lround(
+            nimblerun::layout::kCellHeightDip * layout.scale));
+        const int grid_left = static_cast<int>(std::lround(
+            nimblerun::layout::kGridLeftDip * layout.scale));
+        const int col = (x - grid_left) / cell_width;
+        const int row = (y - layout.list_top) / cell_height;
+        if (col < 0 || col >= columns || row < 0) {
+            return -1;
+        }
+        const int index = g_model->FirstVisibleRow() + row * columns + col;
+        return index < static_cast<int>(g_model->Rows().size()) ? index : -1;
+    }
+    if (x < layout.list_left) {
         return -1;
     }
     const int index =
@@ -423,7 +470,8 @@ int RowAtPoint(HWND window, int x, int y) {
 
 // NR-020: recomputes the viewport row count from the current client rect and
 // DPI and pushes it into the model (design-spec §4.2/§4.9). Called whenever the
-// panel is shown or resized; no timers.
+// panel is shown or resized; no timers. NR-029: the row height differs per
+// layout state (48 DIP list rows vs 96 DIP grid cells), so Columns() picks it.
 void UpdateViewportRows(HWND window) {
     if (!g_model) {
         return;
@@ -434,7 +482,10 @@ void UpdateViewportRows(HWND window) {
         nimblerun::layout::LayoutForDpi(GetDpiForWindow(window));
     const int list_height =
         std::max(0, static_cast<int>(client.bottom - client.top) - layout.list_top);
-    g_model->SetViewportRows(std::max(1, list_height / layout.row_height));
+    const int row_height_px = g_model->Columns() > 1
+        ? static_cast<int>(std::lround(nimblerun::layout::kCellHeightDip * layout.scale))
+        : layout.row_height;
+    g_model->SetViewportRows(std::max(1, list_height / row_height_px));
 }
 
 // NR-022: maps the Win32 error code returned by shell_launch to a short
@@ -539,6 +590,14 @@ void OpenFileLocation(HWND window, const nimblerun::AppEntry& entry) {
     }
 }
 
+// NR-012/NR-029: DIP icon size for the current layout state (30 DIP list tile,
+// 40 DIP grid cell), mapped to physical pixels at the render target's DPI.
+float CurrentIconSizeDip() {
+    return g_model && g_model->Columns() > 1
+        ? nimblerun::layout::kIconSizeDip
+        : nimblerun::layout::kTileSizeDip;
+}
+
 // NR-012: cache key for an entry's tile at the render target's current DPI.
 // The size is the physical pixel size that maps 1:1 to the DIP tile.
 nimblerun::IconKey IconKeyFor(const nimblerun::AppEntry& entry) {
@@ -547,21 +606,23 @@ nimblerun::IconKey IconKeyFor(const nimblerun::AppEntry& entry) {
     if (g_render_target) {
         g_render_target->GetDpi(&dpi_x, &dpi_y);
     }
-    const int size = nimblerun::layout::LayoutForDpi(dpi_x).tile_size;
+    const int size = static_cast<int>(std::lround(
+        CurrentIconSizeDip() * dpi_x / nimblerun::layout::kDpi96));
     return {entry.stable_id, size, dpi_x};
 }
 
-// Number of model rows that intersect the list viewport, for icon loading. Only
-// these rows get their icons requested (design-spec §FR-009 lazy loading); rows
-// outside the viewport stay unrequested until scrolling or a query narrows the
-// list.
-int VisibleRowCount() {
+// Number of model items that intersect the list/grid viewport, for icon
+// loading. Only these items get their icons requested (design-spec §FR-009
+// lazy loading); items outside the viewport stay unrequested until scrolling or
+// a query narrows the list. One page holds ViewportRows() * Columns() items.
+int VisibleItemCount() {
     if (!g_model) {
         return 0;
     }
     const auto& rows = g_model->Rows();
     const int first = g_model->FirstVisibleRow();
-    return std::min(g_model->ViewportRows(), static_cast<int>(rows.size()) - first);
+    const int capacity = g_model->ViewportRows() * g_model->Columns();
+    return std::min(capacity, static_cast<int>(rows.size()) - first);
 }
 
 void DrawDecodedIcon(const nimblerun::IconBitmap& icon,
@@ -606,7 +667,7 @@ void LoadVisibleIcons(HWND window) {
     }
     const auto& rows = g_model->Rows();
     const int first = g_model->FirstVisibleRow();
-    const int count = VisibleRowCount();
+    const int count = VisibleItemCount();
     for (int i = 0; i < count; ++i) {
         const auto& entry = rows[static_cast<std::size_t>(first + i)];
         const nimblerun::IconKey key = IconKeyFor(entry);
@@ -831,140 +892,254 @@ void Render(HWND window) {
 
     if (g_model) {
         const auto& rows = g_model->Rows();
-        const int first = g_model->FirstVisibleRow();
-        const int last =
-            std::min(first + g_model->ViewportRows(), static_cast<int>(rows.size()));
-        const std::wstring windows_app_label(list_strings::kWindowsApp);
-        for (int i = first; i < last; ++i) {
-            // NR-020: fixed single-column list geometry. D2D coordinates are
-            // DIPs; the render target scales them to the monitor's DPI
-            // (design-spec §4.9).
-            const float row_top =
-                nimblerun::layout::kListTopDip +
-                static_cast<float>(i - first) * nimblerun::layout::kRowHeightDip;
-            const auto row_rect = D2D1::RectF(
-                nimblerun::layout::kListLeftDip, row_top,
-                nimblerun::layout::kListRightDip,
-                row_top + nimblerun::layout::kRowHeightDip);
-            const bool selected =
-                g_model->HasSelection() &&
-                g_model->SelectionIndex() == static_cast<std::size_t>(i);
-            g_render_target->FillRectangle(
-                row_rect,
-                selected ? g_selected_brush : g_card_brush);
+        if (g_model->Columns() > 1) {
+            // NR-029: empty-query icon grid (design-spec §4.2/§4.9). Reuses the
+            // model viewport state: visible cells are
+            // FirstVisibleRow()..+ViewportRows()*Columns().
+            const int first = g_model->FirstVisibleRow();
+            const int columns = g_model->Columns();
+            const int visible = g_model->ViewportRows() * columns;
+            const int last = std::min(first + visible, static_cast<int>(rows.size()));
+            for (int i = first; i < last; ++i) {
+                const int slot = i - first;
+                const int row_index = slot / columns;
+                const int col_index = slot % columns;
+                const float cell_left =
+                    nimblerun::layout::kGridLeftDip +
+                    col_index * nimblerun::layout::kCellWidthDip;
+                const float cell_top =
+                    nimblerun::layout::kListTopDip +
+                    row_index * nimblerun::layout::kCellHeightDip;
+                const auto cell = D2D1::RectF(
+                    cell_left, cell_top,
+                    cell_left + nimblerun::layout::kCellWidthDip,
+                    cell_top + nimblerun::layout::kCellHeightDip);
+                const bool selected =
+                    g_model->HasSelection() &&
+                    g_model->SelectionIndex() == static_cast<std::size_t>(i);
+                const bool hovered = g_grid_hover_index == i;
+                if (selected) {
+                    g_render_target->FillRectangle(cell, g_selected_brush);
+                } else if (hovered) {
+                    // NR-029: hover is a card-level fill only; it never draws
+                    // the selection border, so the two states stay distinct.
+                    g_render_target->FillRectangle(cell, g_hover_brush);
+                }
+                if (selected) {
+                    // NR-015: the selected cell also gets a border in a color
+                    // distinct from the fill (design-spec §NFR-006).
+                    const float border_width = std::max(1.0f, dpi_x / nimblerun::layout::kDpi96);
+                    const float inset = border_width / 2.0f;
+                    g_render_target->DrawRectangle(
+                        D2D1::RectF(cell.left + inset, cell.top + inset,
+                                    cell.right - inset, cell.bottom - inset),
+                        g_selected_border_brush, border_width);
+                }
 
-            // NR-015: the selected row also gets a border in a color distinct
-            // from the fill, so selection is never conveyed by color alone
-            // (design-spec §NFR-006).
-            if (selected) {
-                const float border_width = std::max(1.0f, dpi_x / nimblerun::layout::kDpi96);
-                const float inset = border_width / 2.0f;
-                g_render_target->DrawRectangle(
-                    D2D1::RectF(row_rect.left + inset, row_rect.top + inset,
-                                row_rect.right - inset, row_rect.bottom - inset),
-                    g_selected_border_brush,
-                    border_width);
-            }
+                // NR-029: 40x40 icon horizontally centered in the cell's upper
+                // half; fallback tile + first letter until the real icon loads
+                // (NR-012), same no-reflow rule as the list rows.
+                const float icon_left =
+                    cell_left + (nimblerun::layout::kCellWidthDip - nimblerun::layout::kIconSizeDip) / 2.0f;
+                const float icon_top = cell_top + 12.0f;
+                const auto tile = D2D1::RectF(
+                    icon_left, icon_top,
+                    icon_left + nimblerun::layout::kIconSizeDip,
+                    icon_top + nimblerun::layout::kIconSizeDip);
+                const nimblerun::IconKey key = IconKeyFor(rows[i]);
+                const std::wstring encoded = key.Encode();
+                if (const nimblerun::IconBitmap* icon = g_icon_cache ? g_icon_cache->Peek(encoded) : nullptr) {
+                    DrawDecodedIcon(*icon, tile, dpi_x, dpi_y);
+                } else {
+                    g_render_target->FillRectangle(tile, g_dim_brush);
+                    const std::wstring initial =
+                        rows[i].display_name.empty()
+                            ? std::wstring(L"?")
+                            : std::wstring(1, rows[i].display_name.front());
+                    g_render_target->DrawText(
+                        initial.c_str(), static_cast<UINT32>(initial.size()), g_text_format,
+                        tile, g_text_brush);
+                    if (g_icon_cache && g_requested_icon_keys.count(encoded) == 0) {
+                        need_icon_request = true;
+                    }
+                }
 
-            // NR-012: fixed tile inside the row, vertically centered. The decoded
-            // icon (when cached) is drawn into the same rect the placeholder
-            // occupies, so geometry is constant and a late-arriving icon never
-            // reflows.
-            const float tile_left =
-                nimblerun::layout::kListLeftDip + nimblerun::layout::kTileInsetDip;
-            const float tile_top =
-                row_top + (nimblerun::layout::kRowHeightDip - nimblerun::layout::kTileSizeDip) / 2.0f;
-            const auto tile = D2D1::RectF(
-                tile_left, tile_top,
-                tile_left + nimblerun::layout::kTileSizeDip,
-                tile_top + nimblerun::layout::kTileSizeDip);
-
-            const nimblerun::IconKey key = IconKeyFor(rows[i]);
-            const std::wstring encoded = key.Encode();
-            if (const nimblerun::IconBitmap* icon = g_icon_cache ? g_icon_cache->Peek(encoded) : nullptr) {
-                DrawDecodedIcon(*icon, tile, dpi_x, dpi_y);
-            } else {
-                // Fallback tile (design-spec §FR-009): drawn on the first frame
-                // and kept until the icon arrives or the request fails.
-                g_render_target->FillRectangle(tile, g_dim_brush);
-                const std::wstring initial =
-                    rows[i].display_name.empty()
-                        ? std::wstring(L"?")
-                        : std::wstring(1, rows[i].display_name.front());
+                // NR-029: single-line centered name in the lower half. The grid
+                // name format is NO_WRAP + character ellipsis (see the
+                // SetTrimming setup), so name length never changes cell
+                // geometry (design-spec §4.2).
+                const auto name_rect = D2D1::RectF(
+                    cell_left + 4.0f, cell_top + 56.0f,
+                    cell.right - 4.0f, cell.bottom - 8.0f);
                 g_render_target->DrawText(
-                    initial.c_str(), static_cast<UINT32>(initial.size()), g_text_format,
-                    tile,
-                    g_text_brush);
-                if (g_icon_cache && g_requested_icon_keys.count(encoded) == 0) {
-                    need_icon_request = true;
+                    rows[i].display_name.c_str(),
+                    static_cast<UINT32>(rows[i].display_name.size()),
+                    g_grid_name_format, name_rect, g_text_brush);
+
+                // NR-029: NR-024 digit box at the cell's top-right corner for
+                // the first 10 cells; the shared key-box paint is reused.
+                if (const wchar_t* key_label = nimblerun::ui::QuickSelectLabelForSlot(slot)) {
+                    const float box_right = cell.right - 4.0f;
+                    DrawKeyBox(
+                        key_label,
+                        D2D1::RectF(box_right - nimblerun::layout::kRowKeyBoxWidthDip,
+                                    cell_top + 4.0f,
+                                    box_right,
+                                    cell_top + 4.0f + nimblerun::layout::kFooterKeyBoxHeightDip));
                 }
             }
 
-            // NR-020: name in the upper half of the row, source path in the
-            // lower half (design-spec §4.2). Packaged apps show a fixed label
-            // instead of a Shell parsing name. Single-line with trailing
-            // ellipsis (see the SetTrimming setup); length never changes row
-            // height.
-            const float text_left =
-                tile_left + nimblerun::layout::kTileSizeDip + 8.0f;
-            // NR-024: the name and second line unconditionally reserve the key
-            // hint column, so text width never jumps whether or not the row
-            // shows a digit (design-spec §4.9). Single-line + ellipsis below.
-            const float text_right =
-                nimblerun::layout::kListRightDip - nimblerun::layout::kRowHintReserveDip;
-            const float row_mid = row_top + nimblerun::layout::kRowHeightDip / 2.0f;
-            g_render_target->DrawText(
-                rows[i].display_name.c_str(),
-                static_cast<UINT32>(rows[i].display_name.size()),
-                g_text_format,
-                D2D1::RectF(text_left, row_top, text_right, row_mid),
-                g_text_brush);
-            const std::wstring& subtitle =
-                rows[i].source == nimblerun::AppSource::AppsFolder
-                    ? windows_app_label
-                    : rows[i].source_path;
-            g_render_target->DrawText(
-                subtitle.c_str(),
-                static_cast<UINT32>(subtitle.size()),
-                g_small_format,
-                D2D1::RectF(text_left, row_mid, text_right,
-                            row_top + nimblerun::layout::kRowHeightDip),
-                g_dim_brush);
-
-            // NR-024: per-row quick-select digit (design-spec §4.7/§4.9). The
-            // slot is the row's position in the viewport; rows beyond the
-            // 10-digit sequence get no box but keep the reserved text width.
-            const int slot = i - first;
-            if (const wchar_t* key_label = nimblerun::ui::QuickSelectLabelForSlot(slot)) {
-                const float box_left =
-                    nimblerun::layout::kListRightDip -
-                    nimblerun::layout::kRowKeyRightInsetDip -
-                    nimblerun::layout::kRowKeyBoxWidthDip;
-                DrawKeyBox(
-                    key_label,
-                    D2D1::RectF(
-                        box_left,
-                        row_mid - nimblerun::layout::kFooterKeyBoxHeightDip / 2.0f,
-                        box_left + nimblerun::layout::kRowKeyBoxWidthDip,
-                        row_mid + nimblerun::layout::kFooterKeyBoxHeightDip / 2.0f));
+            // NR-029 empty state (design-spec §4.3): the grid is never blank.
+            // Same strings as the list state, drawn in the first grid row.
+            if (rows.empty()) {
+                const wchar_t* hint = g_model->CatalogAvailable()
+                    ? list_strings::kNoMatchingApps
+                    : list_strings::kBuildingCatalog;
+                g_render_target->DrawText(
+                    hint,
+                    static_cast<UINT32>(wcslen(hint)),
+                    g_text_format,
+                    D2D1::RectF(nimblerun::layout::kListLeftDip, nimblerun::layout::kListTopDip,
+                                nimblerun::layout::kListRightDip,
+                                nimblerun::layout::kListTopDip + nimblerun::layout::kCellHeightDip),
+                    g_dim_brush);
             }
-        }
-
-        // NR-020 empty state (design-spec §4.3): the panel is never blank. A
-        // null/empty catalog snapshot means background enumeration is still
-        // running.
-        if (rows.empty()) {
-            const wchar_t* hint = g_model->CatalogAvailable()
-                ? list_strings::kNoMatchingApps
-                : list_strings::kBuildingCatalog;
-            g_render_target->DrawText(
-                hint,
-                static_cast<UINT32>(wcslen(hint)),
-                g_text_format,
-                D2D1::RectF(nimblerun::layout::kListLeftDip, nimblerun::layout::kListTopDip,
-                            nimblerun::layout::kListRightDip,
-                            nimblerun::layout::kListTopDip + nimblerun::layout::kRowHeightDip),
-                g_dim_brush);
+        } else {
+            const int first = g_model->FirstVisibleRow();
+            const int last =
+                std::min(first + g_model->ViewportRows(), static_cast<int>(rows.size()));
+            const std::wstring windows_app_label(list_strings::kWindowsApp);
+            for (int i = first; i < last; ++i) {
+                // NR-020: fixed single-column list geometry. D2D coordinates are
+                // DIPs; the render target scales them to the monitor's DPI
+                // (design-spec §4.9).
+                const float row_top =
+                    nimblerun::layout::kListTopDip +
+                    static_cast<float>(i - first) * nimblerun::layout::kRowHeightDip;
+                const auto row_rect = D2D1::RectF(
+                    nimblerun::layout::kListLeftDip, row_top,
+                    nimblerun::layout::kListRightDip,
+                    row_top + nimblerun::layout::kRowHeightDip);
+                const bool selected =
+                    g_model->HasSelection() &&
+                    g_model->SelectionIndex() == static_cast<std::size_t>(i);
+                g_render_target->FillRectangle(
+                    row_rect,
+                    selected ? g_selected_brush : g_card_brush);
+    
+                // NR-015: the selected row also gets a border in a color distinct
+                // from the fill, so selection is never conveyed by color alone
+                // (design-spec §NFR-006).
+                if (selected) {
+                    const float border_width = std::max(1.0f, dpi_x / nimblerun::layout::kDpi96);
+                    const float inset = border_width / 2.0f;
+                    g_render_target->DrawRectangle(
+                        D2D1::RectF(row_rect.left + inset, row_rect.top + inset,
+                                    row_rect.right - inset, row_rect.bottom - inset),
+                        g_selected_border_brush,
+                        border_width);
+                }
+    
+                // NR-012: fixed tile inside the row, vertically centered. The decoded
+                // icon (when cached) is drawn into the same rect the placeholder
+                // occupies, so geometry is constant and a late-arriving icon never
+                // reflows.
+                const float tile_left =
+                    nimblerun::layout::kListLeftDip + nimblerun::layout::kTileInsetDip;
+                const float tile_top =
+                    row_top + (nimblerun::layout::kRowHeightDip - nimblerun::layout::kTileSizeDip) / 2.0f;
+                const auto tile = D2D1::RectF(
+                    tile_left, tile_top,
+                    tile_left + nimblerun::layout::kTileSizeDip,
+                    tile_top + nimblerun::layout::kTileSizeDip);
+    
+                const nimblerun::IconKey key = IconKeyFor(rows[i]);
+                const std::wstring encoded = key.Encode();
+                if (const nimblerun::IconBitmap* icon = g_icon_cache ? g_icon_cache->Peek(encoded) : nullptr) {
+                    DrawDecodedIcon(*icon, tile, dpi_x, dpi_y);
+                } else {
+                    // Fallback tile (design-spec §FR-009): drawn on the first frame
+                    // and kept until the icon arrives or the request fails.
+                    g_render_target->FillRectangle(tile, g_dim_brush);
+                    const std::wstring initial =
+                        rows[i].display_name.empty()
+                            ? std::wstring(L"?")
+                            : std::wstring(1, rows[i].display_name.front());
+                    g_render_target->DrawText(
+                        initial.c_str(), static_cast<UINT32>(initial.size()), g_text_format,
+                        tile,
+                        g_text_brush);
+                    if (g_icon_cache && g_requested_icon_keys.count(encoded) == 0) {
+                        need_icon_request = true;
+                    }
+                }
+    
+                // NR-020: name in the upper half of the row, source path in the
+                // lower half (design-spec §4.2). Packaged apps show a fixed label
+                // instead of a Shell parsing name. Single-line with trailing
+                // ellipsis (see the SetTrimming setup); length never changes row
+                // height.
+                const float text_left =
+                    tile_left + nimblerun::layout::kTileSizeDip + 8.0f;
+                // NR-024: the name and second line unconditionally reserve the key
+                // hint column, so text width never jumps whether or not the row
+                // shows a digit (design-spec §4.9). Single-line + ellipsis below.
+                const float text_right =
+                    nimblerun::layout::kListRightDip - nimblerun::layout::kRowHintReserveDip;
+                const float row_mid = row_top + nimblerun::layout::kRowHeightDip / 2.0f;
+                g_render_target->DrawText(
+                    rows[i].display_name.c_str(),
+                    static_cast<UINT32>(rows[i].display_name.size()),
+                    g_text_format,
+                    D2D1::RectF(text_left, row_top, text_right, row_mid),
+                    g_text_brush);
+                const std::wstring& subtitle =
+                    rows[i].source == nimblerun::AppSource::AppsFolder
+                        ? windows_app_label
+                        : rows[i].source_path;
+                g_render_target->DrawText(
+                    subtitle.c_str(),
+                    static_cast<UINT32>(subtitle.size()),
+                    g_small_format,
+                    D2D1::RectF(text_left, row_mid, text_right,
+                                row_top + nimblerun::layout::kRowHeightDip),
+                    g_dim_brush);
+    
+                // NR-024: per-row quick-select digit (design-spec §4.7/§4.9). The
+                // slot is the row's position in the viewport; rows beyond the
+                // 10-digit sequence get no box but keep the reserved text width.
+                const int slot = i - first;
+                if (const wchar_t* key_label = nimblerun::ui::QuickSelectLabelForSlot(slot)) {
+                    const float box_left =
+                        nimblerun::layout::kListRightDip -
+                        nimblerun::layout::kRowKeyRightInsetDip -
+                        nimblerun::layout::kRowKeyBoxWidthDip;
+                    DrawKeyBox(
+                        key_label,
+                        D2D1::RectF(
+                            box_left,
+                            row_mid - nimblerun::layout::kFooterKeyBoxHeightDip / 2.0f,
+                            box_left + nimblerun::layout::kRowKeyBoxWidthDip,
+                            row_mid + nimblerun::layout::kFooterKeyBoxHeightDip / 2.0f));
+                }
+            }
+    
+            // NR-020 empty state (design-spec §4.3): the panel is never blank. A
+            // null/empty catalog snapshot means background enumeration is still
+            // running.
+            if (rows.empty()) {
+                const wchar_t* hint = g_model->CatalogAvailable()
+                    ? list_strings::kNoMatchingApps
+                    : list_strings::kBuildingCatalog;
+                g_render_target->DrawText(
+                    hint,
+                    static_cast<UINT32>(wcslen(hint)),
+                    g_text_format,
+                    D2D1::RectF(nimblerun::layout::kListLeftDip, nimblerun::layout::kListTopDip,
+                                nimblerun::layout::kListRightDip,
+                                nimblerun::layout::kListTopDip + nimblerun::layout::kRowHeightDip),
+                    g_dim_brush);
+            }
         }
     }
 
@@ -993,18 +1168,22 @@ void Render(HWND window) {
     };
 
     float right = nimblerun::layout::kListRightDip;
+    float hints_left = right;
     right = draw_key_box(footer_strings::kPageDown, right,
                          nimblerun::layout::kFooterKeyBoxWidthDip);
+    hints_left = std::min(hints_left, right);
     right -= nimblerun::layout::kFooterKeyGapDip;
     right = draw_key_box(footer_strings::kPageUp, right,
                          nimblerun::layout::kFooterKeyBoxWidthDip);
+    hints_left = std::min(hints_left, right);
     right -= nimblerun::layout::kFooterHintGapDip;
 
     // The "Scroll" and "Launch" labels are right-aligned to the key box that
     // follows them: measure the text once per frame and draw it ending at
     // `right` so the group hugs the right edge (the shared formats stay
-    // left-aligned for the list rows).
-    auto draw_right_label = [&](const wchar_t* label, float label_right) {
+    // left-aligned for the list rows). Returns the measured width so the path
+    // bar can stop kFooterHintGapDip before the leftmost hint (NR-029).
+    auto draw_right_label = [&](const wchar_t* label, float label_right) -> float {
         IDWriteTextLayout* label_layout = nullptr;
         if (SUCCEEDED(g_write_factory->CreateTextLayout(
                 label, static_cast<UINT32>(wcslen(label)), g_small_format,
@@ -1017,12 +1196,16 @@ void Render(HWND window) {
                                 box_top + nimblerun::layout::kFooterTextInsetDip,
                                 label_right, box_bottom),
                     g_dim_brush);
+                label_layout->Release();
+                return label_metrics.width;
             }
             label_layout->Release();
         }
+        return 0.0f;
     };
 
-    draw_right_label(footer_strings::kScroll, right);
+    hints_left = std::min(hints_left,
+                          right - draw_right_label(footer_strings::kScroll, right));
 
     // NR-024: "Launch" group to the left of "Scroll", separated by the hint
     // gap. The wide box content is "Alt+1~" followed by the last digit bound
@@ -1038,8 +1221,38 @@ void Render(HWND window) {
     }
     right = draw_key_box(alt_label.c_str(), right,
                          nimblerun::layout::kFooterWideKeyBoxWidthDip);
+    hints_left = std::min(hints_left, right);
     right -= nimblerun::layout::kFooterKeyGapDip;
-    draw_right_label(footer_strings::kLaunch, right);
+    hints_left = std::min(hints_left,
+                          right - draw_right_label(footer_strings::kLaunch, right));
+
+    // NR-029: path bar on the left half of the footer band (grid state only).
+    // Hover wins over the keyboard selection; packaged apps show the source
+    // label instead of a Shell parsing name. The bar ends kFooterHintGapDip
+    // before the leftmost hint, so any length truncates without covering the
+    // key hints (design-spec §4.2/§4.9).
+    if (g_model && g_model->Columns() > 1) {
+        const nimblerun::AppEntry* path_entry = nullptr;
+        if (g_grid_hover_index >= 0 &&
+            g_grid_hover_index < static_cast<int>(g_model->Rows().size())) {
+            path_entry = &g_model->Rows()[static_cast<std::size_t>(g_grid_hover_index)];
+        } else if (g_model->HasSelection()) {
+            path_entry = &g_model->Rows()[g_model->SelectionIndex()];
+        }
+        if (path_entry) {
+            const wchar_t* path =
+                path_entry->source == nimblerun::AppSource::AppsFolder
+                    ? list_strings::kWindowsApp
+                    : path_entry->source_path.c_str();
+            g_render_target->DrawText(
+                path, static_cast<UINT32>(wcslen(path)), g_small_format,
+                D2D1::RectF(nimblerun::layout::kListLeftDip,
+                            box_top + nimblerun::layout::kFooterTextInsetDip,
+                            hints_left - nimblerun::layout::kFooterHintGapDip,
+                            box_bottom),
+                g_dim_brush);
+        }
+    }
 
     const HRESULT result = g_render_target->EndDraw();
     if (result == D2DERR_RECREATE_TARGET) {
@@ -1081,9 +1294,6 @@ void ShowPanel(HWND window) {
 
     SetWindowPos(window, HWND_TOPMOST, left, top, size.width, size.height, SWP_SHOWWINDOW);
     SetForegroundWindow(window);
-    // NR-020: the visible row count derives from the actual client rect at this
-    // monitor's DPI; recompute on every show so a monitor move is picked up.
-    UpdateViewportRows(window);
     // NR-015: the theme applies on the next panel show; reload so a settings
     // change is picked up without a restart (same "apply on next launch" rule
     // the existing code used for hide-after-launch).
@@ -1099,6 +1309,12 @@ void ShowPanel(HWND window) {
     if (g_model) {
         g_model->Reset();
     }
+    // NR-029: the grid hover index is a window-layer visual state; reset it for
+    // this show and never leave a stale fill pointing at a previous session.
+    // Leave-tracking is re-armed from the next mouse move (a hidden window may
+    // swallow the WM_MOUSELEAVE that would otherwise clear the flag).
+    g_grid_hover_index = -1;
+    g_tracking_mouse_leave = false;
     // NR-012: allow a retry of transient icon failures on this open.
     g_requested_icon_keys.clear();
     // NR-011: AppsFolder is on-demand — when the panel is shown and the last
@@ -1113,6 +1329,11 @@ void ShowPanel(HWND window) {
         SetWindowTextW(g_search_edit, L"");
         SetFocus(g_search_edit);
     }
+    // NR-020/NR-029: the visible row count derives from the actual client rect
+    // at this monitor's DPI and the active layout state (Columns() after the
+    // Reset above, i.e. the empty-query grid); recompute on every show so a
+    // monitor move is picked up.
+    UpdateViewportRows(window);
     InvalidateRect(window, nullptr, FALSE);
 }
 
@@ -1301,13 +1522,32 @@ LRESULT CALLBACK SearchEditProc(HWND edit, UINT message, WPARAM w_param, LPARAM 
         if (g_model) {
             switch (w_param) {
             case VK_UP:
-                g_model->MoveSelection(-1);
+                // NR-029: in the grid one step is a whole row (Columns() items);
+                // in the list Columns() is 1, so this stays the original move.
+                g_model->MoveSelection(-g_model->Columns());
                 InvalidateRect(GetParent(edit), nullptr, FALSE);
                 return 0;
             case VK_DOWN:
-                g_model->MoveSelection(1);
+                g_model->MoveSelection(g_model->Columns());
                 InvalidateRect(GetParent(edit), nullptr, FALSE);
                 return 0;
+            case VK_LEFT:
+                // NR-029: only the grid consumes Left/Right (the search box is
+                // empty there, so caret movement is moot); the list keeps
+                // NR-020 behavior and hands them to the EDIT for text editing.
+                if (g_model->Columns() > 1) {
+                    g_model->MoveSelection(-1);
+                    InvalidateRect(GetParent(edit), nullptr, FALSE);
+                    return 0;
+                }
+                break;
+            case VK_RIGHT:
+                if (g_model->Columns() > 1) {
+                    g_model->MoveSelection(1);
+                    InvalidateRect(GetParent(edit), nullptr, FALSE);
+                    return 0;
+                }
+                break;
             case VK_PRIOR:
                 g_model->ScrollBy(-g_model->ViewportRows());
                 InvalidateRect(GetParent(edit), nullptr, FALSE);
@@ -1482,6 +1722,13 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
             wchar_t buffer[1024];
             const int length = GetWindowTextW(g_search_edit, buffer, 1024);
             g_model->SetQuery(std::wstring(buffer, length));
+            // NR-029: the grid/list row counts differ (96 vs 48 DIP rows), so
+            // recompute the viewport on the empty<->non-empty layout switch.
+            // Hover is a grid-only visual state and is cleared here too.
+            UpdateViewportRows(window);
+            if (g_grid_hover_index != -1) {
+                g_grid_hover_index = -1;
+            }
             InvalidateRect(window, nullptr, FALSE);
         }
         return 0;
@@ -1515,28 +1762,57 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
         }
         return 0;
     }
+    case WM_MOUSEMOVE:
+        // NR-029: grid hover is a window-layer visual state. The hit index is
+        // only recomputed and invalidated when the hit cell actually changes
+        // (no per-pixel paint); TME_LEAVE clears it when the pointer exits the
+        // panel. No timers.
+        if (g_model && g_model->Columns() > 1) {
+            const int cell =
+                CellAtPoint(window, GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param));
+            if (cell != g_grid_hover_index) {
+                g_grid_hover_index = cell;
+                InvalidateRect(window, nullptr, FALSE);
+            }
+            if (!g_tracking_mouse_leave) {
+                TRACKMOUSEEVENT track{};
+                track.cbSize = sizeof(track);
+                track.dwFlags = TME_LEAVE;
+                track.hwndTrack = window;
+                TrackMouseEvent(&track);
+                g_tracking_mouse_leave = true;
+            }
+        }
+        return DefWindowProcW(window, message, w_param, l_param);
+    case WM_MOUSELEAVE:
+        g_tracking_mouse_leave = false;
+        if (g_grid_hover_index != -1) {
+            g_grid_hover_index = -1;
+            InvalidateRect(window, nullptr, FALSE);
+        }
+        return 0;
     case WM_LBUTTONDOWN: {
-        // NR-020: a single click selects and launches the row under the cursor
-        // (design-spec §4.8). RowAtPoint maps the client point through the
-        // current first visible row.
-        const int row = RowAtPoint(window, GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param));
-        if (row >= 0) {
-            g_model->SelectRow(static_cast<std::size_t>(row));
-            ActivateRow(static_cast<std::size_t>(row), window);
+        // NR-020/NR-029: a single click selects and launches the row (list) or
+        // cell (grid) under the cursor (design-spec §4.8). CellAtPoint maps the
+        // client point through the current first visible item.
+        const int cell = CellAtPoint(window, GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param));
+        if (cell >= 0) {
+            g_model->SelectRow(static_cast<std::size_t>(cell));
+            ActivateRow(static_cast<std::size_t>(cell), window);
         }
         return 0;
     }
     case WM_RBUTTONDOWN: {
-        // NR-018: right-click offers Pin/Unpin (per the row's current pinned
+        // NR-018: right-click offers Pin/Unpin (per the item's current pinned
         // state) and "Open file location" for valid paths (design-spec §4.8).
         if (!g_model || !g_pins) {
             return 0;
         }
-        const int row = RowAtPoint(window, GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param));
-        if (row < 0) {
+        const int cell = CellAtPoint(window, GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param));
+        if (cell < 0) {
             return 0;
         }
-        const nimblerun::AppEntry entry = g_model->Rows()[static_cast<std::size_t>(row)];
+        const nimblerun::AppEntry entry = g_model->Rows()[static_cast<std::size_t>(cell)];
         const bool pinned = g_pins->IsPinned(entry.stable_id);
 
         const HMENU menu = CreatePopupMenu();
@@ -1731,6 +2007,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
 
     nimblerun::PanelModel model(&refresh.Snapshot(), {});
     g_model = &model;
+    // NR-029: the empty-query grid is a fixed 6-column layout (design-spec
+    // §4.9); the constant is set once and Columns() switches by query state.
+    model.SetGridColumns(nimblerun::layout::kGridColumns);
     RefreshPanelSnapshot();
 
     // NR-012: bounded decoded-bitmap cache + Shell-backed provider. The UI
@@ -1815,6 +2094,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     Release(g_title_format);
     Release(g_text_format);
     Release(g_small_format);
+    Release(g_grid_name_format);
     Release(g_ellipsis_sign);
     Release(g_write_factory);
     Release(g_d2d_factory);

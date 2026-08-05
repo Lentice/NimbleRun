@@ -34,6 +34,17 @@ constexpr float kRowKeyGapDip = 8.0f;          // box left edge from the text ri
 constexpr float kRowHintReserveDip = kRowKeyBoxWidthDip + kRowKeyRightInsetDip + kRowKeyGapDip;
 // NR-024: the footer "Alt+1~N" box is wider than the short PgUp/PgDn boxes.
 constexpr float kFooterWideKeyBoxWidthDip = 56.0f;
+// NR-029: empty-query icon grid (design-spec §4.9). One page is kGridColumns x
+// 4 rows = 24 cells (result area 72~456 DIP is 384 DIP tall -> 384/96 = 4 rows);
+// the grid reuses the model's viewport/scroll/selection state with Columns()>1.
+constexpr float kCellWidthDip = 101.0f;
+constexpr float kCellHeightDip = 96.0f;
+constexpr float kIconSizeDip = 40.0f;
+constexpr int kGridColumns = 6;
+// Left edge of the grid, horizontally centered in the list area (608 DIP wide
+// vs 6 x 101 = 606 DIP of cells).
+constexpr float kGridLeftDip =
+    kListLeftDip + (kListRightDip - kListLeftDip - kGridColumns * kCellWidthDip) / 2.0f;
 constexpr float kSearchLeftDip = 16.0f;
 constexpr float kSearchTopDip = 16.0f;
 constexpr float kSearchRightDip = 624.0f;
