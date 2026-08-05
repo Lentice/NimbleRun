@@ -29,13 +29,17 @@ void Expect(bool condition, const char* message) {
 // child through: false means "skip this child, count it, keep going". Driving it
 // directly verifies the error-isolation branch without a fake IShellFolder.
 void TestEntryBuilder() {
-    const std::wstring parsing = L"shell:AppsFolder\\Microsoft.WindowsCalculator_8wekyb3d8bbwe!App";
+    // NR-028: the enumerator hands BuildAppsFolderEntry the child's bare Shell
+    // parsing name (AUMID / GUID-relative path / absolute path); the builder
+    // assembles the launch identity from it.
+    const std::wstring parsing = L"Microsoft.WindowsCalculator_8wekyb3d8bbwe!App";
     AppEntry entry;
     Expect(BuildAppsFolderEntry(L"Calculator", parsing, entry),
            "builder accepts valid child names");
     Expect(entry.source == AppSource::AppsFolder, "builder source value");
     Expect(entry.display_name == L"Calculator", "builder display name");
-    Expect(entry.launch_identity == parsing, "builder launch identity is the parsing name");
+    Expect(entry.launch_identity == L"shell:AppsFolder\\Microsoft.WindowsCalculator_8wekyb3d8bbwe!App",
+           "builder launch identity is the prefixed AppsFolder identity");
     Expect(entry.source_path == parsing, "builder source path is the parsing name");
     Expect(entry.stable_id.size() == 16, "builder stable id is a fixed-length hash");
 
@@ -56,6 +60,33 @@ void TestEntryBuilder() {
     Expect(renamed.stable_id == entry.stable_id, "stable id independent of display name");
 }
 
+// NR-028: the launch identity gains the AppsFolder namespace prefix, while the
+// source path and the stable id (zero migration) keep the bare parsing name.
+void TestLaunchIdentityAndFilter() {
+    const std::wstring calc_parsing = L"Microsoft.WindowsCalculator_8wekyb3d8bbwe!App";
+    AppEntry calc;
+    Expect(BuildAppsFolderEntry(L"Calc", calc_parsing, calc),
+           "AUMID child is accepted");
+    Expect(calc.launch_identity ==
+               L"shell:AppsFolder\\Microsoft.WindowsCalculator_8wekyb3d8bbwe!App",
+           "launch identity is the prefixed AppsFolder identity");
+    Expect(calc.source_path == calc_parsing, "source path keeps the bare parsing name");
+    // Zero migration (design-spec §10.3): the stable id is hashed from the bare
+    // parsing name, so pins and usage survive the identity change. Expected
+    // value captured from the pre-NR-028 implementation.
+    Expect(calc.stable_id == L"445ac7f22c5f914c",
+           "stable id unchanged from the pre-NR-028 implementation");
+
+    // A non-program-like parsing name (document / website) is filtered out and
+    // the caller's skip-and-count path applies.
+    AppEntry help;
+    help.display_name = L"sentinel";
+    Expect(!BuildAppsFolderEntry(L"Help", L"{7C5A40EF-96BC-48C3-88F4-0B6D1E1C6B4C}\\AutoIt3\\AutoIt.chm",
+                                 help),
+           "chm child is filtered out");
+    Expect(help.display_name == L"sentinel", "filtered item left untouched");
+}
+
 void TestAppsFolderInvariants() {
     // FOLDERID_AppsFolder resolves to real inbox packaged apps on a dev machine;
     // a non-empty result is an acceptable smoke check of the wiring (same as the
@@ -68,11 +99,11 @@ void TestAppsFolderInvariants() {
         Expect(!entry.source_path.empty(), "entry source path");
         Expect(entry.stable_id.size() == 16, "entry stable id length");
         Expect(entry.source == AppSource::AppsFolder, "entry source value");
-        // The canonical identity is the Shell parsing name the Shell can launch
-        // and a later icon query can resolve (design-spec §FR-006). Its concrete
-        // shape varies per app: shell:AppsFolder\... URIs, bare AUMIDs, or an
-        // absolute path, so only non-empty (checked above) and reproducibility
-        // (checked below) are asserted here.
+        // NR-028: the launch identity is the AppsFolder namespace prefix plus
+        // the bare parsing name (design-spec §FR-006), so it is always
+        // Shell-launchable. Its concrete shape varies per app (bare AUMID,
+        // GUID-relative path, absolute path), so only non-empty (checked above)
+        // and reproducibility (checked below) are asserted here.
     }
 
     // Determinism: re-enumeration keeps the same count and the same identities.
@@ -102,6 +133,7 @@ int wmain() {
     }
 
     TestEntryBuilder();
+    TestLaunchIdentityAndFilter();
     TestAppsFolderInvariants();
 
     CoUninitialize();

@@ -157,6 +157,7 @@ Settings DefaultSettings() {
     settings.theme = Theme::System;
     settings.recent_count = 20;
     settings.hide_after_launch = true;
+    settings.include_windows_apps = true;
     settings.catalog_roots.clear();
     settings.catalog_extensions = DefaultExtensions();
     return settings;
@@ -266,6 +267,10 @@ SettingsLoadResult SettingsStore::Load(Settings& out) const {
             if (const auto parsed = ParseBool(value)) {
                 out.hide_after_launch = *parsed;
             }
+        } else if (key == L"include_windows_apps") {
+            if (const auto parsed = ParseBool(value)) {
+                out.include_windows_apps = *parsed;
+            }
         } else if (key == L"catalog_root") {
             // Format: <escaped path>|<recursive 0/1>. '|' cannot appear in a
             // Windows path, so it is a safe separator.
@@ -311,6 +316,7 @@ bool SettingsStore::Save(const Settings& settings) const {
     text += L"theme=" + ThemeToString(settings.theme) + L"\n";
     text += L"recent_count=" + std::to_wstring(settings.recent_count) + L"\n";
     text += L"hide_after_launch=" + std::wstring(settings.hide_after_launch ? L"true" : L"false") + L"\n";
+    text += L"include_windows_apps=" + std::wstring(settings.include_windows_apps ? L"true" : L"false") + L"\n";
     for (const CatalogRoot& root : settings.catalog_roots) {
         text += L"catalog_root=" + EscapeText(root.path) + L"|" +
                 std::wstring(root.recursive ? L"true" : L"false") + L"\n";

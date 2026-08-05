@@ -60,6 +60,7 @@ void TestDefaults(const std::wstring& dir) {
     Expect(loaded.theme == Theme::System, "default theme");
     Expect(loaded.recent_count == 20, "default recent_count");
     Expect(loaded.hide_after_launch == true, "default hide_after_launch");
+    Expect(loaded.include_windows_apps == true, "default include_windows_apps");
     Expect(loaded.catalog_roots.empty(), "default catalog_roots is empty");
     Expect(loaded.catalog_extensions == nimblerun::DefaultExtensions(),
            "default catalog_extensions is the full allowlist");
@@ -73,6 +74,7 @@ void TestRoundTrip(const std::wstring& dir) {
     expected.theme = Theme::Dark;
     expected.recent_count = 32;
     expected.hide_after_launch = false;
+    expected.include_windows_apps = false;
     Expect(store.Save(expected), "save settings");
 
     Settings loaded;
@@ -82,6 +84,22 @@ void TestRoundTrip(const std::wstring& dir) {
     Expect(loaded.theme == expected.theme, "round-trip theme");
     Expect(loaded.recent_count == expected.recent_count, "round-trip recent_count");
     Expect(loaded.hide_after_launch == expected.hide_after_launch, "round-trip hide_after_launch");
+    Expect(loaded.include_windows_apps == expected.include_windows_apps,
+           "round-trip include_windows_apps");
+}
+
+void TestIncludeWindowsAppsOldFormat(const std::wstring& dir) {
+    // A pre-NR-028 settings.ini has no include_windows_apps key; on load the
+    // default (true) must win so the AppsFolder source keeps working.
+    WriteBytes(dir + L"\\settings.ini",
+        "schema=1\n"
+        "hotkey=Alt+Space\n"
+        "recent_count=20\n"
+        "hide_after_launch=true\n");
+    SettingsStore store(dir);
+    Settings loaded;
+    Expect(store.Load(loaded) == SettingsLoadResult::Loaded, "old-format load");
+    Expect(loaded.include_windows_apps == true, "missing key loads the default true");
 }
 
 void TestCatalogRootsRoundTrip(const std::wstring& dir) {
@@ -207,6 +225,7 @@ void TestAtomicWriteFailure(const std::wstring& dir) {
 int wmain() {
     TestDefaults(MakeTempDir("defaults"));
     TestRoundTrip(MakeTempDir("roundtrip"));
+    TestIncludeWindowsAppsOldFormat(MakeTempDir("oldformat"));
     TestEscaping(MakeTempDir("escaping"));
     TestValidation(MakeTempDir("validation"));
     TestCatalogRootsRoundTrip(MakeTempDir("catalogroots"));

@@ -80,6 +80,7 @@ bool SameRoot(const CatalogRoot& a, const CatalogRoot& b) {
 bool SameSettings(const Settings& a, const Settings& b) {
     if (a.hotkey != b.hotkey || a.auto_start != b.auto_start || a.theme != b.theme ||
         a.recent_count != b.recent_count || a.hide_after_launch != b.hide_after_launch ||
+        a.include_windows_apps != b.include_windows_apps ||
         a.catalog_roots.size() != b.catalog_roots.size() ||
         a.catalog_extensions != b.catalog_extensions) {
         return false;
@@ -146,6 +147,7 @@ void TestDirtyTrackingAndPersist() {
     Expect(!editor.Dirty(), "not dirty before edits");
     Expect(editor.SetRecentCount(33) == true, "set recent_count");
     Expect(editor.SetHideAfterLaunch(false) == true, "uncheck hide-after-launch");
+    Expect(editor.SetIncludeWindowsApps(false) == true, "uncheck include-windows-apps");
     Expect(editor.SetTheme(Theme::Dark) == true, "set theme");
     Expect(editor.SetHotkey(L"Ctrl+Shift+P") == true, "set hotkey");
     Expect(editor.Dirty(), "dirty after edits");
@@ -163,6 +165,7 @@ void TestDirtyTrackingAndPersist() {
     Expect(store.Load(loaded) == nimblerun::SettingsLoadResult::Loaded, "round-trip load");
     Expect(loaded.recent_count == 33, "round-trip recent_count");
     Expect(loaded.hide_after_launch == false, "round-trip hide_after_launch");
+    Expect(loaded.include_windows_apps == false, "round-trip include_windows_apps");
     Expect(loaded.theme == Theme::Dark, "round-trip theme");
     Expect(loaded.hotkey == L"Ctrl+Shift+P", "round-trip hotkey is canonical");
     fs::remove_all(dir);

@@ -27,12 +27,14 @@ enum class SettingsString {
     ThemeSystem,
     ThemeLight,
     ThemeDark,
-    UserFoldersGroup,
+    CatalogSourcesGroup,
+    IncludeWindowsAppsLabel,
+    UserFoldersLabel,
     AddFolderButton,
     RemoveFolderButton,
     BrowseFolderTitle,
     IncludeSubfolders,
-    ExtensionsGroup,
+    ExtensionsLabel,
     ClearUsageButton,
     ResetSettingsButton,
     OkButton,
@@ -85,6 +87,7 @@ public:
     bool SetRecentCount(int count);             // only 8..40 (default 20)
     bool SetTheme(Theme theme);
     bool SetHideAfterLaunch(bool hide);
+    bool SetIncludeWindowsApps(bool enabled);
     bool SetAutoStart(bool enabled);
     bool SetHotkey(std::wstring_view combo);    // empty/invalid/Win-key rejected
     bool SetExtensionEnabled(std::wstring_view extension, bool enabled);

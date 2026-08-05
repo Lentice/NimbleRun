@@ -1,6 +1,6 @@
 # NR-024 — Alt+digit quick select with per-row key hints
 
-- Status: `ready`
+- Status: `done`
 - Phase: 3
 - Depends on: NR-020、NR-021
 - Source: `docs/design-spec.md` §4.7、§4.9、§NFR-006、AC-002
@@ -142,6 +142,9 @@ ctest --test-dir build --output-on-failure
 
 ## 交接區
 
-- Start: —
+- Start: 2026-08-05
 - Subagent scope: 依「必讀」讀完所有文件；trace `src/app_host/panel_model.{h,cpp}`（`FirstVisibleRow`／`ViewportRows`／`SelectRow`／`ScrollBy`）、`src/app_host/main.cpp`（`Render()` 列迴圈與 footer 區塊、`draw_key_box` lambda、`SearchEditProc`、`ActivateRow`）、`src/ui/panel_layout.h`、`src/ui/panel_palette.h`、`tests/unit/panel_model_test.cpp`、`tests/unit/ui_palette_layout_test.cpp`。先確認 NR-020／NR-021 已完成，否則回報阻塞。實作 Scope 1~5，不越界到 NR-022／NR-023。回報修改檔案、測試命令、結果與未完成事項。
-- Result: —
+- Result: 2026-08-05 完成。
+  - 修改檔案：`src/ui/quick_select.h`（新增，header-only 純值，無 `windows.h`）、`src/app_host/panel_model.h`／`.cpp`（`RowForVisibleSlot(int) const`）、`src/ui/panel_layout.h`（`kRowKeyBoxWidthDip=20`／`kRowKeyRightInsetDip=8`／`kRowKeyGapDip=8`／`kRowHintReserveDip=36`／`kFooterWideKeyBoxWidthDip=56`）、`src/app_host/main.cpp`（`WM_SYSKEYDOWN`／`WM_SYSCHAR`、`text_right` 預留 `kRowHintReserveDip`、列內 digit 方塊、footer 抽 `DrawKeyBox` 檔案範圍函式並新增 `Launch`＋`Alt+1~N` 組、`footer_strings` 加 `kLaunch`／`kAltOnePrefix`）、`tests/unit/panel_model_test.cpp`（6 case）、`tests/unit/ui_palette_layout_test.cpp`（4 case）、`docs/work-items.md`（NR-024 → `done`）。
+  - Agent checks（Release x64，PATH 含 CMake/LLVM/Ninja）：`cmake -S . -B build -G Ninja -D"CMAKE_TOOLCHAIN_FILE=cmake/llvm-mingw.cmake" -DCMAKE_BUILD_TYPE=Release`（configure 成功）；`cmake --build build`（無 error、無新增 warning；首次 link 被執行中的 NimbleRun.exe 檔鎖，停掉測試程序後重建成功）；`ctest --test-dir build -R "list_vertical_slice|dpi_theme_accessibility" --output-on-failure` → 2/2 Passed；`ctest --test-dir build --output-on-failure` → 18/18 Passed。
+  - 未完成事項：無。鍵盤行為（Alt+1 啟動、翻頁後對位、無嗶聲）與三種主題下指引方塊外觀的肉眼確認屬人工驗證，不列入 Agent 交付。

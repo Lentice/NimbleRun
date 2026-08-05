@@ -87,6 +87,11 @@ public:
     // (design-spec §4.7). No-op on an empty list.
     void ScrollBy(int delta_rows);
 
+    // Absolute row index for the slot-th visible row (0-based slot), or -1 when
+    // the slot is outside the current viewport or past the end of the list
+    // (design-spec §4.7). Never changes model state.
+    int RowForVisibleSlot(int slot) const;
+
     // Selects a specific row (mouse click); no-op when out of range.
     void SelectRow(std::size_t index);
 

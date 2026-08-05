@@ -327,6 +327,85 @@ void TestScrollByRoundTripNoWrap() {
     Expect(model.SelectionIndex() == 0, "selection follows the returned first visible row");
 }
 
+// NR-024: Alt+digit maps a visible slot (0-based position in the viewport) to
+// an absolute row index; the mapping is pure (design-spec §4.7) and never
+// mutates model state.
+
+void TestRowForVisibleSlotBasics() {
+    const std::vector<AppEntry> catalog = CatalogOf(20);
+    PanelModel model(&catalog, {});
+    model.SetQuery(L"App");
+    model.SetViewportRows(5);
+    Expect(model.RowForVisibleSlot(0) == model.FirstVisibleRow(),
+           "slot 0 maps to the first visible row");
+    Expect(model.RowForVisibleSlot(4) == model.FirstVisibleRow() + 4,
+           "last viewport slot maps to the last visible row");
+    Expect(model.RowForVisibleSlot(0) == 0, "visible window starts at row 0");
+    Expect(model.RowForVisibleSlot(4) == 4, "last slot at the start is row 4");
+}
+
+void TestRowForVisibleSlotTracksScroll() {
+    const std::vector<AppEntry> catalog = CatalogOf(20);
+    PanelModel model(&catalog, {});
+    model.SetQuery(L"App");
+    model.SetViewportRows(5);
+    model.ScrollBy(5);
+    Expect(model.RowForVisibleSlot(0) == model.FirstVisibleRow(),
+           "after a page, slot 0 maps to the new first visible row");
+    Expect(model.RowForVisibleSlot(0) == 5, "absolute row advances with the page");
+    Expect(model.RowForVisibleSlot(4) == 9, "new last visible slot maps to row 9");
+}
+
+void TestRowForVisibleSlotOutOfRange() {
+    const std::vector<AppEntry> catalog = CatalogOf(20);
+    PanelModel model(&catalog, {});
+    model.SetQuery(L"App");
+    model.SetViewportRows(5);
+    Expect(model.RowForVisibleSlot(-1) == -1, "negative slot is invalid");
+    Expect(model.RowForVisibleSlot(5) == -1, "slot at the viewport edge is invalid");
+    Expect(model.RowForVisibleSlot(7) == -1, "slot past the viewport is invalid");
+}
+
+void TestRowForVisibleSlotPastListEnd() {
+    const std::vector<AppEntry> catalog = CatalogOf(3);
+    PanelModel model(&catalog, {});
+    model.SetQuery(L"App");
+    model.SetViewportRows(7);
+    const std::size_t selection_before = model.SelectionIndex();
+    Expect(model.RowForVisibleSlot(3) == -1, "slot beyond RowCount is invalid");
+    Expect(model.RowForVisibleSlot(0) == 0, "first slot still maps to row 0");
+    Expect(model.SelectionIndex() == selection_before,
+           "RowForVisibleSlot never changes the selection");
+}
+
+void TestRowForVisibleSlotEmptyList() {
+    const std::vector<AppEntry> catalog = CatalogOf(1);
+    PanelModel model(&catalog, {});
+    model.SetQuery(L"zzz-no-match");
+    Expect(model.Rows().empty(), "empty result list");
+    for (int slot = -1; slot <= 10; ++slot) {
+        Expect(model.RowForVisibleSlot(slot) == -1,
+               "empty list has no visible rows for any slot");
+    }
+}
+
+void TestRowForVisibleSlotIsConst() {
+    const std::vector<AppEntry> catalog = CatalogOf(20);
+    PanelModel model(&catalog, {});
+    model.SetQuery(L"App");
+    model.SetViewportRows(5);
+    const PanelModel& const_model = model;
+    const int first_before = const_model.FirstVisibleRow();
+    const std::size_t selection_before = const_model.SelectionIndex();
+    for (int slot = -2; slot <= 8; ++slot) {
+        (void)const_model.RowForVisibleSlot(slot);
+    }
+    Expect(const_model.FirstVisibleRow() == first_before,
+           "repeated RowForVisibleSlot calls leave the viewport untouched");
+    Expect(const_model.SelectionIndex() == selection_before,
+           "repeated RowForVisibleSlot calls leave the selection untouched");
+}
+
 } // namespace
 
 int wmain() {
@@ -352,6 +431,12 @@ int wmain() {
     TestScrollByFewerRowsThanViewport();
     TestScrollByEmptyList();
     TestScrollByRoundTripNoWrap();
-    std::printf("NR-010/NR-020/NR-021 panel model check PASSED\n");
+    TestRowForVisibleSlotBasics();
+    TestRowForVisibleSlotTracksScroll();
+    TestRowForVisibleSlotOutOfRange();
+    TestRowForVisibleSlotPastListEnd();
+    TestRowForVisibleSlotEmptyList();
+    TestRowForVisibleSlotIsConst();
+    std::printf("NR-010/NR-020/NR-021/NR-024 panel model check PASSED\n");
     return 0;
 }

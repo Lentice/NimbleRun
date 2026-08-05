@@ -25,10 +25,12 @@ AppsFolderEnumerateResult EnumerateAppsFolderCatalog();
 
 // Builds one AppEntry from a child's already-extracted Shell names. Returns
 // false and does not modify out when the child data is unusable (empty display
-// name or parsing name), so callers skip and count the failure without aborting
-// the walk. launch_identity and source_path carry the Shell parsing name, which
-// is both the canonical launch identity (§FR-006, §10.3) and enough identity for
-// a later icon query.
+// name or parsing name) or when the parsing name is not a program-like target
+// (design-spec §FR-004a, shared app_filter module), so callers skip and count
+// the skip without aborting the walk. launch_identity is the Shell-launchable
+// "shell:AppsFolder\" + parsing name (§FR-006); source_path keeps the bare
+// parsing name for display, and the stable id is hashed from the bare parsing
+// name only (§10.3, zero migration).
 bool BuildAppsFolderEntry(const std::wstring& display_name,
                           const std::wstring& parsing_name,
                           AppEntry& out);

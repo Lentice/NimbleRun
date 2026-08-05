@@ -64,6 +64,16 @@ MVP 必須證明以下三件事：
 2. 程式長時間待機時不產生可觀察的持續 CPU 活動。
 3. Win32 桌面程式與 Microsoft Store／封裝 App 均能被列出並正常啟動。
 
+### 2.6 術語
+
+本節釘住跨模組共用的名詞。欄位名稱看起來理所當然的地方，就是最容易被誤解的地方。
+
+- **Shell parsing name**：Shell namespace 內某個項目相對於其父容器的解析字串。**它不保證是檔案系統路徑，也不保證能單獨交給 `ShellExecuteExW`。** AppsFolder 子項目的 parsing name 有三種實際形態：AUMID（`Microsoft.WindowsCalculator_8wekyb3d8bbwe!App`）、Known Folder GUID 相對路徑（`{7C5A40EF-…}\AutoIt3\Au3Info.exe`）、真實絕對路徑（`D:\Tools\Notepad3.exe`）。前兩者單獨解析必定失敗。
+- **launch identity**（`AppEntry::launch_identity`）：可直接交給 Shell 啟動的字串，**已完成必要的命名空間前綴組裝**。與 parsing name 是不同概念，不可互相代入。各來源的組裝規則見 FR-006 與 FR-010。
+- **identity key**：產生 `stable_id` 的來源字串。它與 launch identity **刻意脫鉤**——launch identity 的組裝規則若日後調整，不得使既有 pin 與使用紀錄失效。規則見 §10.3。
+- **program-like item**：允許進入 catalog 的「程式類」項目。判準為白名單而非黑名單，理由與規則見 FR-004。
+- **AUMID**：Application User Model ID。封裝／已註冊 App 的啟動識別，無副檔名概念。**含點號但點號後方不是副檔名**，任何副檔名判斷都不得套用於它。
+
 ---
 
 ## 3. 範圍
@@ -135,17 +145,23 @@ MVP 不覆寫 Windows 或其他程式的系統快捷鍵。包含 Windows 鍵、�
 規則：
 
 - 同一 App 不可重複出現。
-- 呈現方式為單欄垂直清單：每列左側為圖示，右側上行為 App 名稱、下行為來源路徑。
-- 沒有檔案系統路徑的 packaged App，下行顯示來源標籤而非 Shell parsing name。
-- 每列文字各限一行，超出寬度以尾端省略號截斷；不換行、不因文字長度改變列高。
-- 清單一次只顯示可見容量的列；超出時以 `PgUp`／`PgDn` 或滾輪翻頁，不顯示捲軸。
+- 呈現方式為 **icon grid**：每格上方為圖示、下方為 App 名稱，不顯示路徑。空白狀態的目的是「一眼看到並點到常用 App」，格狀能容納的項目數遠多於單欄清單，對釘選項目尤其重要。
+- 釘選與常用項目共用同一種格子外觀，不加分組標題或分隔線；順序本身即為區隔。
+- 名稱限一行，超出寬度以尾端省略號截斷；不換行、不因文字長度改變格子高度。
+- 當前 active（鍵盤選取）或 hover 的項目，其完整來源路徑顯示於面板底部的 footer band 左側（§4.9）。沒有檔案系統路徑的 packaged App 顯示來源標籤而非 Shell parsing name。
+- hover 只改變 path bar 內容與該格的淡填色，**不改變選取**；指標離開格狀區後 path bar 回到顯示選取項。`Enter` 永遠啟動具備選取邊框的那一格。
+- 一次只顯示可見容量的格數；超出時以 `PgUp`／`PgDn` 或滾輪翻頁，不顯示捲軸。可見範圍永遠對齊整列，不得出現半列。
 
 ### 4.3 搜尋狀態
 
 只要搜尋欄包含非空白字元：
 
-- 常用清單立即切換為完整 App Catalog 的過濾結果。
-- 結果沿用同一份單欄清單版面，不切換成另一種頁面或混合呈現。
+- 常用 grid 立即切換為完整 App Catalog 的過濾結果，並換成**單欄垂直清單**：每列左側為圖示，右側上行為 App 名稱、下行為來源路徑。搜尋結果需要路徑才能分辨同名項目，格狀放不下第二行文字。
+- 版面切換點唯一：搜尋欄由空變為非空、或由非空變為空。同一狀態內不得再出現第二種版面或混合呈現。
+- 進入清單狀態後 footer 不再顯示 path bar（每列自帶路徑）。
+- 沒有檔案系統路徑的 packaged App，下行顯示來源標籤而非 Shell parsing name。
+- 每列文字各限一行，超出寬度以尾端省略號截斷；不換行、不因文字長度改變列高。
+- 清單一次只顯示可見容量的列；超出時以 `PgUp`／`PgDn` 或滾輪翻頁，不顯示捲軸。
 - 第一個結果自動選取，但不可因選取而自動執行。
 - 每次輸入變更後同步計算；若未來 Catalog 超過 5,000 筆或量測超標，再改用背景工作執行緒。
 - 無結果時顯示「找不到 App」，不得建議網路搜尋。
@@ -202,10 +218,11 @@ usage_score = launch_count_30d + 3 × launch_count_7d + recency_bonus
 |---|---|
 | 全域快捷鍵 | 顯示／隱藏面板 |
 | 文字輸入 | 更新過濾結果 |
-| `↑` `↓` | 在清單移動選取；到頭尾環繞 |
-| `PgUp` `PgDn` | 以可見列數為單位翻頁；夾在清單頭尾，不環繞 |
-| `Alt` ＋數字 | 直接啟動對應的可見列。鍵序固定為 `1 2 3 4 5 6 7 8 9 0`，依序指派給當前可見列（可見 8 列時用到 `Alt+1`~`Alt+8`）；沒有對應列的數字不綁定 |
-| `←` `→` `Home` `End` | 保留給搜尋欄文字編輯，不攔截 |
+| `↑` `↓` | 清單狀態：移動一列。格狀狀態：移動一整列（一次跨越一欄數的項目）。兩者到頭尾環繞 |
+| `PgUp` `PgDn` | 以「一個可見頁」為單位翻頁（清單狀態＝可見列數，格狀狀態＝可見列數 × 欄數）；夾在頭尾，不環繞 |
+| `Alt` ＋數字 | 直接啟動對應的可見項目。鍵序固定為 `1 2 3 4 5 6 7 8 9 0`，依序指派給當前可見項目的前 10 個；沒有對應項目的數字不綁定 |
+| `←` `→` | 格狀狀態（搜尋欄為空）移動選取一格；清單狀態保留給搜尋欄文字編輯，不攔截 |
+| `Home` `End` | 保留給搜尋欄文字編輯，不攔截 |
 | `Enter` | 啟動選取 App |
 | `Esc` | 搜尋有內容時先清空；空白時隱藏面板 |
 | `Ctrl+R` | 重新整理 App Catalog |
@@ -215,7 +232,8 @@ Tab 順序只包含搜尋欄、結果清單及必要按鈕。面板顯示後不�
 
 ### 4.8 滑鼠操作
 
-- 單擊清單列立即啟動。
+- 單擊清單列或格子立即啟動。
+- 格狀狀態下指標停在某格時，該格顯示淡填色並在 footer 顯示其路徑；不改變鍵盤選取。
 - 右鍵提供「釘選／取消釘選」及「開啟檔案位置」（適用時）。
 - 點擊面板外，面板自動隱藏。
 - 滾輪只在結果超過可見容量時捲動。
@@ -224,9 +242,11 @@ Tab 順序只包含搜尋欄、結果清單及必要按鈕。面板顯示後不�
 ### 4.9 視窗外觀
 
 - 預設寬度 640 DIP、高度 488 DIP；高度依內容調整，上限為目前螢幕工作區的 70%。
-- 搜尋欄位於頂端，結果清單位於中段，最下方保留一條固定高度的提示列（footer）。
-- 清單列高 48 DIP，列內圖示 30×30 DIP，可見 8 列；footer 只顯示當下適用的按鍵指引，不顯示狀態或版本資訊。
-- 每個清單列最右方顯示該列的數字快選指引：一個圓角按鍵方塊，內容只有數字本身（修飾鍵 `Alt` 在 footer 說明一次，不在每列重複）。方塊寬度固定並常駐佔位，App 名稱與第二行文字的可用寬度不因指引有無而變動。
+- 搜尋欄位於頂端，結果區位於中段，最下方保留一條固定高度的提示列（footer）。結果區的幾何在格狀與清單兩種狀態下相同，只有內部排版不同。
+- 清單狀態：列高 48 DIP，列內圖示 30×30 DIP，可見 8 列。
+- 格狀狀態：6 欄 × 4 列，格子 101×96 DIP，圖示 40×40 DIP 置中於格子上半，名稱單行置中於下半。一頁 24 格。
+- footer 右側顯示當下適用的按鍵指引，左側在格狀狀態顯示 active／hover 項目的完整路徑（清單狀態留空）；不顯示狀態或版本資訊。路徑超出可用寬度時以尾端省略號截斷，且不得覆蓋右側指引。
+- 數字快選指引顯示於對應項目上：清單狀態在列最右方，格狀狀態在格子右上角，皆為只含數字的圓角按鍵方塊（修飾鍵 `Alt` 在 footer 說明一次，不重複）。清單狀態的方塊寬度固定並常駐佔位，App 名稱與第二行文字的可用寬度不因指引有無而變動。
 - 搜尋欄外觀：距面板左右各 16 DIP、上緣 16 DIP，高 48 DIP，圓角半徑 6 DIP；填色與 1 DIP 邊框由主題色盤提供，與面板底色可分辨，高對比模式下改用系統語意色並保持實心可見。
 - 搜尋輸入沿用原生 EDIT 控制項（caret、選取、IME、剪貼簿為系統行為），文字左內距 12 DIP、字級 24 DIP。搜尋欄的圓角框由面板繪製，EDIT 內縮於框內。
 - 使用系統字型與系統色彩語意。搜尋欄字型取系統 message font，只覆寫字級。
@@ -304,7 +324,22 @@ struct AppEntry {
 - `.lnk` 以 `IShellLinkW`／`IPersistFile` 解析，禁止自行解析二進位格式。
 - 顯示名稱預設採捷徑檔名，不含副檔名。
 - 無法解析但 Shell 可正常開啟的捷徑仍可保留，啟動時交給 Shell。
-- 排除解除安裝、說明、網站捷徑等非 App 項目；初版採保守副檔名與 Shell 屬性判斷，不以名稱黑名單作唯一依據。
+- 排除解除安裝、說明、網站捷徑等非 App 項目；判斷依目標型別（URL scheme／副檔名），不以名稱黑名單作唯一依據。
+
+#### FR-004a program-like item 判準
+
+Start Menu 與 AppsFolder **共用同一份判準**，集中於單一純值模組，兩個列舉器都必須經過它。判準無條件生效，不提供設定開關——使用者需要的是 app drawer，不是檔案瀏覽器。
+
+判斷輸入為該項目的 resolved target（Start Menu）或 parsing name（AppsFolder）：
+
+1. 字串**不含反斜線**時視為 AUMID，一律判為 program-like。AUMID 含點號但點號後方不是副檔名，**不得對它做副檔名判斷**（`Microsoft.WindowsCalculator_8wekyb3d8bbwe!App` 若天真取最後一個點，會被誤判成副檔名 `.windowscalculator_8wekyb3d8bbwe!app`）。
+2. 字串為 URL scheme（`scheme://`，`file:` 除外）時判為非 program-like。
+3. 其餘視為路徑，採**白名單**：僅 `.exe`、`.com`、`.bat`、`.cmd`、`.lnk`、`.appref-ms`、`.msc` 為 program-like，其他一律排除。
+4. 檔名主體為 `unins*` 者無論副檔名一律排除（解除安裝程式誤觸代價過高）。
+
+採白名單而非黑名單的理由：黑名單的語意是「除了列舉到的以外都算程式」，遇到未預期的文件型別時**靜默漏出**；白名單直接表達「預設只看得到程式」。代價是冷門可執行型別（`.ps1`、`.vbs`、`.wsf`）會被排除，已知並接受。
+
+此判準**不套用於 FR-005 的使用者自訂資料夾**。該來源的把關者是使用者自己勾選的副檔名清單；若對它二次過濾，使用者手動加入的副檔名會被無聲擋掉。
 
 ### FR-005 使用者自訂資料夾
 
@@ -320,9 +355,11 @@ struct AppEntry {
 ### FR-006 Microsoft Store／封裝 App
 
 - 透過 `FOLDERID_AppsFolder` 的 Shell namespace 列舉，不掃描 `WindowsApps` 目錄，不要求存取受保護檔案。
-- 保存 Shell parsing name 或等價的穩定啟動識別。
 - 顯示名稱與圖示由 Shell property／image API 取得。
 - 啟動交由 Shell，不直接尋找或執行封裝目錄內的 EXE。
+- 列舉出的每個子項目，取其 parsing name 作為 identity key 保存（§10.3），並依 FR-004a 判斷是否為 program-like item，非 program-like 者不進入 catalog。
+- **launch identity 為 `shell:AppsFolder\` 前綴加上該 parsing name。** parsing name 本身不是可啟動字串（§2.6）：AUMID 與 Known Folder GUID 相對路徑單獨交給 Shell 必定失敗，只有恰好是真實絕對路徑的少數項目會僥倖成功。前綴後所有項目都在 AppsFolder 命名空間內解析成功。
+- 列舉是否執行由設定「包含 Windows apps」控制（FR-013），關閉時整個來源跳過，不在項目上加旗標、不在查詢時過濾。預設開啟——關閉會使封裝 App 完全消失，它們沒有 Start Menu 捷徑可代替。
 
 ### FR-007 去重複
 
@@ -357,7 +394,8 @@ struct AppEntry {
 
 ### FR-010 App 啟動
 
-- 使用 Unicode 版本 `ShellExecuteExW` 或 Shell item verb。
+- 使用 Unicode 版本 `ShellExecuteExW` 或 Shell item verb，傳入 `AppEntry::launch_identity`。
+- 啟動層不對 launch identity 做任何加工。命名空間前綴等組裝工作屬於各 catalog 來源的責任（FR-006），啟動層假設拿到的字串已可直接使用。
 - UI 執行緒已初始化 STA COM：`COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE`。
 - 啟動成功後立即隱藏面板並更新統計。
 - 啟動失敗時保持面板顯示，呈現簡短錯誤及「重新整理」選項。
@@ -391,8 +429,11 @@ MVP 設定：
 - 啟動 App 後是否隱藏：預設開啟。
 - 清除使用紀錄。
 - 重設設定。
+- 包含 Windows apps（Start Menu 與已安裝 App）：預設開啟。關閉時跳過 AppsFolder 列舉。
 - 多個使用者自訂本機資料夾。
-- 受支援可啟動副檔名的勾選清單；預設全選 `.exe`、`.cmd`、`.bat`、`.lnk`、`.appref-ms`。
+- 受支援可啟動副檔名的勾選清單；預設全選 `.exe`、`.cmd`、`.bat`、`.lnk`、`.appref-ms`。此清單**只作用於使用者自訂資料夾**，設定介面必須讓這個範圍在視覺上明確，不可讓它看起來像全域設定。
+
+設定變更影響 catalog 來源時（新增／移除資料夾、副檔名清單、包含 Windows apps），標記受影響來源需完整重掃並背景重建（FR-008），不即時過濾既有 snapshot。
 
 設定頁不必使用獨立框架，可用原生 modal／property sheet 或同一自繪視窗中的簡單頁面。
 
@@ -673,7 +714,7 @@ flowchart TD
 ### 10.3 Stable ID
 
 - Start Menu 項目：以正規化 Shell parsing identity／resolved target 加必要參數產生 SHA-256 或穩定雜湊表示。
-- AppsFolder 項目：以 Shell parsing name／AUMID 產生。
+- AppsFolder 項目：以 Shell parsing name／AUMID 產生，**不含 `shell:AppsFolder\` 前綴**。identity key 與 launch identity 刻意脫鉤（§2.6）：前綴屬於啟動組裝，納入 hash 會使既有 pin 與使用紀錄在組裝規則調整時失效。
 - UserFolder `.exe`、`.cmd`、`.bat`：以正規化後的本機絕對路徑產生。
 - UserFolder `.lnk`、`.appref-ms`：以 Shell 可啟動的 canonical identity／resolved target 產生，保留必要的捷徑語意。
 - stable ID 不可依顯示名稱、圖示或目前排序產生。
@@ -787,7 +828,11 @@ Given NimbleRun 正在待機，When 使用者按下有效快捷鍵，Then 面板
 
 ### AC-002 常用面板
 
-Given 搜尋欄為空，When 面板顯示，Then 釘選 App 依自訂順序優先顯示，其後為不重複的常用 App。
+Given 搜尋欄為空，When 面板顯示，Then 以 icon grid 呈現：釘選 App 依自訂順序優先顯示，其後為不重複的常用 App，每格只有圖示與單行名稱，且 footer 左側顯示當前 active 或 hover 項目的完整路徑。
+
+### AC-002b 版面切換
+
+Given 面板處於空白查詢的格狀狀態，When 使用者輸入第一個非空白字元，Then 版面切換為單欄清單並顯示過濾結果；When 使用者把搜尋欄清空，Then 版面切回格狀。整個過程只在這一個切換點改變版面，且兩種狀態各自的可見範圍都回到頂端。
 
 ### AC-003 即時過濾
 

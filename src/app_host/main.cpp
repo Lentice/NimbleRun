@@ -25,6 +25,7 @@
 #include "settings/settings_store.h"
 #include "ui/panel_layout.h"
 #include "ui/panel_palette.h"
+#include "ui/quick_select.h"
 #include "usage/usage_store.h"
 
 #include <d2d1.h>
@@ -98,6 +99,9 @@ namespace footer_strings {
 constexpr wchar_t kScroll[] = L"Scroll";
 constexpr wchar_t kPageUp[] = L"PgUp";
 constexpr wchar_t kPageDown[] = L"PgDn";
+// NR-024: the Alt+digit quick-select hint group (design-spec §4.9).
+constexpr wchar_t kLaunch[] = L"Launch";
+constexpr wchar_t kAltOnePrefix[] = L"Alt+1~";
 } // namespace footer_strings
 
 // NR-022: centralized English strings for the launch-failure / open-location
@@ -671,7 +675,13 @@ void StartRebuild(HWND window, std::vector<nimblerun::CatalogSource> sources) {
                 result->entries = nimblerun::EnumerateStartMenuCatalog();
                 break;
             case nimblerun::CatalogSource::AppsFolder:
-                result->entries = nimblerun::EnumerateAppsFolderCatalog().entries;
+                // NR-028: "Include Windows apps" off skips the enumeration
+                // entirely (no COM walk) and the source reports empty, so the
+                // merged snapshot clears old packaged-app entries via the same
+                // ApplySourceResult path.
+                result->entries = g_settings.include_windows_apps
+                    ? nimblerun::EnumerateAppsFolderCatalog().entries
+                    : std::vector<nimblerun::AppEntry>{};
                 break;
             case nimblerun::CatalogSource::UserFolder:
                 result->entries = nimblerun::EnumerateUserFolderCatalog(g_settings);
@@ -748,6 +758,27 @@ void StartWatchers() {
     }
 
     g_watcher->SetRoots(roots, recursive);
+}
+
+// NR-024: one shared rounded key-box draw for the footer hints and the
+// per-row digit boxes (design-spec §4.9). The caller supplies the full DIP
+// rect; the footer keeps its right-to-left advance and the row loop passes
+// the box centered on the row. There is exactly one key-box paint path in the
+// repo.
+void DrawKeyBox(const wchar_t* label, const D2D1_RECT_F& box_rect) {
+    const auto box = D2D1::RoundedRect(
+        box_rect,
+        nimblerun::layout::kFooterKeyRadiusDip,
+        nimblerun::layout::kFooterKeyRadiusDip);
+    g_render_target->FillRoundedRectangle(box, g_card_brush);
+    g_render_target->DrawRoundedRectangle(box, g_dim_brush,
+                                          nimblerun::layout::kFooterDividerWidthDip);
+    g_render_target->DrawText(
+        label, static_cast<UINT32>(wcslen(label)), g_small_format,
+        D2D1::RectF(box_rect.left,
+                    box_rect.top + nimblerun::layout::kFooterTextInsetDip,
+                    box_rect.right, box_rect.bottom),
+        g_text_brush);
 }
 
 void Render(HWND window) {
@@ -876,7 +907,11 @@ void Render(HWND window) {
             // height.
             const float text_left =
                 tile_left + nimblerun::layout::kTileSizeDip + 8.0f;
-            const float text_right = nimblerun::layout::kListRightDip - 8.0f;
+            // NR-024: the name and second line unconditionally reserve the key
+            // hint column, so text width never jumps whether or not the row
+            // shows a digit (design-spec §4.9). Single-line + ellipsis below.
+            const float text_right =
+                nimblerun::layout::kListRightDip - nimblerun::layout::kRowHintReserveDip;
             const float row_mid = row_top + nimblerun::layout::kRowHeightDip / 2.0f;
             g_render_target->DrawText(
                 rows[i].display_name.c_str(),
@@ -895,6 +930,24 @@ void Render(HWND window) {
                 D2D1::RectF(text_left, row_mid, text_right,
                             row_top + nimblerun::layout::kRowHeightDip),
                 g_dim_brush);
+
+            // NR-024: per-row quick-select digit (design-spec §4.7/§4.9). The
+            // slot is the row's position in the viewport; rows beyond the
+            // 10-digit sequence get no box but keep the reserved text width.
+            const int slot = i - first;
+            if (const wchar_t* key_label = nimblerun::ui::QuickSelectLabelForSlot(slot)) {
+                const float box_left =
+                    nimblerun::layout::kListRightDip -
+                    nimblerun::layout::kRowKeyRightInsetDip -
+                    nimblerun::layout::kRowKeyBoxWidthDip;
+                DrawKeyBox(
+                    key_label,
+                    D2D1::RectF(
+                        box_left,
+                        row_mid - nimblerun::layout::kFooterKeyBoxHeightDip / 2.0f,
+                        box_left + nimblerun::layout::kRowKeyBoxWidthDip,
+                        row_mid + nimblerun::layout::kFooterKeyBoxHeightDip / 2.0f));
+            }
         }
 
         // NR-020 empty state (design-spec §4.3): the panel is never blank. A
@@ -915,9 +968,10 @@ void Render(HWND window) {
         }
     }
 
-    // NR-021: fixed footer key-hint band (design-spec §4.9). A 1 DIP divider
-    // then a right-aligned group of "Scroll" + PgUp/PgDn key boxes. Fixed
-    // content, not state-driven; no status, version or update text.
+    // NR-021 footer key-hint band (design-spec §4.9). A 1 DIP divider then a
+    // right-aligned "Launch" group + "Scroll"/PgUp/PgDn group. Only key hints
+    // live here; no status, version or update text. NR-024 adds the Launch
+    // group whose box text depends on the current viewport row count.
     const float footer_top = nimblerun::layout::kFooterTopDip;
     g_render_target->DrawLine(
         D2D1::Point2F(0.0f, footer_top),
@@ -930,50 +984,62 @@ void Render(HWND window) {
     const float box_top =
         footer_mid - nimblerun::layout::kFooterKeyBoxHeightDip / 2.0f;
     const float box_bottom = box_top + nimblerun::layout::kFooterKeyBoxHeightDip;
-    auto draw_key_box = [&](const wchar_t* label, float right) -> float {
-        const float left = right - nimblerun::layout::kFooterKeyBoxWidthDip;
-        const auto box = D2D1::RoundedRect(
-            D2D1::RectF(left, box_top, right, box_bottom),
-            nimblerun::layout::kFooterKeyRadiusDip,
-            nimblerun::layout::kFooterKeyRadiusDip);
-        g_render_target->FillRoundedRectangle(box, g_card_brush);
-        g_render_target->DrawRoundedRectangle(box, g_dim_brush,
-                                              nimblerun::layout::kFooterDividerWidthDip);
-        g_render_target->DrawText(
-            label, static_cast<UINT32>(wcslen(label)), g_small_format,
-            D2D1::RectF(left, box_top + nimblerun::layout::kFooterTextInsetDip,
-                        right, box_bottom),
-            g_text_brush);
+    // NR-024: the footer keeps its right-to-left advance; the paint itself is
+    // the file-scope DrawKeyBox shared with the per-row digit boxes.
+    auto draw_key_box = [&](const wchar_t* label, float right, float width) -> float {
+        const float left = right - width;
+        DrawKeyBox(label, D2D1::RectF(left, box_top, right, box_bottom));
         return left;
     };
 
     float right = nimblerun::layout::kListRightDip;
-    right = draw_key_box(footer_strings::kPageDown, right);
+    right = draw_key_box(footer_strings::kPageDown, right,
+                         nimblerun::layout::kFooterKeyBoxWidthDip);
     right -= nimblerun::layout::kFooterKeyGapDip;
-    right = draw_key_box(footer_strings::kPageUp, right);
+    right = draw_key_box(footer_strings::kPageUp, right,
+                         nimblerun::layout::kFooterKeyBoxWidthDip);
     right -= nimblerun::layout::kFooterHintGapDip;
 
-    // The "Scroll" label is right-aligned to the first key box: measure the
-    // text once per frame and draw it ending at `right` so the group hugs the
-    // right edge (the shared formats stay left-aligned for the list rows).
-    IDWriteTextLayout* scroll_layout = nullptr;
-    if (SUCCEEDED(g_write_factory->CreateTextLayout(
-            footer_strings::kScroll,
-            static_cast<UINT32>(wcslen(footer_strings::kScroll)),
-            g_small_format, 1000.0f, 1000.0f, &scroll_layout))) {
-        DWRITE_TEXT_METRICS scroll_metrics{};
-        if (SUCCEEDED(scroll_layout->GetMetrics(&scroll_metrics))) {
-            g_render_target->DrawText(
-                footer_strings::kScroll,
-                static_cast<UINT32>(wcslen(footer_strings::kScroll)),
-                g_small_format,
-                D2D1::RectF(right - scroll_metrics.width,
-                            box_top + nimblerun::layout::kFooterTextInsetDip,
-                            right, box_bottom),
-                g_dim_brush);
+    // The "Scroll" and "Launch" labels are right-aligned to the key box that
+    // follows them: measure the text once per frame and draw it ending at
+    // `right` so the group hugs the right edge (the shared formats stay
+    // left-aligned for the list rows).
+    auto draw_right_label = [&](const wchar_t* label, float label_right) {
+        IDWriteTextLayout* label_layout = nullptr;
+        if (SUCCEEDED(g_write_factory->CreateTextLayout(
+                label, static_cast<UINT32>(wcslen(label)), g_small_format,
+                1000.0f, 1000.0f, &label_layout))) {
+            DWRITE_TEXT_METRICS label_metrics{};
+            if (SUCCEEDED(label_layout->GetMetrics(&label_metrics))) {
+                g_render_target->DrawText(
+                    label, static_cast<UINT32>(wcslen(label)), g_small_format,
+                    D2D1::RectF(label_right - label_metrics.width,
+                                box_top + nimblerun::layout::kFooterTextInsetDip,
+                                label_right, box_bottom),
+                    g_dim_brush);
+            }
+            label_layout->Release();
         }
-        scroll_layout->Release();
+    };
+
+    draw_right_label(footer_strings::kScroll, right);
+
+    // NR-024: "Launch" group to the left of "Scroll", separated by the hint
+    // gap. The wide box content is "Alt+1~" followed by the last digit bound
+    // to the current viewport (8 visible rows -> Alt+1~8, >=10 -> Alt+1~0);
+    // built per frame since the viewport can change.
+    right -= nimblerun::layout::kFooterHintGapDip;
+    const int last_slot =
+        std::min(g_model ? g_model->ViewportRows() : 0,
+                 nimblerun::ui::kQuickSelectSlotCount) - 1;
+    std::wstring alt_label(footer_strings::kAltOnePrefix);
+    if (const wchar_t* last_label = nimblerun::ui::QuickSelectLabelForSlot(last_slot)) {
+        alt_label += last_label;
     }
+    right = draw_key_box(alt_label.c_str(), right,
+                         nimblerun::layout::kFooterWideKeyBoxWidthDip);
+    right -= nimblerun::layout::kFooterKeyGapDip;
+    draw_right_label(footer_strings::kLaunch, right);
 
     const HRESULT result = g_render_target->EndDraw();
     if (result == D2DERR_RECREATE_TARGET) {
@@ -1037,8 +1103,10 @@ void ShowPanel(HWND window) {
     g_requested_icon_keys.clear();
     // NR-011: AppsFolder is on-demand — when the panel is shown and the last
     // successful enumeration is older than 10 minutes, rebuild it in the
-    // background; no polling and never a blocking scan on this path.
-    if (g_refresh && g_refresh->ShouldRefreshAppsFolder(MonotonicMs())) {
+    // background; no polling and never a blocking scan on this path. NR-028:
+    // "Include Windows apps" off schedules nothing here.
+    if (g_refresh && g_settings.include_windows_apps &&
+        g_refresh->ShouldRefreshAppsFolder(MonotonicMs())) {
         StartRebuild(window, {nimblerun::CatalogSource::AppsFolder});
     }
     if (g_search_edit) {
@@ -1199,6 +1267,36 @@ LRESULT CALLBACK SearchEditProc(HWND edit, UINT message, WPARAM w_param, LPARAM 
         CallWindowProcW(g_search_original_proc, edit, message, w_param, l_param);
         DestroyCaret();
         return 0;
+    case WM_SYSKEYDOWN:
+        // NR-024: Alt+digit directly launches the corresponding visible row,
+        // exactly like Enter on that row (design-spec §4.7; reuses the same
+        // ActivateRow usage/hide-after-launch/NR-022 failure path). Bit 29 of
+        // lParam is the ALT state; Ctrl+Alt and unbound combos like Alt+Space
+        // keep their default processing.
+        if ((l_param & (1 << 29)) != 0 && GetKeyState(VK_CONTROL) >= 0 &&
+            g_model != nullptr) {
+            const int slot = nimblerun::ui::QuickSelectSlotForKey(
+                static_cast<int>(w_param));
+            if (slot >= 0) {
+                const int row = g_model->RowForVisibleSlot(slot);
+                if (row >= 0) {
+                    g_model->SelectRow(static_cast<std::size_t>(row));
+                    ActivateRow(static_cast<std::size_t>(row), GetParent(edit));
+                }
+                // A bound digit never beeps, even when no row maps to it.
+                return 0;
+            }
+        }
+        break;  // unbound (e.g. Alt+Space) -> default processing
+    case WM_SYSCHAR:
+        // NR-024: swallow the system beep for the 10 bound digits; the
+        // WM_SYSKEYDOWN above already handled the launch. Everything else
+        // falls through to the default.
+        if ((l_param & (1 << 29)) != 0 &&
+            nimblerun::ui::QuickSelectSlotForKey(static_cast<int>(w_param)) >= 0) {
+            return 0;
+        }
+        break;
     case WM_KEYDOWN:
         if (g_model) {
             switch (w_param) {

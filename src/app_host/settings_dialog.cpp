@@ -58,11 +58,13 @@ void InitLabels(HWND dialog) {
     SetControlText(dialog, IDC_HIDE_AFTER_LAUNCH, SettingsString::HideAfterLaunchLabel);
     SetControlText(dialog, IDC_AUTO_START, SettingsString::StartupAutoStartLabel);
     SetControlText(dialog, IDC_THEME_LABEL, SettingsString::ThemeLabel);
-    SetControlText(dialog, IDC_FOLDERS_GROUP, SettingsString::UserFoldersGroup);
+    SetControlText(dialog, IDC_CATALOG_SOURCES_GROUP, SettingsString::CatalogSourcesGroup);
+    SetControlText(dialog, IDC_INCLUDE_WINDOWS_APPS, SettingsString::IncludeWindowsAppsLabel);
+    SetControlText(dialog, IDC_FOLDERS_LABEL, SettingsString::UserFoldersLabel);
     SetControlText(dialog, IDC_ADD_FOLDER, SettingsString::AddFolderButton);
     SetControlText(dialog, IDC_REMOVE_FOLDER, SettingsString::RemoveFolderButton);
     SetControlText(dialog, IDC_FOLDER_RECURSIVE, SettingsString::IncludeSubfolders);
-    SetControlText(dialog, IDC_EXTENSIONS_GROUP, SettingsString::ExtensionsGroup);
+    SetControlText(dialog, IDC_EXTENSIONS_LABEL, SettingsString::ExtensionsLabel);
     SetControlText(dialog, IDC_CLEAR_USAGE, SettingsString::ClearUsageButton);
     SetControlText(dialog, IDC_RESET_SETTINGS, SettingsString::ResetSettingsButton);
     SetControlText(dialog, IDOK, SettingsString::OkButton);
@@ -92,6 +94,8 @@ void Populate(HWND dialog, const Settings& settings) {
                     std::to_wstring(settings.recent_count).c_str());
     CheckDlgButton(dialog, IDC_HIDE_AFTER_LAUNCH,
                    settings.hide_after_launch ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(dialog, IDC_INCLUDE_WINDOWS_APPS,
+                   settings.include_windows_apps ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(dialog, IDC_AUTO_START,
                    settings.auto_start ? BST_CHECKED : BST_UNCHECKED);
 
@@ -206,6 +210,11 @@ INT_PTR CALLBACK SettingsDialogProc(HWND dialog, UINT message, WPARAM w_param, L
         case IDC_HIDE_AFTER_LAUNCH:
             g_dialog.editor->SetHideAfterLaunch(
                 IsDlgButtonChecked(dialog, IDC_HIDE_AFTER_LAUNCH) == BST_CHECKED);
+            return TRUE;
+
+        case IDC_INCLUDE_WINDOWS_APPS:
+            g_dialog.editor->SetIncludeWindowsApps(
+                IsDlgButtonChecked(dialog, IDC_INCLUDE_WINDOWS_APPS) == BST_CHECKED);
             return TRUE;
 
         case IDC_AUTO_START:

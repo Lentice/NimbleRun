@@ -1,3 +1,4 @@
+#include "catalog/app_filter.h"
 #include "catalog/stable_id.h"
 #include "catalog/start_menu_catalog.h"
 
@@ -10,7 +11,6 @@
 #include <shtypes.h>
 #include <knownfolders.h>
 
-#include <cwctype>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -18,63 +18,9 @@
 namespace nimblerun {
 namespace {
 
-std::wstring ToLower(std::wstring_view value) {
-    std::wstring out;
-    out.reserve(value.size());
-    for (const wchar_t c : value) {
-        out.push_back(static_cast<wchar_t>(towlower(static_cast<wint_t>(c))));
-    }
-    return out;
-}
-
-std::wstring_view FileName(std::wstring_view path) {
-    const std::size_t slash = path.find_last_of(L"/\\");
-    return slash == std::wstring_view::npos ? path : path.substr(slash + 1);
-}
-
-// File name without the final extension, e.g. "Notepad.lnk" -> "Notepad".
-std::wstring FileStem(std::wstring_view path) {
-    const std::wstring_view name = FileName(path);
-    const std::size_t dot = name.find_last_of(L'.');
-    return std::wstring(dot == std::wstring_view::npos ? name : name.substr(0, dot));
-}
-
-// Lowercased extension including the dot, or empty when none. A trailing dot in
-// a directory name is not treated as an extension.
-std::wstring Extension(std::wstring_view path) {
-    const std::wstring_view name = FileName(path);
-    const std::size_t dot = name.find_last_of(L'.');
-    if (dot == std::wstring_view::npos) {
-        return {};
-    }
-    return ToLower(name.substr(dot));
-}
-
 bool AcceptExtension(std::wstring_view path) {
     const std::wstring ext = Extension(path);
     return ext == L".lnk" || ext == L".appref-ms" || ext == L".exe";
-}
-
-// "scheme://..." with a valid RFC scheme prefix.
-bool IsUrlTarget(std::wstring_view target) {
-    const std::size_t colon = target.find(L':');
-    if (colon == std::wstring_view::npos || colon == 0) {
-        return false;
-    }
-    const wchar_t first = target[0];
-    const bool alpha = (first >= L'a' && first <= L'z') || (first >= L'A' && first <= L'Z');
-    if (!alpha) {
-        return false;
-    }
-    for (std::size_t i = 1; i < colon; ++i) {
-        const wchar_t c = target[i];
-        const bool valid = (c >= L'a' && c <= L'z') || (c >= L'A' && c <= L'Z') ||
-                           (c >= L'0' && c <= L'9') || c == L'+' || c == L'-' || c == L'.';
-        if (!valid) {
-            return false;
-        }
-    }
-    return target.compare(colon, 3, L"://") == 0;
 }
 
 // SIGDN_URL gives a file:/// URI for local files and the real URL for website
@@ -106,24 +52,6 @@ bool ShortcutIsWeb(IShellLinkW& link) {
     }
     CoTaskMemFree(pidl);
     return web;
-}
-
-// Conservative FR-004 filter: drop website, help, and uninstaller targets. The
-// target type (URL scheme / document extension) is the primary signal, not a
-// name-only blacklist.
-bool LooksLikeNonAppTarget(std::wstring_view resolved_target) {
-    if (IsUrlTarget(resolved_target)) {
-        return true;
-    }
-    const std::wstring ext = Extension(resolved_target);
-    if (ext == L".chm" || ext == L".hlp" || ext == L".html" || ext == L".htm") {
-        return true;
-    }
-    const std::wstring stem = ToLower(FileStem(resolved_target));
-    if (stem == L"uninstall" || stem == L"uninstaller" || stem.compare(0, 5, L"unins") == 0) {
-        return true;
-    }
-    return false;
 }
 
 class ComGuard {
@@ -200,7 +128,10 @@ void ProcessFile(const std::wstring& path, AppSource source, std::vector<AppEntr
         if (link.web) {
             return;  // website shortcut (FR-004)
         }
-        if (!link.target.empty() && LooksLikeNonAppTarget(link.target)) {
+        // NR-028: the shared program-like filter (FR-004a) replaces the old
+        // local blacklist. An empty target is skipped here on purpose so a
+        // loadable .lnk whose target cannot be resolved stays in the catalog.
+        if (!link.target.empty() && !IsProgramLikeTarget(link.target)) {
             return;
         }
     }

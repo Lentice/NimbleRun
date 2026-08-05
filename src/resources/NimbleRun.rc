@@ -7,17 +7,17 @@ LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
 1 RT_MANIFEST "NimbleRun.manifest"
 IDI_NIMBLERUN ICON "NimbleRun.ico"
 
-IDD_SETTINGS DIALOGEX 0, 0, 300, 350
+IDD_SETTINGS DIALOGEX 0, 0, 320, 366
 STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "NimbleRun Settings"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
-    GROUPBOX        "Global hotkey", IDC_HOTKEY_GROUP, 8, 6, 284, 46
+    GROUPBOX        "Global hotkey", IDC_HOTKEY_GROUP, 8, 6, 304, 46
     LTEXT           "Shortcut:", IDC_HOTKEY_LABEL, 16, 18, 44, 10
     EDITTEXT        IDC_HOTKEY_EDIT, 64, 16, 120, 13, ES_AUTOHSCROLL
-    LTEXT           "Alt+Space, Ctrl+Alt+Space, ...", IDC_HOTKEY_HINT, 64, 34, 220, 10
+    LTEXT           "Alt+Space, Ctrl+Alt+Space, ...", IDC_HOTKEY_HINT, 64, 34, 240, 10
 
-    GROUPBOX        "Launcher", IDC_LAUNCHER_GROUP, 8, 58, 284, 100
+    GROUPBOX        "Launcher", IDC_LAUNCHER_GROUP, 8, 58, 304, 100
     LTEXT           "Recent apps to show (8-40):", IDC_RECENT_LABEL, 16, 72, 120, 10
     EDITTEXT        IDC_RECENT_COUNT_EDIT, 140, 70, 40, 13, ES_NUMBER
     CONTROL         "Hide after launching an app", IDC_HIDE_AFTER_LAUNCH, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 16, 92, 180, 12
@@ -25,23 +25,24 @@ BEGIN
     LTEXT           "Theme:", IDC_THEME_LABEL, 16, 130, 40, 10
     COMBOBOX        IDC_THEME_COMBO, 140, 128, 100, 60, CBS_DROPDOWNLIST | WS_TABSTOP
 
-    GROUPBOX        "User folders", IDC_FOLDERS_GROUP, 8, 164, 284, 72
-    LISTBOX         IDC_FOLDERS_LIST, 16, 176, 182, 52, LBS_NOINTEGRALHEIGHT | WS_TABSTOP | WS_VSCROLL
-    PUSHBUTTON      "Add...", IDC_ADD_FOLDER, 206, 176, 78, 13
-    PUSHBUTTON      "Remove", IDC_REMOVE_FOLDER, 206, 194, 78, 13
-    CONTROL         "Include subfolders", IDC_FOLDER_RECURSIVE, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 16, 232, 130, 12
+    GROUPBOX        "Catalog sources", IDC_CATALOG_SOURCES_GROUP, 8, 164, 304, 160
+    CONTROL         "Include Windows apps (Start Menu and installed apps)", IDC_INCLUDE_WINDOWS_APPS, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 16, 176, 288, 12
+    LTEXT           "User folders:", IDC_FOLDERS_LABEL, 16, 192, 80, 10
+    LISTBOX         IDC_FOLDERS_LIST, 16, 204, 182, 52, LBS_NOINTEGRALHEIGHT | WS_TABSTOP | WS_VSCROLL
+    PUSHBUTTON      "Add...", IDC_ADD_FOLDER, 206, 204, 78, 13
+    PUSHBUTTON      "Remove", IDC_REMOVE_FOLDER, 206, 222, 78, 13
+    CONTROL         "Include subfolders", IDC_FOLDER_RECURSIVE, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 16, 258, 130, 12
+    LTEXT           "Extensions to scan in user folders:", IDC_EXTENSIONS_LABEL, 16, 276, 288, 10
+    CONTROL         ".exe", IDC_EXT_EXE, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 16, 288, 60, 12
+    CONTROL         ".cmd", IDC_EXT_CMD, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 80, 288, 60, 12
+    CONTROL         ".bat", IDC_EXT_BAT, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 144, 288, 60, 12
+    CONTROL         ".lnk", IDC_EXT_LNK, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 208, 288, 60, 12
+    CONTROL         ".appref-ms", IDC_EXT_APPREF, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 16, 304, 70, 12
 
-    GROUPBOX        "Extensions to scan", IDC_EXTENSIONS_GROUP, 8, 242, 284, 56
-    CONTROL         ".exe", IDC_EXT_EXE, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 16, 256, 60, 12
-    CONTROL         ".cmd", IDC_EXT_CMD, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 80, 256, 60, 12
-    CONTROL         ".bat", IDC_EXT_BAT, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 144, 256, 60, 12
-    CONTROL         ".lnk", IDC_EXT_LNK, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 208, 256, 60, 12
-    CONTROL         ".appref-ms", IDC_EXT_APPREF, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 16, 272, 70, 12
+    PUSHBUTTON      "Clear usage history", IDC_CLEAR_USAGE, 8, 330, 100, 14
+    PUSHBUTTON      "Reset settings", IDC_RESET_SETTINGS, 124, 330, 80, 14
+    PUSHBUTTON      "Cancel", IDCANCEL, 208, 330, 50, 14
+    DEFPUSHBUTTON   "OK", IDOK, 262, 330, 50, 14
 
-    PUSHBUTTON      "Clear usage history", IDC_CLEAR_USAGE, 16, 308, 110, 14
-    PUSHBUTTON      "Reset settings", IDC_RESET_SETTINGS, 132, 308, 90, 14
-    DEFPUSHBUTTON   "OK", IDOK, 232, 308, 60, 14
-    PUSHBUTTON      "Cancel", IDCANCEL, 168, 326, 60, 14
-
-    LTEXT           "", IDC_STATUS, 8, 330, 284, 20
+    LTEXT           "", IDC_STATUS, 8, 348, 304, 10
 END

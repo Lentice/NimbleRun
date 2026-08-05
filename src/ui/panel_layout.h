@@ -25,6 +25,15 @@ constexpr float kFooterKeyRadiusDip = 3.0f;
 constexpr float kFooterKeyGapDip = 8.0f;
 constexpr float kFooterHintGapDip = 12.0f;  // "Scroll" label to the first key box
 constexpr float kFooterTextInsetDip = 3.0f;  // text top padding inside a key box
+// NR-024: per-row quick-select digit box geometry (design-spec §4.9). The name
+// and second-line width unconditionally reserve kRowHintReserveDip so text
+// width never jumps whether or not a row shows a digit.
+constexpr float kRowKeyBoxWidthDip = 20.0f;
+constexpr float kRowKeyRightInsetDip = 8.0f;   // box right edge from kListRightDip
+constexpr float kRowKeyGapDip = 8.0f;          // box left edge from the text right edge
+constexpr float kRowHintReserveDip = kRowKeyBoxWidthDip + kRowKeyRightInsetDip + kRowKeyGapDip;
+// NR-024: the footer "Alt+1~N" box is wider than the short PgUp/PgDn boxes.
+constexpr float kFooterWideKeyBoxWidthDip = 56.0f;
 constexpr float kSearchLeftDip = 16.0f;
 constexpr float kSearchTopDip = 16.0f;
 constexpr float kSearchRightDip = 624.0f;

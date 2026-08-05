@@ -139,8 +139,12 @@ std::wstring_view SettingsStringText(SettingsString key) {
         return L"Light";
     case SettingsString::ThemeDark:
         return L"Dark";
-    case SettingsString::UserFoldersGroup:
-        return L"User folders";
+    case SettingsString::CatalogSourcesGroup:
+        return L"Catalog sources";
+    case SettingsString::IncludeWindowsAppsLabel:
+        return L"Include Windows apps (Start Menu and installed apps)";
+    case SettingsString::UserFoldersLabel:
+        return L"User folders:";
     case SettingsString::AddFolderButton:
         return L"Add...";
     case SettingsString::RemoveFolderButton:
@@ -149,8 +153,8 @@ std::wstring_view SettingsStringText(SettingsString key) {
         return L"Choose a local folder to scan";
     case SettingsString::IncludeSubfolders:
         return L"Include subfolders";
-    case SettingsString::ExtensionsGroup:
-        return L"Extensions to scan";
+    case SettingsString::ExtensionsLabel:
+        return L"Extensions to scan in user folders:";
     case SettingsString::ClearUsageButton:
         return L"Clear usage history";
     case SettingsString::ResetSettingsButton:
@@ -293,6 +297,14 @@ bool SettingsEditor::SetTheme(Theme theme) {
 bool SettingsEditor::SetHideAfterLaunch(bool hide) {
     if (hide != working_.hide_after_launch) {
         working_.hide_after_launch = hide;
+        dirty_ = true;
+    }
+    return true;
+}
+
+bool SettingsEditor::SetIncludeWindowsApps(bool enabled) {
+    if (enabled != working_.include_windows_apps) {
+        working_.include_windows_apps = enabled;
         dirty_ = true;
     }
     return true;

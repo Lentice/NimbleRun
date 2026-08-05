@@ -118,6 +118,14 @@ void PanelModel::ScrollBy(int delta_rows) {
     selected_ = first_visible_;
 }
 
+int PanelModel::RowForVisibleSlot(int slot) const {
+    if (slot < 0 || slot >= viewport_rows_) {
+        return -1;
+    }
+    const int row = first_visible_ + slot;
+    return row < static_cast<int>(rows_.size()) ? row : -1;
+}
+
 void PanelModel::SelectRow(std::size_t index) {
     if (index >= rows_.size()) {
         return;

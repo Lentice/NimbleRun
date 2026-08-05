@@ -1,9 +1,11 @@
 #include "app_host/panel_model.h"
 #include "ui/panel_layout.h"
 #include "ui/panel_palette.h"
+#include "ui/quick_select.h"
 
 #include <cstdio>
 #include <cstdlib>
+#include <cwchar>
 #include <string>
 #include <vector>
 
@@ -13,10 +15,21 @@ using nimblerun::PanelModel;
 using nimblerun::Theme;
 using nimblerun::layout::ClampWindowSize;
 using nimblerun::layout::LayoutForDpi;
+using nimblerun::layout::kListLeftDip;
+using nimblerun::layout::kListRightDip;
+using nimblerun::layout::kRowHintReserveDip;
+using nimblerun::layout::kRowKeyBoxWidthDip;
+using nimblerun::layout::kRowKeyGapDip;
+using nimblerun::layout::kRowKeyRightInsetDip;
+using nimblerun::layout::kTileSizeDip;
 using nimblerun::palette::PanelColors;
 using nimblerun::palette::ResolveColors;
 using nimblerun::palette::Rgb;
 using nimblerun::palette::SystemColors;
+using nimblerun::ui::QuickSelectLabelForSlot;
+using nimblerun::ui::QuickSelectSlotForKey;
+using nimblerun::ui::kQuickSelectDigits;
+using nimblerun::ui::kQuickSelectSlotCount;
 
 namespace {
 
@@ -265,6 +278,52 @@ void TestSearchFieldColors() {
     Expect(hc.input_fill != hc.input_border, "high contrast border distinct from fill");
 }
 
+// NR-024: the Alt+digit key sequence is pure header-only state: the slot
+// mapping, the static labels and the reserved row width are all testable
+// without a window (design-spec §4.7/§4.9).
+
+void TestQuickSelectSlotForKey() {
+    Expect(QuickSelectSlotForKey('1') == 0, "'1' maps to slot 0");
+    Expect(QuickSelectSlotForKey('5') == 4, "'5' maps to slot 4");
+    Expect(QuickSelectSlotForKey('9') == 8, "'9' maps to slot 8");
+    Expect(QuickSelectSlotForKey('0') == 9, "'0' maps to slot 9");
+    Expect(QuickSelectSlotForKey('A') == -1, "letter is not a quick-select key");
+    Expect(QuickSelectSlotForKey(0) == -1, "NUL is not a quick-select key");
+    Expect(QuickSelectSlotForKey(0x60) == -1, "VK_NUMPAD0 is not a quick-select key");
+}
+
+void TestQuickSelectLabelForSlot() {
+    Expect(std::wcscmp(QuickSelectLabelForSlot(0), L"1") == 0, "slot 0 label is '1'");
+    Expect(std::wcscmp(QuickSelectLabelForSlot(8), L"9") == 0, "slot 8 label is '9'");
+    Expect(std::wcscmp(QuickSelectLabelForSlot(9), L"0") == 0, "slot 9 label is '0'");
+    Expect(QuickSelectLabelForSlot(10) == nullptr, "slot 10 has no label");
+    Expect(QuickSelectLabelForSlot(-1) == nullptr, "negative slot has no label");
+}
+
+void TestQuickSelectDigitsUnique() {
+    Expect(kQuickSelectSlotCount == 10, "quick-select slot count is 10");
+    const std::size_t length = std::char_traits<wchar_t>::length(kQuickSelectDigits);
+    Expect(length == 10, "kQuickSelectDigits has exactly 10 characters");
+    bool seen[10] = {};
+    for (std::size_t i = 0; i < length; ++i) {
+        const wchar_t c = kQuickSelectDigits[i];
+        const int digit = (c >= L'1' && c <= L'9') ? c - L'1' : 9;
+        Expect(digit >= 0 && digit < 10, "digit label maps to a valid slot");
+        Expect(!seen[static_cast<std::size_t>(digit)],
+               "kQuickSelectDigits has no duplicate characters");
+        seen[static_cast<std::size_t>(digit)] = true;
+    }
+}
+
+void TestRowHintReserveWidth() {
+    Expect(kRowHintReserveDip ==
+               kRowKeyBoxWidthDip + kRowKeyRightInsetDip + kRowKeyGapDip,
+           "row hint reserve is box + right inset + gap");
+    Expect(kRowHintReserveDip == 36.0f, "row hint reserve is 36 DIP");
+    Expect(kListLeftDip + kTileSizeDip + kRowHintReserveDip < kListRightDip,
+           "app name still has positive width beside the key hint");
+}
+
 }  // namespace
 
 int wmain() {
@@ -282,6 +341,10 @@ int wmain() {
     TestSearchFieldScalingTo200Percent();
     TestEditRectInsideSearchBox();
     TestSearchFieldColors();
-    std::printf("NR-015 dpi/theme/accessibility check PASSED\n");
+    TestQuickSelectSlotForKey();
+    TestQuickSelectLabelForSlot();
+    TestQuickSelectDigitsUnique();
+    TestRowHintReserveWidth();
+    std::printf("NR-015/NR-024 dpi/theme/accessibility check PASSED\n");
     return 0;
 }

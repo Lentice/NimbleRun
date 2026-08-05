@@ -1,5 +1,6 @@
 #include "catalog/appsfolder_catalog.h"
 
+#include "catalog/app_filter.h"
 #include "catalog/stable_id.h"
 
 #include <windows.h>
@@ -56,14 +57,23 @@ bool BuildAppsFolderEntry(const std::wstring& display_name,
     if (display_name.empty() || parsing_name.empty()) {
         return false;  // unusable child: caller skips and counts the failure
     }
+    // NR-028: only program-like children enter the catalog (FR-004a, shared
+    // with the Start Menu source). Documents, websites and uninstallers that
+    // leak through AppsFolder are excluded; the caller skips and counts them.
+    if (!IsProgramLikeTarget(parsing_name)) {
+        return false;
+    }
     out = AppEntry{};
     out.display_name = display_name;
-    // The Shell parsing name is the canonical launch identity NR-008 can hand to
-    // the Shell, and the identity a later icon query can resolve. Packaged apps
-    // have no filesystem path, so it doubles as source_path.
-    out.launch_identity = parsing_name;
+    // NR-028: the launch identity is the AppsFolder namespace prefix plus the
+    // child's parsing name (design-spec §FR-006). The bare parsing name is not
+    // Shell-launchable on its own: AUMIDs and Known Folder GUID-relative paths
+    // resolve only inside the AppsFolder namespace.
+    out.launch_identity = L"shell:AppsFolder\\" + parsing_name;
     out.source_path = parsing_name;
     out.source = AppSource::AppsFolder;
+    // Identity key stays the bare parsing name (design-spec §10.3): the prefix
+    // is launch-assembly, not identity, so pins and usage survive unchanged.
     out.stable_id = HashStableId(NormalizePathKey(parsing_name));
     return true;
 }
