@@ -298,6 +298,31 @@ endif()
 
 add_test(NAME nimblerun_icons_cache_test COMMAND nimblerun_icons_cache_test)
 
+add_executable(nimblerun_icon_pack_format_test
+    unit/icon_pack_format_test.cpp
+)
+
+target_link_libraries(nimblerun_icon_pack_format_test PRIVATE nimblerun_icons)
+
+target_compile_definitions(nimblerun_icon_pack_format_test
+    PRIVATE
+        UNICODE
+        _UNICODE
+        WIN32_LEAN_AND_MEAN
+        NOMINMAX
+        WINVER=0x0A00
+        _WIN32_WINNT=0x0A00
+)
+
+if(MSVC OR CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
+    target_compile_options(nimblerun_icon_pack_format_test PRIVATE /W4 /permissive- /EHsc)
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    target_compile_options(nimblerun_icon_pack_format_test PRIVATE -Wall -Wextra -Wpedantic)
+    target_link_options(nimblerun_icon_pack_format_test PRIVATE -municode -static)
+endif()
+
+add_test(NAME nimblerun_icon_pack_format_test COMMAND nimblerun_icon_pack_format_test)
+
 add_executable(nimblerun_dpi_theme_accessibility_test
     unit/ui_palette_layout_test.cpp
 )
