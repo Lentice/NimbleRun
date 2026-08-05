@@ -9,6 +9,7 @@ enum class AppSource : std::uint8_t {
     UserStartMenu,
     CommonStartMenu,
     AppsFolder,
+    UserFolder,
 };
 
 struct AppEntry {

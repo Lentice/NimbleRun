@@ -4,7 +4,7 @@
 
 | 欄位 | 內容 |
 |---|---|
-| 文件版本 | 1.0 |
+| 文件版本 | 1.1 |
 | 產品暫定名稱 | NimbleRun |
 | 文件狀態 | MVP 開發基準 |
 | 目標平台 | Windows 10 22H2／Windows 11，x64 |
@@ -30,7 +30,7 @@
 
 ### 2.1 一句話定位
 
-NimbleRun 是介於 Windows 開始功能表與 Wox 類搜尋器之間的極輕量 App Drawer：空白時呈現常用 App 圖示，輸入時在同一面板即時過濾所有已安裝 App。
+NimbleRun 是介於 Windows 開始功能表與 Wox 類搜尋器之間的極輕量 App Drawer：空白時呈現常用 App 圖示，輸入時在同一面板即時過濾 Catalog 中已設定來源的可啟動 App。
 
 ### 2.2 核心使用情境
 
@@ -76,11 +76,12 @@ MVP 必須證明以下三件事：
 - 常用 App 圖示網格。
 - 釘選／取消釘選 App。
 - 依啟動次數與最近使用時間排列未釘選常用 App。
-- 輸入時即時過濾已安裝 App。
+- 輸入時即時過濾 Catalog 中的可啟動 App。
 - 滑鼠、鍵盤與觸控板操作。
 - 啟動 Win32、捷徑與 Microsoft Store／封裝 App。
+- 使用者可加入多個本機資料夾，搜尋其中受支援的可啟動檔案類型。
 - 自動取得 App 名稱與圖示。
-- Start Menu 變更後更新索引。
+- Start Menu 或使用者自訂資料夾變更後更新索引。
 - 手動重新整理 App 目錄。
 - 開機自動啟動選項。
 - 淺色／深色模式跟隨系統。
@@ -90,7 +91,7 @@ MVP 必須證明以下三件事：
 
 ### 3.2 明確不包含
 
-- 檔案、資料夾或檔案內容搜尋。
+- 任意檔案、資料夾或檔案內容搜尋；只掃描使用者明確加入的資料夾及可啟動副檔名。
 - 網頁與搜尋引擎整合。
 - 計算器、命令列、Shell 指令或自訂動作。
 - 外掛系統或腳本執行。
@@ -116,7 +117,7 @@ MVP 必須證明以下三件事：
 3. 面板出現在目前游標所在螢幕的工作區中央。
 4. 搜尋欄取得鍵盤焦點；欄位為空。
 5. 面板顯示釘選 App，其後顯示常用 App。
-6. 使用者點擊圖示，或開始輸入搜尋。
+6. 使用者點擊清單項目，或開始輸入搜尋。
 7. 成功啟動 App 後，NimbleRun 隱藏並更新本機使用紀錄。
 
 `Alt+Space` 可能與其他 Launcher 衝突。首次註冊失敗時不得攔截或覆寫其他程式；應顯示一次非阻擋提示，要求使用者在設定中選擇其他組合。不得靜默改用候選鍵；設定頁可提供 `Ctrl+Alt+Space` 作為建議值。
@@ -134,16 +135,17 @@ MVP 不覆寫 Windows 或其他程式的系統快捷鍵。包含 Windows 鍵、�
 規則：
 
 - 同一 App 不可重複出現。
-- 預設最多顯示 20 個圖示，依視窗寬度自動換行。
-- 若所有項目可在一頁呈現，不顯示捲軸。
-- App 名稱最多兩行；超出時使用省略號並提供 Tooltip。
+- 呈現方式為單欄垂直清單：每列左側為圖示，右側上行為 App 名稱、下行為來源路徑。
+- 沒有檔案系統路徑的 packaged App，下行顯示來源標籤而非 Shell parsing name。
+- 每列文字各限一行，超出寬度以尾端省略號截斷；不換行、不因文字長度改變列高。
+- 清單一次只顯示可見容量的列；超出時以 `PgUp`／`PgDn` 或滾輪翻頁，不顯示捲軸。
 
 ### 4.3 搜尋狀態
 
 只要搜尋欄包含非空白字元：
 
 - 常用清單立即切換為完整 App Catalog 的過濾結果。
-- 結果仍使用圖示網格，不切換成另一種頁面或混合清單。
+- 結果沿用同一份單欄清單版面，不切換成另一種頁面或混合呈現。
 - 第一個結果自動選取，但不可因選取而自動執行。
 - 每次輸入變更後同步計算；若未來 Catalog 超過 5,000 筆或量測超標，再改用背景工作執行緒。
 - 無結果時顯示「找不到 App」，不得建議網路搜尋。
@@ -200,17 +202,20 @@ usage_score = launch_count_30d + 3 × launch_count_7d + recency_bonus
 |---|---|
 | 全域快捷鍵 | 顯示／隱藏面板 |
 | 文字輸入 | 更新過濾結果 |
-| `←` `→` `↑` `↓` | 在圖示網格移動選取 |
+| `↑` `↓` | 在清單移動選取；到頭尾環繞 |
+| `PgUp` `PgDn` | 以可見列數為單位翻頁；夾在清單頭尾，不環繞 |
+| `Alt` ＋數字 | 直接啟動對應的可見列。鍵序固定為 `1 2 3 4 5 6 7 8 9 0`，依序指派給當前可見列（可見 8 列時用到 `Alt+1`~`Alt+8`）；沒有對應列的數字不綁定 |
+| `←` `→` `Home` `End` | 保留給搜尋欄文字編輯，不攔截 |
 | `Enter` | 啟動選取 App |
 | `Esc` | 搜尋有內容時先清空；空白時隱藏面板 |
 | `Ctrl+R` | 重新整理 App Catalog |
 | `Context Menu`／`Shift+F10` | 開啟項目選單 |
 
-Tab 順序只包含搜尋欄、結果網格及必要按鈕。面板顯示後不得將使用者輸入送到原本前景程式。
+Tab 順序只包含搜尋欄、結果清單及必要按鈕。面板顯示後不得將使用者輸入送到原本前景程式。
 
 ### 4.8 滑鼠操作
 
-- 單擊 App 圖示立即啟動。
+- 單擊清單列立即啟動。
 - 右鍵提供「釘選／取消釘選」及「開啟檔案位置」（適用時）。
 - 點擊面板外，面板自動隱藏。
 - 滾輪只在結果超過可見容量時捲動。
@@ -218,10 +223,13 @@ Tab 順序只包含搜尋欄、結果網格及必要按鈕。面板顯示後不�
 
 ### 4.9 視窗外觀
 
-- 預設寬度 640 DIP；高度依內容調整，上限為目前螢幕工作區的 70%。
-- 搜尋欄位於頂端，圖示網格位於下方。
-- 圖示預設 40×40 DIP；每個項目目標尺寸約 112×82 DIP。
-- 使用系統字型與系統色彩語意。
+- 預設寬度 640 DIP、高度 488 DIP；高度依內容調整，上限為目前螢幕工作區的 70%。
+- 搜尋欄位於頂端，結果清單位於中段，最下方保留一條固定高度的提示列（footer）。
+- 清單列高 48 DIP，列內圖示 30×30 DIP，可見 8 列；footer 只顯示當下適用的按鍵指引，不顯示狀態或版本資訊。
+- 每個清單列最右方顯示該列的數字快選指引：一個圓角按鍵方塊，內容只有數字本身（修飾鍵 `Alt` 在 footer 說明一次，不在每列重複）。方塊寬度固定並常駐佔位，App 名稱與第二行文字的可用寬度不因指引有無而變動。
+- 搜尋欄外觀：距面板左右各 16 DIP、上緣 16 DIP，高 48 DIP，圓角半徑 6 DIP；填色與 1 DIP 邊框由主題色盤提供，與面板底色可分辨，高對比模式下改用系統語意色並保持實心可見。
+- 搜尋輸入沿用原生 EDIT 控制項（caret、選取、IME、剪貼簿為系統行為），文字左內距 12 DIP、字級 24 DIP。搜尋欄的圓角框由面板繪製，EDIT 內縮於框內。
+- 使用系統字型與系統色彩語意。搜尋欄字型取系統 message font，只覆寫字級。
 - 跟隨 Windows 淺色／深色模式。
 - MVP 不使用透明模糊；陰影只採系統可低成本提供的效果。
 - 動畫預設關閉。若加入淡入，Release 預設總時長不得超過 80 ms，且尊重「關閉動畫」輔助設定。
@@ -262,6 +270,7 @@ Catalog 至少包含：
 1. 目前使用者 Start Menu：`FOLDERID_Programs`。
 2. 所有使用者 Start Menu：`FOLDERID_CommonPrograms`。
 3. Windows Apps Folder：`FOLDERID_AppsFolder`。
+4. 使用者設定的多個本機資料夾，依設定的可啟動副檔名遞迴列舉。
 
 不得使用硬編碼英文目錄。所有 Known Folder 路徑以 Shell Known Folder API 取得。
 
@@ -271,7 +280,8 @@ Catalog 至少包含：
 enum class AppSource : uint8_t {
     UserStartMenu,
     CommonStartMenu,
-    AppsFolder
+    AppsFolder,
+    UserFolder
 };
 
 struct AppEntry {
@@ -296,31 +306,46 @@ struct AppEntry {
 - 無法解析但 Shell 可正常開啟的捷徑仍可保留，啟動時交給 Shell。
 - 排除解除安裝、說明、網站捷徑等非 App 項目；初版採保守副檔名與 Shell 屬性判斷，不以名稱黑名單作唯一依據。
 
-### FR-005 Microsoft Store／封裝 App
+### FR-005 使用者自訂資料夾
+
+- 使用者可從設定頁逐一加入或移除多個本機資料夾；設定保存正規化後的絕對路徑。
+- 每個資料夾項目都有獨立的「包含子資料夾」選項；新增時預設勾選，使用者可取消。
+- 只接受本機磁碟路徑；拒絕 UNC、網路磁碟、URI、裝置路徑及命令列內容。
+- 「包含子資料夾」開啟時遞迴掃描；關閉時只掃描該資料夾第一層，不追蹤目錄 symbolic link／reparse point。
+- 副檔名採大小寫不敏感比對。MVP 由使用者從受支援清單勾選：`.exe`、`.cmd`、`.bat`、`.lnk`、`.appref-ms`；不接受任意副檔名文字。
+- `.exe`、`.cmd`、`.bat` 必須是可讀取的普通檔案；`.lnk` 與 `.appref-ms` 交由 Shell 驗證及啟動。
+- 只建立設定來源中的檔案項目，不搜尋一般文件、資料夾名稱或檔案內容。
+- 單一資料夾不存在、無權限或單一檔案異常時，略過該項目並保留其他來源結果；不得使整次 Catalog 建立失敗。
+
+### FR-006 Microsoft Store／封裝 App
 
 - 透過 `FOLDERID_AppsFolder` 的 Shell namespace 列舉，不掃描 `WindowsApps` 目錄，不要求存取受保護檔案。
 - 保存 Shell parsing name 或等價的穩定啟動識別。
 - 顯示名稱與圖示由 Shell property／image API 取得。
 - 啟動交由 Shell，不直接尋找或執行封裝目錄內的 EXE。
 
-### FR-006 去重複
+### FR-007 去重複
 
 優先以正規化後的 launch identity 去重。若不同來源指向同一目標：
 
 1. 保留能由 Shell 正確啟動且圖示品質較佳的項目。
-2. 使用者 Start Menu 優先於 Common Start Menu。
+2. 使用者 Start Menu 優先於 UserFolder，再優先於 Common Start Menu。
 3. 若 packaged App 的 Start Menu 捷徑與 AppsFolder 項目無法可靠判定相同，寧可暫時保留，並記錄診斷資訊；不得只用顯示名稱合併。
 
-### FR-007 Catalog 更新
+### FR-008 Catalog 更新
 
-- 啟動時建立 Catalog。
-- 以 `ReadDirectoryChangesW` 非同步監看兩個 Programs 資料夾。
-- 收到密集事件時 debounce 500 ms，合併成一次重掃。
-- AppsFolder 不做背景輪詢；當面板被叫出且距上次 AppsFolder 列舉超過 10 分鐘時，在背景低優先序重新列舉並原子替換結果。
-- 使用者可用 `Ctrl+R` 強制完整重建。
-- 重建期間沿用舊 Catalog；成功後才整批替換，不顯示半完成結果。
+- 啟動時先載入有效的 Catalog cache，立即提供舊結果；再背景完整建立一次最新 Catalog。
+- 以 `ReadDirectoryChangesW` 非同步監看兩個 Programs 資料夾及所有已設定的本機資料夾；每個 user-folder watcher 依該路徑的遞迴選項設定 `bWatchSubtree`。
+- `ReadDirectoryChangesW` 不支援以副檔名過濾；只要求檔名、目錄名與最後寫入時間等必要通知，收到事件後在 worker 依路徑與副檔名 allowlist 過濾。
+- 收到密集事件時 debounce 500 ms，合併成一次受影響來源的重掃；不因每個檔案事件各建立一次工作。
+- 若通知 buffer 溢位或收到 `ERROR_NOTIFY_ENUM_DIR`，標記來源需要完整重掃；不得假設事件清單仍完整。
+- 設定新增／移除資料夾或變更副檔名清單時，立即取消過期工作並背景重建 Catalog。
+- 面板被叫出時不做無條件完整掃描，沿用目前 snapshot；若來源已標記 dirty，立即顯示舊 snapshot 並在背景更新。
+- AppsFolder 不做背景輪詢；當面板被叫出且距上次成功列舉超過 10 分鐘時，在背景低優先序重新列舉。
+- `Ctrl+R` 強制完整重建所有來源；成功啟動 App 不觸發刷新。
+- 重建期間沿用舊 Catalog；成功後才整批替換，不顯示半完成結果。單一來源失敗時保留該來源舊結果及其他來源的新結果。
 
-### FR-008 圖示
+### FR-009 圖示
 
 - 透過 Windows Shell 取得圖示，不自行進入封裝目錄。
 - 圖示採 lazy loading，只載入目前可見項目。
@@ -330,30 +355,31 @@ struct AppEntry {
 - 取得失敗時顯示單一內建 fallback icon。
 - 第一幀允許先顯示 fallback，再非同步更新真實圖示，但不可造成格位重排。
 
-### FR-009 App 啟動
+### FR-010 App 啟動
 
 - 使用 Unicode 版本 `ShellExecuteExW` 或 Shell item verb。
 - UI 執行緒已初始化 STA COM：`COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE`。
 - 啟動成功後立即隱藏面板並更新統計。
 - 啟動失敗時保持面板顯示，呈現簡短錯誤及「重新整理」選項。
 - 不拼接命令列字串後交給 `CreateProcess`，避免引號及參數錯誤。
+- 不檢查目標程序是否已執行；每次使用者啟動請求都可再次交給 Shell。
 - 除非功能明確要求程序 Handle，否則不要使用 `SEE_MASK_NOCLOSEPROCESS`；若取得 Handle，必須關閉。
 
-### FR-010 釘選與排序
+### FR-011 釘選與排序
 
 - 項目右鍵可釘選或取消。
 - 釘選項目可用拖曳調整順序；MVP 若拖曳延誤開發，可先提供「向前／向後移動」。
 - App 暫時不存在時保留 pin 紀錄 30 天；若重新安裝且 stable ID 相同，自動恢復。
 - 30 天後仍不存在的 pin 可在設定頁清理，但不得在第一次掃描失敗時立即刪除。
 
-### FR-011 開機啟動
+### FR-012 開機啟動
 
 - 預設關閉，由使用者主動開啟。
 - Portable MVP 使用目前使用者 Startup Known Folder 的捷徑，或 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`；實作擇一並集中封裝。
 - 不寫入 HKLM，不要求管理員權限。
 - 移動 EXE 後若啟動項目失效，設定頁應能重新建立。
 
-### FR-012 設定
+### FR-013 設定
 
 MVP 設定：
 
@@ -365,10 +391,12 @@ MVP 設定：
 - 啟動 App 後是否隱藏：預設開啟。
 - 清除使用紀錄。
 - 重設設定。
+- 多個使用者自訂本機資料夾。
+- 受支援可啟動副檔名的勾選清單；預設全選 `.exe`、`.cmd`、`.bat`、`.lnk`、`.appref-ms`。
 
 設定頁不必使用獨立框架，可用原生 modal／property sheet 或同一自繪視窗中的簡單頁面。
 
-### FR-013 記錄與診斷
+### FR-014 記錄與診斷
 
 - 正常模式不輸出逐鍵搜尋紀錄。
 - 錯誤記錄採有上限的循環／輪替檔案，單檔上限 512 KiB，最多保留 2 份。
@@ -416,6 +444,7 @@ MVP 設定：
 
 - 任一 App 圖示失敗不得使 Catalog 建立失敗。
 - 任一損壞捷徑不得造成崩潰或卡住整體掃描。
+- 任一使用者資料夾不存在、無權限或無法列舉時，不得清空其他 Catalog 來源。
 - Catalog 重建可取消或具世代編號；舊工作完成後不得覆蓋較新的結果。
 - 設定寫入採 temporary file＋atomic replace，避免斷電造成整份設定損壞。
 - 崩潰後下次啟動仍可重建 Catalog，不依賴不可恢復的 cache。
@@ -426,6 +455,7 @@ MVP 設定：
 - 不安裝 Service、Driver 或排程工作。
 - 不從網路下載或執行內容。
 - 搜尋只過濾既有 Catalog，不把輸入當成命令列或 URI 執行。
+- 自訂來源只接受本機資料夾及受支援的可啟動副檔名，不執行任意使用者輸入或未知副檔名。
 - 使用者點擊的項目必須對應 Catalog 中已解析的 launch identity。
 - 不繞過 SmartScreen、UAC 或 Windows Shell 安全行為。
 
@@ -552,7 +582,7 @@ flowchart TD
     UI --> Icons["Lazy Icon Cache"]
     Catalog["App Catalog"] --> Search
     Catalog --> Icons
-    Sources["Start Menu + AppsFolder"] --> Catalog
+    Sources["Start Menu + AppsFolder + User Folders"] --> Catalog
     Watch["Directory Watcher"] --> Catalog
     UI --> Launch["Shell Launcher"]
     Usage["Pins & Usage Store"] --> Search
@@ -568,6 +598,7 @@ flowchart TD
 | `app_catalog` | 合併、去重、快照、世代管理 | 直接繪 UI |
 | `start_menu_source` | Known Folder 與捷徑列舉 | 使用紀錄 |
 | `apps_folder_source` | Shell AppsFolder 列舉 | 掃 WindowsApps |
+| `user_folder_source` | 設定資料夾的受控副檔名列舉 | 任意檔案搜尋、網路路徑 |
 | `catalog_watcher` | 目錄變更通知與 debounce | 固定輪詢 |
 | `search_engine` | 正規化、匹配、穩定排序 | Shell 呼叫 |
 | `icon_cache` | 非同步取得、LRU、DPI key | 永久保存全部 bitmap |
@@ -581,7 +612,7 @@ flowchart TD
 - UI thread：Win32 message loop、HWND、Direct2D、輸入、Catalog snapshot 交換。
 - Scan worker：只在啟動、目錄變更或手動刷新時存在。
 - Icon worker：單一低優先序 worker，依可見項目載入；queue 有上限並可取消過期請求。
-- Directory watcher：優先使用 overlapped I/O 與 UI／worker wait integration；若使用專用 thread，必須長時間阻塞等待事件。
+- Directory watcher：優先使用 overlapped I/O 與 UI／worker wait integration；若使用專用 thread，必須長時間阻塞等待事件，不得以固定週期輪詢。
 
 不得為每個圖示建立一個 thread。Catalog 以 `shared_ptr<const CatalogSnapshot>` 或等價 immutable snapshot 在執行緒間交換，UI 不鎖住掃描工作。
 
@@ -595,7 +626,7 @@ flowchart TD
 6. 依設定註冊 `RegisterHotKey`，再建立通知區圖示；失敗時保留 tray 並顯示一次非阻擋提醒。
 7. 載入可選 Catalog cache，若有效可先提供結果。
 8. 背景建立最新 Catalog。
-9. 啟動 Programs directory watcher。
+9. 啟動 Programs 與已設定 user-folder directory watcher。
 10. 主執行緒進入阻塞式 message loop。
 
 即使 Catalog 尚未完成，快捷鍵也應能叫出面板並顯示「正在準備 App」。
@@ -632,6 +663,7 @@ flowchart TD
 ### 10.2 格式選擇
 
 - `settings.ini`：少量 key/value，使用 Win32 profile API 或受測試的自有 reader/writer。
+- `settings.ini` 保存 `catalog_roots`（多個本機絕對路徑及各自的 recursive flag）與 `catalog_extensions`（受支援副檔名清單）；每個值都要經過格式與安全邊界驗證。
 - `favorites.txt`：UTF-8，每行一個經 escaping 的 stable ID，行序即 pin 順序。
 - `usage.tsv`：版本化 UTF-8 TSV；欄位為 stable ID、總啟動數、7／30 日 buckets 或必要時間資料、最後啟動 UTC。
 - `catalog.cache`：可選的版本化二進位 cache，只用於加速，不是真實來源；讀取錯誤可直接刪除並重建。
@@ -642,6 +674,8 @@ flowchart TD
 
 - Start Menu 項目：以正規化 Shell parsing identity／resolved target 加必要參數產生 SHA-256 或穩定雜湊表示。
 - AppsFolder 項目：以 Shell parsing name／AUMID 產生。
+- UserFolder `.exe`、`.cmd`、`.bat`：以正規化後的本機絕對路徑產生。
+- UserFolder `.lnk`、`.appref-ms`：以 Shell 可啟動的 canonical identity／resolved target 產生，保留必要的捷徑語意。
 - stable ID 不可依顯示名稱、圖示或目前排序產生。
 - hash 用於識別，不作安全信任判斷。
 
@@ -665,8 +699,10 @@ flowchart TD
 | 快捷鍵無法註冊 | 由 tray 開啟設定 | 拒絕新設定，不攔截任何按鍵；已有快捷鍵則保留 |
 | 單一捷徑損壞 | 該 App 可略過或顯示 fallback | 記錄錯誤，繼續掃描 |
 | 圖示取得失敗 | 顯示 fallback icon | 不影響啟動 |
-| App 已解除安裝 | 啟動失敗提示 | 觸發一次 Catalog refresh |
+| App 已解除安裝 | 單次對話框提示啟動失敗，按下確認後回到搜尋欄 | 先在背景觸發一次 Catalog refresh（已在進行則合併），再顯示提示；期間面板保持顯示且不執行啟動後隱藏 |
 | AppsFolder 列舉失敗 | 仍顯示 Win32 App | 下次使用者叫出時再試，不高頻 retry |
+| 自訂資料夾不存在／無權限 | 仍顯示其他 App | 保留設定、略過該來源並記錄一次；路徑恢復或手動 refresh 後再試 |
+| 自訂資料夾大量變更 | 可能延遲顯示新項目 | 事件合併 500 ms、背景掃描、舊 snapshot 持續可用 |
 | 設定損壞 | 採預設值並通知 | 原檔改名保存，不靜默覆寫 |
 | Direct2D device loss | 當前畫面可短暫空白 | 重建 device resource |
 | Worker 發生例外 | UI 不崩潰 | 捕捉邊界、記錄並丟棄該次結果 |
@@ -684,6 +720,7 @@ flowchart TD
 - 使用分數時間邊界。
 - 去重複規則。
 - stable ID 一致性。
+- 使用者資料夾的多路徑、遞迴列舉、副檔名 allowlist、權限錯誤隔離與重複路徑處理。
 - INI／favorites／usage 的 round-trip、escaping 與損壞輸入。
 - schema migration。
 - LRU cache 淘汰策略。
@@ -692,7 +729,9 @@ flowchart TD
 ### 12.2 整合測試
 
 - 建立含正常、損壞、參數、Unicode 名稱及深層子目錄的測試 Start Menu。
+- 建立多個含深層子目錄、Unicode 名稱、重疊路徑及非支援副檔名的使用者資料夾 fixture。
 - 修改／新增／刪除捷徑後 watcher 只重建一次。
+- 修改／新增／刪除使用者資料夾內的受支援檔案後，watcher 在 debounce 後更新一次；未選副檔名不進入 Catalog。
 - 列舉並啟動至少三個 Win32 App。
 - 列舉並啟動至少三個 inbox packaged App，例如 Calculator、Settings 對應項目；實際清單依 OS 映像調整。
 - Hotkey 衝突與重新設定。
@@ -704,8 +743,10 @@ flowchart TD
 ### 12.3 UI 測試
 
 - 空白查詢顯示 pins＋常用 App。
-- 輸入後同一 grid 原地過濾。
-- 方向鍵跨行移動。
+- 輸入後同一份清單原地過濾。
+- `↑`／`↓` 跨列移動並在頭尾環繞。
+- `PgUp`／`PgDn` 與滾輪翻頁時可見範圍不溢出清單頭尾。
+- 清單為空時顯示對應提示（建立中／找不到 App），不留一片空白。
 - Esc 兩階段行為。
 - 點擊外部自動隱藏。
 - 主螢幕與第二螢幕不同 DPI。
@@ -750,7 +791,7 @@ Given 搜尋欄為空，When 面板顯示，Then 釘選 App 依自訂順序優�
 
 ### AC-003 即時過濾
 
-Given Catalog 已建立，When 使用者逐字輸入，Then 圖示網格在每次輸入後更新，只顯示符合名稱的 App，且不出現檔案、網頁或設定結果。
+Given Catalog 已建立，When 使用者逐字輸入，Then 圖示網格在每次輸入後更新，只顯示符合名稱的可啟動 App，且不出現未列入來源的檔案、網頁或設定結果。
 
 ### AC-004 鍵盤啟動
 
@@ -766,7 +807,15 @@ Given 標準 Windows 11 測試環境，When 完整重建 Catalog，Then 能列�
 
 ### AC-007 更新
 
-Given Programs folder 新增或刪除捷徑，When 目錄通知完成 debounce，Then Catalog 在不阻塞 UI 的情況下更新，且不需要重啟 NimbleRun。
+Given Programs folder 或已設定 user folder 新增或刪除受支援檔案，When 目錄通知完成 debounce，Then Catalog 在不阻塞 UI 的情況下更新，且不需要重啟 NimbleRun。
+
+### AC-012 使用者自訂來源
+
+Given 使用者設定兩個以上本機資料夾及一組受支援副檔名，When Catalog 完整重建，Then 只列出各資料夾設定的遞迴範圍內符合 allowlist 的可啟動項目，且可在同一搜尋列表中啟動。
+
+### AC-013 刷新效率
+
+Given Catalog cache 有效且來源沒有變更，When 使用者反覆顯示面板或啟動已列出的 App，Then 不進行無條件完整掃描；Given 來源發生密集變更，When debounce 結束，Then 只產生一次合併 refresh，且掃描在背景執行。
 
 ### AC-008 離線與隱私
 
@@ -829,8 +878,9 @@ NimbleRun/
 - Single instance。
 - Hotkey＋tray。
 - Start Menu `.lnk` 列舉。
-- 純文字／fallback icon grid。
+- 純文字／fallback icon 清單。
 - 搜尋與 Enter／click 啟動。
+- 使用者自訂本機資料夾與受支援副檔名來源。
 - 基本單元測試。
 
 完成定義：可以從 ZIP 執行，搜尋並啟動至少 20 個真實 Win32 App。
@@ -839,11 +889,11 @@ NimbleRun/
 
 - AppsFolder 列舉。
 - 去重與 stable ID。
-- Directory watcher。
+- Programs／user-folder directory watcher。
 - Catalog snapshot 與 refresh generation。
 - 錯誤隔離。
 
-完成定義：Win32 與 packaged App 均可搜尋啟動；安裝／移除捷徑後能更新。
+完成定義：Win32、packaged App 與設定來源中的可啟動檔案均可搜尋啟動；安裝／移除捷徑或來源檔案後能更新。
 
 ### Phase 3：視覺面板
 
@@ -927,7 +977,7 @@ MVP 不內建遙測。若開發者或測試者自願提供本機測試報告，�
 
 ## 19. 重要實作原則摘要
 
-1. 空白顯示常用 App；輸入後在同一 grid 過濾完整 App Catalog。
+1. 空白顯示常用 App；輸入後在同一份單欄清單過濾完整 App Catalog。
 2. 只搜尋 App，不搜尋檔案、網頁或其他內容。
 3. C++20＋原生 Win32；不使用 WPF、WinUI 3、Qt 或 Electron。
 4. 待機完全事件驅動，不使用高頻 timer 或背景掃描。

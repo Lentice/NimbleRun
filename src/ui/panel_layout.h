@@ -1,0 +1,81 @@
+#pragma once
+
+namespace nimblerun {
+namespace layout {
+
+// DIP constants (design-spec §4.9). D2D's HwndRenderTarget coordinate space is
+// DIPs, so render geometry and DWrite font sizes use these directly; the host
+// converts them to physical pixels only for Win32 geometry (window size, child
+// controls, hit-testing) via LayoutForDpi().
+constexpr float kDpi96 = 96.0f;
+constexpr float kPanelWidthDip = 640.0f;
+constexpr float kPanelHeightDip = 488.0f; // NR-023: taller search box (16~64) keeps 8 rows visible
+constexpr float kListLeftDip = 16.0f;
+constexpr float kListTopDip = 72.0f;      // NR-023: below the 64 DIP search box
+constexpr float kListRightDip = 624.0f;
+constexpr float kRowHeightDip = 48.0f;
+constexpr float kTileSizeDip = 30.0f;   // NR-012 fixed tile
+constexpr float kTileInsetDip = 8.0f;   // tile offset inside a row
+constexpr float kFooterTopDip = 456.0f; // NR-023: footer band 456~488 (replaces NR-020's 400~432)
+// NR-021: fixed footer key-hint band geometry (design-spec §4.9).
+constexpr float kFooterDividerWidthDip = 1.0f;
+constexpr float kFooterKeyBoxWidthDip = 44.0f;
+constexpr float kFooterKeyBoxHeightDip = 20.0f;
+constexpr float kFooterKeyRadiusDip = 3.0f;
+constexpr float kFooterKeyGapDip = 8.0f;
+constexpr float kFooterHintGapDip = 12.0f;  // "Scroll" label to the first key box
+constexpr float kFooterTextInsetDip = 3.0f;  // text top padding inside a key box
+constexpr float kSearchLeftDip = 16.0f;
+constexpr float kSearchTopDip = 16.0f;
+constexpr float kSearchRightDip = 624.0f;
+constexpr float kSearchBottomDip = 64.0f;  // NR-023: search box 16~64, height 48 DIP
+// NR-023: rounded search box geometry (design-spec §4.9).
+constexpr float kSearchCornerRadiusDip = 6.0f;
+constexpr float kSearchTextInsetDip = 12.0f;   // EDIT inset left/right of the box
+constexpr float kSearchEditInsetYDip = 6.0f;   // EDIT inset top/bottom of the box
+constexpr float kSearchFontDip = 24.0f;
+constexpr float kTitleFontDip = 16.0f;
+constexpr float kTextFontDip = 14.0f;
+constexpr float kSmallFontDip = 11.0f;
+
+// Physical-pixel geometry for a monitor at `dpi`: every field is the
+// corresponding DIP constant scaled by dpi / 96 (rounded). Pure value; no HWND
+// or Windows dependencies.
+struct LayoutPx {
+    float scale = 1.0f;  // dpi / 96
+    int panel_width = 0;
+    int panel_height = 0;
+    int list_left = 0;
+    int list_top = 0;
+    int list_right = 0;
+    int row_height = 0;
+    int tile_size = 0;
+    int tile_inset = 0;
+    int search_left = 0;
+    int search_top = 0;
+    int search_right = 0;
+    int search_bottom = 0;
+    // NR-023: the search EDIT child rect, inset inside the D2D search box so its
+    // right angles never cover the rounded corners.
+    int search_edit_left = 0;
+    int search_edit_top = 0;
+    int search_edit_right = 0;
+    int search_edit_bottom = 0;
+    // NR-023: LOGFONTW::lfHeight for the search font (negative = char height).
+    int search_font_height = 0;
+    int dpi = 0;
+};
+
+LayoutPx LayoutForDpi(float dpi);
+
+struct WindowSize {
+    int width = 0;
+    int height = 0;
+};
+
+// DPI-scaled panel size capped to a monitor work area, keeping a 32px margin
+// on each edge (design-spec §4.9).
+WindowSize ClampWindowSize(float dpi, int work_width, int work_height);
+
+}  // namespace layout
+}  // namespace nimblerun

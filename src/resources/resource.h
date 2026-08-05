@@ -1,0 +1,41 @@
+#ifndef NIMBLERUN_RESOURCE_H
+#define NIMBLERUN_RESOURCE_H
+
+// Control and dialog resource ids shared between the .rc template and the
+// settings dialog code (NR-013). IDOK/IDCANCEL come from windows.h/winres.h.
+#define IDD_SETTINGS 100
+
+#define IDC_STATUS 2000
+#define IDC_HOTKEY_GROUP 2001
+#define IDC_HOTKEY_LABEL 2002
+#define IDC_HOTKEY_HINT 2003
+#define IDC_HOTKEY_EDIT 2004
+#define IDC_LAUNCHER_GROUP 2005
+#define IDC_RECENT_LABEL 2006
+#define IDC_RECENT_COUNT_EDIT 2007
+#define IDC_HIDE_AFTER_LAUNCH 2008
+#define IDC_AUTO_START 2009
+#define IDC_THEME_LABEL 2010
+#define IDC_THEME_COMBO 2011
+#define IDC_FOLDERS_GROUP 2012
+#define IDC_FOLDERS_LIST 2013
+#define IDC_FOLDER_RECURSIVE 2014
+#define IDC_ADD_FOLDER 2015
+#define IDC_REMOVE_FOLDER 2016
+#define IDC_EXTENSIONS_GROUP 2017
+#define IDC_EXT_EXE 2018
+#define IDC_EXT_CMD 2019
+#define IDC_EXT_BAT 2020
+#define IDC_EXT_LNK 2021
+#define IDC_EXT_APPREF 2022
+#define IDC_CLEAR_USAGE 2023
+#define IDC_RESET_SETTINGS 2024
+
+#ifndef IDOK
+#define IDOK 1
+#endif
+#ifndef IDCANCEL
+#define IDCANCEL 2
+#endif
+
+#endif  // NIMBLERUN_RESOURCE_H

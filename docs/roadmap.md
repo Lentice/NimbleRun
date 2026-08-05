@@ -21,8 +21,9 @@ Done means a portable ZIP build can search and launch at least 20 real Win32 app
 ## Phase 2 — Complete catalog
 
 - AppsFolder enumeration.
+- User-selected local folder enumeration with extension allowlist.
 - Stable IDs and deduplication.
-- Directory watcher with debounce.
+- Programs and user-folder directory watcher with debounce.
 - Immutable catalog snapshots and refresh generations.
 
 ## Phase 3 — Usable panel

@@ -3,7 +3,7 @@
 ## Automated checks
 
 ```powershell
-cmake -S . -B build -G Ninja -DCMAKE_TOOLCHAIN_FILE=cmake/llvm-mingw.cmake -DCMAKE_BUILD_TYPE=Release
+cmake -S . -B build -G Ninja -D"CMAKE_TOOLCHAIN_FILE=cmake/llvm-mingw.cmake" -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ctest --test-dir build --output-on-failure
 ```
@@ -29,7 +29,10 @@ When testing a conflicting or Windows-reserved shortcut, confirm that NimbleRun 
 - [ ] Non-empty search filters only launchable apps in the same grid.
 - [ ] Arrow keys move through the grid and `Enter` launches the selected app.
 - [ ] Win32 Start Menu and AppsFolder packaged apps can be discovered and launched.
-- [ ] Start Menu changes refresh the catalog after the debounce window.
+- [ ] Multiple configured local folders honor each folder's recursive setting and scan only the selected executable extension allowlist.
+- [ ] Start Menu or configured-folder changes refresh the catalog after the debounce window without rescanning on every panel show.
+- [ ] Startup can show a valid cached catalog while the first background rebuild is running; `Ctrl+R` forces a full rebuild.
+- [ ] AppsFolder refreshes on panel show only when its last successful enumeration is older than 10 minutes.
 - [ ] Corrupt shortcuts, icon failures, and corrupt caches do not crash the process.
 - [ ] High contrast, light/dark mode, keyboard navigation, and 100/150/200% DPI work.
 - [ ] Core flows work without network access or administrator rights.

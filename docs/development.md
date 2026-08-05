@@ -2,7 +2,7 @@
 
 ## Product boundary
 
-NimbleRun searches launchable apps only. It is not a file searcher, web searcher, command runner, plugin host, AI assistant, or package manager.
+NimbleRun searches launchable apps only. It is not a general file searcher, web searcher, command runner, plugin host, AI assistant, or package manager. User-selected local folders are scanned only for the supported executable extension allowlist.
 
 The priority order is:
 
@@ -20,6 +20,7 @@ The intended module boundaries are:
 | `app_host` | WinMain, COM initialization, message loop, single instance, lifecycle | Search ranking |
 | `ui` | HWND, focus, input, DPI, rendering | Folder scanning |
 | `catalog` | Sources, merge, deduplication, immutable snapshots | Direct drawing |
+| `user_folder_source` | User-selected local roots, recursive enumeration, extension allowlist | General file search, network paths |
 | `search` | Normalization, matching, stable ranking | Shell calls |
 | `shell` | Known Folders, Shell namespace, icon and launch APIs | Usage statistics |
 | `storage` | Settings, pins, usage, atomic writes | Catalog enumeration |

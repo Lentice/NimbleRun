@@ -1,0 +1,320 @@
+#include "catalog/catalog_cache.h"
+#include "catalog/catalog_refresh.h"
+
+#include <windows.h>
+
+#include <cstdio>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <string>
+#include <vector>
+
+namespace fs = std::filesystem;
+
+using nimblerun::AppEntry;
+using nimblerun::AppSource;
+using nimblerun::CatalogRefreshCoordinator;
+using nimblerun::CatalogSource;
+using nimblerun::LoadCatalogCache;
+using nimblerun::SaveCatalogCache;
+
+namespace {
+
+void Expect(bool condition, const char* message) {
+    if (!condition) {
+        std::fprintf(stderr, "FAILED: %s\n", message);
+        std::exit(1);
+    }
+}
+
+AppEntry Entry(std::wstring id, AppSource source) {
+    AppEntry entry;
+    entry.stable_id = std::move(id);
+    entry.display_name = id;
+    entry.normalized_name = id;
+    entry.launch_identity = L"C:\\Apps\\" + entry.display_name + L".exe";
+    entry.source_path = entry.launch_identity;
+    entry.source = source;
+    return entry;
+}
+
+std::wstring TempDir() {
+    wchar_t buffer[MAX_PATH];
+    const DWORD length = GetTempPathW(MAX_PATH, buffer);
+    (void)length;
+    const std::wstring dir =
+        std::wstring(buffer) + L"NimbleRun_catalog_refresh_test_" +
+        std::to_wstring(GetCurrentProcessId());
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    return dir;
+}
+
+// Best-effort fixture cleanup so a transient OS/AV hold never fails the test.
+void RemoveTreeBestEffort(const std::wstring& path) {
+    for (int attempt = 0; attempt < 10; ++attempt) {
+        std::error_code ec;
+        fs::remove_all(fs::path(path), ec);
+        if (!ec || !fs::exists(fs::path(path), ec)) {
+            return;
+        }
+        Sleep(150);
+    }
+}
+
+// Dense events inside the 500 ms window coalesce into one rebuild: only one
+// generation is due at the end of the window, not one per event.
+void TestDebounceCoalescing() {
+    CatalogRefreshCoordinator c;
+    c.NotifySourceEvent(CatalogSource::StartMenu, 1000);
+    c.NotifySourceEvent(CatalogSource::StartMenu, 1100);
+    c.NotifySourceEvent(CatalogSource::StartMenu, 1300);
+    Expect(!c.HasDueRebuild(1500), "events inside the debounce window are not due");
+    Expect(c.HasDueRebuild(1900), "after 500 ms the merged rebuild is due");
+    const auto due = c.DueSources(1900);
+    Expect(due.size() == 1 && due[0] == CatalogSource::StartMenu,
+           "one merged rebuild for the source, not one per event");
+}
+
+// Buffer overflow marks the source for an immediate full rescan.
+void TestOverflowForcesFullRescan() {
+    CatalogRefreshCoordinator c;
+    c.MarkSourceFullRescan(CatalogSource::UserFolder);
+    Expect(c.HasDueRebuild(0), "full-rescan marker is due immediately");
+    const auto due = c.DueSources(0);
+    Expect(due.size() == 1 && due[0] == CatalogSource::UserFolder,
+           "overflowed source is due for a full rescan");
+}
+
+// An older generation completing after a newer one never overwrites the newer
+// snapshot.
+void TestStaleGenerationDoesNotOverwrite() {
+    CatalogRefreshCoordinator c;
+    const std::uint64_t gen_old =
+        c.BeginGeneration({CatalogSource::StartMenu, CatalogSource::AppsFolder});
+    const std::uint64_t gen_new = c.BeginGeneration({CatalogSource::StartMenu});
+    Expect(gen_new > gen_old, "generations are strictly increasing");
+
+    c.ApplySourceResult(gen_new, CatalogSource::StartMenu,
+                        {Entry(L"new", AppSource::UserStartMenu)});
+    const std::vector<AppEntry> fresh = c.Snapshot();
+    Expect(fresh.size() == 1 && fresh[0].stable_id == L"new", "newest generation applied");
+
+    c.ApplySourceResult(gen_old, CatalogSource::StartMenu,
+                        {Entry(L"old", AppSource::UserStartMenu)});
+    const std::vector<AppEntry> after_stale = c.Snapshot();
+    Expect(after_stale.size() == 1 && after_stale[0].stable_id == L"new",
+           "stale generation does not overwrite the newer snapshot");
+}
+
+// A failed refresh keeps the last usable snapshot.
+void TestFailureKeepsOldSnapshot() {
+    CatalogRefreshCoordinator c;
+    const std::uint64_t gen = c.BeginGeneration({CatalogSource::StartMenu});
+    c.ApplySourceResult(gen, CatalogSource::StartMenu,
+                        {Entry(L"good", AppSource::UserStartMenu)});
+    Expect(c.Snapshot().size() == 1, "initial snapshot present");
+
+    const std::uint64_t gen_fail = c.BeginGeneration({CatalogSource::StartMenu});
+    c.ApplySourceFailure(gen_fail, CatalogSource::StartMenu);
+    const std::vector<AppEntry> after_fail = c.Snapshot();
+    Expect(after_fail.size() == 1 && after_fail[0].stable_id == L"good",
+           "failed refresh keeps the last usable snapshot");
+}
+
+// One source failing keeps its old result while other sources' new results
+// still apply (design-spec §FR-008).
+void TestSingleSourceFailureIsolation() {
+    CatalogRefreshCoordinator c;
+    const std::uint64_t gen =
+        c.BeginGeneration({CatalogSource::StartMenu, CatalogSource::AppsFolder});
+    c.ApplySourceResult(gen, CatalogSource::StartMenu,
+                        {Entry(L"start", AppSource::UserStartMenu)});
+    c.ApplySourceResult(gen, CatalogSource::AppsFolder,
+                        {Entry(L"apps", AppSource::AppsFolder)});
+
+    const std::uint64_t gen2 =
+        c.BeginGeneration({CatalogSource::StartMenu, CatalogSource::AppsFolder});
+    c.ApplySourceResult(gen2, CatalogSource::StartMenu,
+                        {Entry(L"start2", AppSource::UserStartMenu)});
+    c.ApplySourceFailure(gen2, CatalogSource::AppsFolder);
+
+    const std::vector<AppEntry> after = c.Snapshot();
+    Expect(after.size() == 2, "two sources represented after isolation");
+    bool found_start = false;
+    bool found_apps = false;
+    for (const AppEntry& entry : after) {
+        if (entry.stable_id == L"start2") {
+            found_start = true;
+        }
+        if (entry.stable_id == L"apps") {
+            found_apps = true;  // AppsFolder kept its old result
+        }
+    }
+    Expect(found_start && found_apps,
+           "failed source keeps old entries, others apply their new ones");
+}
+
+// The merged snapshot is not swapped until every source in a generation has
+// reported, so the panel never sees a partial build.
+void TestNoPartialSnapshotBeforeAllSourcesReport() {
+    CatalogRefreshCoordinator c;
+    const std::uint64_t gen = c.BeginGeneration(
+        {CatalogSource::StartMenu, CatalogSource::AppsFolder, CatalogSource::UserFolder});
+    c.ApplySourceResult(gen, CatalogSource::StartMenu,
+                        {Entry(L"start", AppSource::UserStartMenu)});
+    c.ApplySourceResult(gen, CatalogSource::AppsFolder,
+                        {Entry(L"apps", AppSource::AppsFolder)});
+    // Only two of three sources have reported: the snapshot stays as it was.
+    Expect(c.Snapshot().empty(), "no partial snapshot before all sources report");
+    c.ApplySourceResult(gen, CatalogSource::UserFolder,
+                        {Entry(L"user", AppSource::UserFolder)});
+    Expect(c.Snapshot().size() == 3, "snapshot swaps only when the generation is complete");
+}
+
+// AppsFolder on-demand rule: no refresh under 10 minutes, refresh when older.
+void TestAppsFolderStaleness() {
+    CatalogRefreshCoordinator c;
+    c.RecordAppsFolderSuccess(0);
+    Expect(!c.ShouldRefreshAppsFolder(1000),
+           "recent AppsFolder enumeration is not refreshed");
+    Expect(c.ShouldRefreshAppsFolder(CatalogRefreshCoordinator::kAppsFolderStaleMs + 1),
+           "AppsFolder older than 10 minutes is refreshed on demand");
+}
+
+// Snapshot is recomputed deterministically and atomic per swap: the caller sees
+// either the old or the new merged list, never a partial build.
+void TestSnapshotIsAtomicAndDeterministic() {
+    CatalogRefreshCoordinator c;
+    const std::uint64_t gen = c.BeginGeneration({CatalogSource::StartMenu});
+    c.ApplySourceResult(gen, CatalogSource::StartMenu,
+                        {Entry(L"a", AppSource::UserStartMenu)});
+    const std::vector<AppEntry> first = c.Snapshot();
+    const std::uint64_t gen2 = c.BeginGeneration({CatalogSource::StartMenu});
+    c.ApplySourceResult(gen2, CatalogSource::StartMenu,
+                        {Entry(L"a", AppSource::UserStartMenu),
+                         Entry(L"b", AppSource::UserStartMenu)});
+    const std::vector<AppEntry> second = c.Snapshot();
+    Expect(first.size() == 1 && second.size() == 2, "snapshot swaps as a whole");
+    Expect(c.Snapshot().size() == second.size(), "later snapshot stays until the next swap");
+}
+
+// NR-022: a failed launch with no rebuild running triggers exactly one refresh.
+void TestFailureNoRebuildTriggersOnce() {
+    nimblerun::LaunchFailureRefreshGate gate;
+    int triggers = 0;
+    if (gate.OnLaunchAttempt(false, false)) {
+        ++triggers;
+    }
+    Expect(triggers == 1, "failed launch with no rebuild in progress triggers once");
+}
+
+// NR-022: a failed launch while a rebuild is running merges instead.
+void TestFailureWithRebuildMerges() {
+    nimblerun::LaunchFailureRefreshGate gate;
+    int triggers = 0;
+    if (gate.OnLaunchAttempt(false, true)) {
+        ++triggers;
+    }
+    Expect(triggers == 0, "failed launch during a rebuild does not trigger");
+}
+
+// NR-022: two consecutive failures (the first already scheduled) schedule only
+// one refresh in total.
+void TestConsecutiveFailuresTriggerOnce() {
+    nimblerun::LaunchFailureRefreshGate gate;
+    int triggers = 0;
+    if (gate.OnLaunchAttempt(false, false)) {
+        ++triggers;
+    }
+    if (gate.OnLaunchAttempt(false, false)) {
+        ++triggers;
+    }
+    Expect(triggers == 1, "two consecutive failed launches schedule one refresh");
+}
+
+// NR-022: a successful launch never triggers a refresh.
+void TestSuccessNeverTriggers() {
+    nimblerun::LaunchFailureRefreshGate gate;
+    int triggers = 0;
+    if (gate.OnLaunchAttempt(true, false)) {
+        ++triggers;
+    }
+    if (gate.OnLaunchAttempt(true, true)) {
+        ++triggers;
+    }
+    Expect(triggers == 0, "successful launch never triggers a refresh");
+}
+
+void TestCacheRoundTrip() {
+    const std::wstring dir = TempDir();
+    std::vector<AppEntry> entries = {
+        Entry(L"id1", AppSource::UserStartMenu),
+        Entry(L"id2", AppSource::AppsFolder),
+        Entry(L"id3", AppSource::UserFolder),
+    };
+    entries[0].display_name = L"Notepad";
+    entries[0].normalized_name = L"notepad";
+
+    SaveCatalogCache(dir, entries);
+    std::vector<AppEntry> loaded;
+    Expect(LoadCatalogCache(dir, loaded), "valid cache loads");
+    Expect(loaded.size() == 3, "cache round-trips the entry count");
+    Expect(loaded[0].stable_id == L"id1" && loaded[0].display_name == L"Notepad",
+           "cache preserves stable id and display name");
+    Expect(loaded[1].source == AppSource::AppsFolder, "cache preserves source");
+    Expect(loaded[2].launch_identity == entries[2].launch_identity,
+           "cache preserves launch identity");
+    RemoveTreeBestEffort(dir);
+}
+
+void TestCorruptCacheRebuilds() {
+    const std::wstring dir = TempDir();
+    SaveCatalogCache(dir, {Entry(L"id1", AppSource::UserStartMenu)});
+
+    std::vector<AppEntry> loaded;
+    {
+        std::ofstream corrupt(fs::path(dir) / L"catalog.cache",
+                              std::ios::binary | std::ios::trunc);
+        corrupt << "not a cache";
+    }
+    Expect(!LoadCatalogCache(dir, loaded), "corrupt cache fails to load");
+    Expect(loaded.empty(), "no partial entries from a corrupt cache");
+    Expect(fs::exists(fs::path(dir) / L"catalog.cache.corrupt"),
+           "corrupt cache is preserved for diagnostics");
+    RemoveTreeBestEffort(dir);
+}
+
+void TestNewerSchemaCacheRebuilds() {
+    const std::wstring dir = TempDir();
+    std::ofstream cache(fs::path(dir) / L"catalog.cache", std::ios::binary | std::ios::trunc);
+    cache << "schema=999\n";
+    std::vector<AppEntry> loaded;
+    Expect(!LoadCatalogCache(dir, loaded), "newer schema cache is not loaded");
+    Expect(fs::exists(fs::path(dir) / L"catalog.cache"),
+           "newer schema file is left untouched");
+    RemoveTreeBestEffort(dir);
+}
+
+} // namespace
+
+int wmain() {
+    TestDebounceCoalescing();
+    TestOverflowForcesFullRescan();
+    TestStaleGenerationDoesNotOverwrite();
+    TestFailureKeepsOldSnapshot();
+    TestSingleSourceFailureIsolation();
+    TestAppsFolderStaleness();
+    TestSnapshotIsAtomicAndDeterministic();
+    TestNoPartialSnapshotBeforeAllSourcesReport();
+    TestCacheRoundTrip();
+    TestCorruptCacheRebuilds();
+    TestNewerSchemaCacheRebuilds();
+    TestFailureNoRebuildTriggersOnce();
+    TestFailureWithRebuildMerges();
+    TestConsecutiveFailuresTriggerOnce();
+    TestSuccessNeverTriggers();
+    std::printf("NR-011/NR-022 catalog refresh check PASSED\n");
+    return 0;
+}

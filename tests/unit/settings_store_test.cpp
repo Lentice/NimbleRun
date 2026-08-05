@@ -1,0 +1,219 @@
+#include "settings/settings_store.h"
+
+#include <windows.h>
+
+#include <cstdio>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <string>
+
+namespace fs = std::filesystem;
+
+using nimblerun::DefaultSettings;
+using nimblerun::Settings;
+using nimblerun::SettingsLoadResult;
+using nimblerun::SettingsStore;
+using nimblerun::Theme;
+
+namespace {
+
+void Expect(bool condition, const char* message) {
+    if (!condition) {
+        std::fprintf(stderr, "FAILED: %s\n", message);
+        std::exit(1);
+    }
+}
+
+std::wstring MakeTempDir(const char* label) {
+    wchar_t buffer[MAX_PATH];
+    const DWORD length = GetTempPathW(MAX_PATH, buffer);
+    if (length == 0 || length >= MAX_PATH) {
+        return {};
+    }
+    const std::wstring dir =
+        std::wstring(buffer) + L"NimbleRun_settings_test_" + std::to_wstring(GetCurrentProcessId()) +
+        L"_" + std::wstring(label, label + std::char_traits<char>::length(label));
+    fs::remove_all(dir);
+    Expect(fs::create_directories(dir), "create temp dir");
+    return dir;
+}
+
+std::string ReadBytes(const std::wstring& path) {
+    std::ifstream in(fs::path(path), std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+}
+
+void WriteBytes(const std::wstring& path, const std::string& bytes) {
+    std::ofstream out(fs::path(path), std::ios::binary | std::ios::trunc);
+    out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+}
+
+void TestDefaults(const std::wstring& dir) {
+    SettingsStore store(dir);
+    Settings loaded = DefaultSettings();
+    loaded.hotkey = L"changed";
+    Expect(store.Load(loaded) == SettingsLoadResult::Missing, "missing file reports Missing");
+    Expect(loaded.hotkey == L"Alt+Space", "default hotkey");
+    Expect(loaded.auto_start == false, "default auto_start");
+    Expect(loaded.theme == Theme::System, "default theme");
+    Expect(loaded.recent_count == 20, "default recent_count");
+    Expect(loaded.hide_after_launch == true, "default hide_after_launch");
+    Expect(loaded.catalog_roots.empty(), "default catalog_roots is empty");
+    Expect(loaded.catalog_extensions == nimblerun::DefaultExtensions(),
+           "default catalog_extensions is the full allowlist");
+}
+
+void TestRoundTrip(const std::wstring& dir) {
+    SettingsStore store(dir);
+    Settings expected;
+    expected.hotkey = L"Ctrl+Shift+P";
+    expected.auto_start = true;
+    expected.theme = Theme::Dark;
+    expected.recent_count = 32;
+    expected.hide_after_launch = false;
+    Expect(store.Save(expected), "save settings");
+
+    Settings loaded;
+    Expect(store.Load(loaded) == SettingsLoadResult::Loaded, "round-trip load");
+    Expect(loaded.hotkey == expected.hotkey, "round-trip hotkey");
+    Expect(loaded.auto_start == expected.auto_start, "round-trip auto_start");
+    Expect(loaded.theme == expected.theme, "round-trip theme");
+    Expect(loaded.recent_count == expected.recent_count, "round-trip recent_count");
+    Expect(loaded.hide_after_launch == expected.hide_after_launch, "round-trip hide_after_launch");
+}
+
+void TestCatalogRootsRoundTrip(const std::wstring& dir) {
+    SettingsStore store(dir);
+    Settings expected;
+    expected.catalog_roots.push_back({L"C:\\Tools", true});
+    expected.catalog_roots.push_back({L"D:\\Games\\Emu", false});
+    expected.catalog_extensions = {L".exe", L".lnk"};
+    Expect(store.Save(expected), "save catalog roots");
+
+    Settings loaded;
+    Expect(store.Load(loaded) == SettingsLoadResult::Loaded, "catalog roots load");
+    Expect(loaded.catalog_roots.size() == 2, "catalog roots count");
+    Expect(loaded.catalog_roots[0].path == L"C:\\Tools", "catalog root 1 path");
+    Expect(loaded.catalog_roots[0].recursive == true, "catalog root 1 recursive");
+    Expect(loaded.catalog_roots[1].path == L"D:\\Games\\Emu", "catalog root 2 path");
+    Expect(loaded.catalog_roots[1].recursive == false, "catalog root 2 recursive");
+    Expect(loaded.catalog_extensions == expected.catalog_extensions, "catalog extensions round-trip");
+}
+
+void TestCatalogRootsValidation(const std::wstring& dir) {
+    WriteBytes(dir + L"\\settings.ini",
+        "schema=1\n"
+        "catalog_root=C:\\Valid|true\n"
+        "catalog_root=unc\\share|true\n"
+        "catalog_root=//net\\host|false\n"
+        "catalog_root=C:\\NoFlag\n"
+        "catalog_extension=.exe\n"
+        "catalog_extension=.DLL\n"
+        "catalog_extension=.txt\n"
+        "catalog_extension=exe\n");
+    SettingsStore store(dir);
+    Settings loaded;
+    Expect(store.Load(loaded) == SettingsLoadResult::Loaded, "catalog validation load");
+    Expect(loaded.catalog_roots.size() == 2, "only local absolute roots kept");
+    Expect(loaded.catalog_roots[0].path == L"C:\\Valid", "valid root kept");
+    Expect(loaded.catalog_roots[0].recursive == true, "valid root recursive flag");
+    Expect(loaded.catalog_roots[1].path == L"C:\\NoFlag", "valid root without flag kept");
+    Expect(loaded.catalog_roots[1].recursive == true, "missing flag defaults to recursive");
+    Expect(loaded.catalog_extensions.size() == 1, "only allowlisted extensions kept");
+    Expect(loaded.catalog_extensions[0] == L".exe", "extension normalized and deduped");
+}
+
+void TestEscaping(const std::wstring& dir) {
+    SettingsStore store(dir);
+    Settings expected;
+    expected.hotkey = L"Ctrl+Alt+= \\slash\nnewline\ttab";
+    expected.theme = Theme::Light;
+    Expect(store.Save(expected), "save escaped settings");
+
+    const std::string on_disk = ReadBytes(dir + L"\\settings.ini");
+    Expect(on_disk.find("\\=") != std::string::npos, "escaped equals on disk");
+    Expect(on_disk.find("\\\\") != std::string::npos, "escaped backslash on disk");
+    Expect(on_disk.find("\\n") != std::string::npos, "escaped newline on disk");
+    Expect(on_disk.find("\\t") != std::string::npos, "escaped tab on disk");
+
+    Settings loaded;
+    Expect(store.Load(loaded) == SettingsLoadResult::Loaded, "escaping load");
+    Expect(loaded.hotkey == expected.hotkey, "escaping round-trip hotkey");
+    Expect(loaded.theme == Theme::Light, "escaping round-trip theme");
+}
+
+void TestValidation(const std::wstring& dir) {
+    WriteBytes(dir + L"\\settings.ini",
+        "schema=1\nrecent_count=1000\ntheme=bogus\nauto_start=banana\n"
+        "hide_after_launch=maybe\nhotkey=\n");
+    SettingsStore store(dir);
+    Settings loaded;
+    Expect(store.Load(loaded) == SettingsLoadResult::Loaded, "validation load");
+    Expect(loaded.recent_count == 20, "out-of-range recent_count defaults");
+    Expect(loaded.theme == Theme::System, "bogus theme defaults");
+    Expect(loaded.auto_start == false, "bogus auto_start defaults");
+    Expect(loaded.hide_after_launch == true, "bogus hide_after_launch defaults");
+    Expect(loaded.hotkey == L"Alt+Space", "empty hotkey defaults");
+}
+
+void TestCorrupt(const std::wstring& dir) {
+    const std::string content = "not a settings file\nschema=1\n";
+    WriteBytes(dir + L"\\settings.ini", content);
+    SettingsStore store(dir);
+    Settings loaded;
+    Expect(store.Load(loaded) == SettingsLoadResult::Corrupt, "corrupt file reports Corrupt");
+    Expect(loaded.hotkey == L"Alt+Space", "corrupt load uses default hotkey");
+    Expect(loaded.recent_count == 20, "corrupt load uses default recent_count");
+    Expect(!fs::exists(dir + L"\\settings.ini"), "corrupt file moved aside");
+    Expect(fs::exists(dir + L"\\settings.ini.corrupt"), "corrupt file preserved");
+    Expect(ReadBytes(dir + L"\\settings.ini.corrupt") == content, "corrupt content preserved verbatim");
+}
+
+void TestNewerSchema(const std::wstring& dir) {
+    const std::string content = "schema=99\nrecent_count=30\n";
+    WriteBytes(dir + L"\\settings.ini", content);
+    SettingsStore store(dir);
+    Settings loaded;
+    Expect(store.Load(loaded) == SettingsLoadResult::NewerSchema, "newer schema reports NewerSchema");
+    Expect(loaded.recent_count == 20, "newer schema load uses defaults");
+    Expect(loaded.hotkey == L"Alt+Space", "newer schema default hotkey");
+    Expect(fs::exists(dir + L"\\settings.ini"), "newer schema file untouched");
+    Expect(ReadBytes(dir + L"\\settings.ini") == content, "newer schema content unchanged");
+    Expect(!fs::exists(dir + L"\\settings.ini.corrupt"), "newer schema not treated as corrupt");
+}
+
+void TestAtomicWriteFailure(const std::wstring& dir) {
+    SettingsStore store(dir);
+    Settings expected;
+    expected.recent_count = 25;
+    Expect(store.Save(expected), "initial save");
+
+    // A directory occupying the .tmp path forces the temp write to fail.
+    Expect(fs::create_directory(dir + L"\\settings.ini.tmp"), "create tmp dir obstacle");
+
+    Settings modified = expected;
+    modified.recent_count = 30;
+    Expect(store.Save(modified) == false, "save fails when temp write fails");
+
+    Settings loaded;
+    Expect(store.Load(loaded) == SettingsLoadResult::Loaded, "original survives failed save");
+    Expect(loaded.recent_count == 25, "original value preserved after failed save");
+}
+
+} // namespace
+
+int wmain() {
+    TestDefaults(MakeTempDir("defaults"));
+    TestRoundTrip(MakeTempDir("roundtrip"));
+    TestEscaping(MakeTempDir("escaping"));
+    TestValidation(MakeTempDir("validation"));
+    TestCatalogRootsRoundTrip(MakeTempDir("catalogroots"));
+    TestCatalogRootsValidation(MakeTempDir("catalogvalidation"));
+    TestCorrupt(MakeTempDir("corrupt"));
+    TestNewerSchema(MakeTempDir("newer"));
+    TestAtomicWriteFailure(MakeTempDir("atomic"));
+    std::printf("NR-004 settings store check PASSED\n");
+    return 0;
+}

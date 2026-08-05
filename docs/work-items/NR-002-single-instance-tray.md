@@ -35,3 +35,18 @@ ctest --test-dir build --output-on-failure
 ```
 
 另加 focused lifecycle check：啟動第一個程序、確認唯一 process／window，再啟動第二個程序，確認第二個退出且第一個仍存活；測試結束必須終止測試程序。
+
+## 交接區
+
+- Start: 2026-08-04
+- Subagent scope: 以使用者範圍 single-instance 訊號實作單實例；tray lifecycle 不持有 Shell COM pointer；提供 Open、Refresh、Settings、About、Exit 命令入口並 dispatch 到主視窗訊息；不處理完整 Settings page、catalog refresh、hotkey registration 或 icon 載入。
+- Result: done
+- Agent: general subagent
+- 修改檔案：`src/app_host/main.cpp`（single-instance wake message、tray lifecycle、tray command dispatch）、`tests/integration/lifecycle_check.ps1`（新增，focused lifecycle check）、`tests/CMakeLists.txt`（註冊 `nimblerun_lifecycle_check` 至 CTest）。
+- 設計：session-scoped named mutex `Local\NimbleRun.SingleInstance`；wake 用 `RegisterWindowMessageW(L"NimbleRun.ShowPanel")`，第二個程序 FindWindow＋PostMessage 後以 exit 0 退出。tray 用 `Shell_NotifyIconW`，左鍵 show panel、右鍵 `TrackPopupMenu`（Open/Refresh Apps/Settings/About/Exit），各命令 dispatch 到主視窗 `WM_APP+n` 訊息；Refresh/Settings/About 目前為 no-op placeholder（NR-011/NR-013 認領），Exit 走 `DestroyWindow→WM_DESTROY`（移除 tray、unregister hotkey、PostQuitMessage）。hide／close panel 僅 SW_HIDE，不結束程序。
+- 行為變更（spec 一致）：`RegisterHotKey` 失敗改為 non-fatal（`main.cpp`），tray 常駐程序繼續存活，符合 §9.3 step 6；衝突提醒 UX 屬 NR-003。
+- Agent checks（2026-08-04）：
+  - `cmake --build build` → exit 0
+  - `ctest --test-dir build --output-on-failure` → exit 0，2/2 passed（`nimblerun_search_test`、`nimblerun_lifecycle_check`）
+  - lifecycle check：第一程序隱藏啟動、唯一 window 屬正確 PID；第二程序 exit 0 且第一程序存活並顯示；tray Exit message 讓第一程序乾淨退出；結束後無殘留 NimbleRun process。
+- 證據：`build\Testing\Temporary\LastTest.log`；`build\NimbleRun.exe`。

@@ -45,7 +45,7 @@ Do not treat the probe UI as the finished product. Implement the vertical slices
 From a shell with LLVM-MinGW, CMake, and Ninja on `PATH`:
 
 ```powershell
-cmake -S . -B build -G Ninja -DCMAKE_TOOLCHAIN_FILE=cmake/llvm-mingw.cmake -DCMAKE_BUILD_TYPE=Release
+cmake -S . -B build -G Ninja -D"CMAKE_TOOLCHAIN_FILE=cmake/llvm-mingw.cmake" -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ctest --test-dir build --output-on-failure
 ```

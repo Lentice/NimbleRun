@@ -1,0 +1,357 @@
+#include "app_host/panel_model.h"
+
+#include <cstdio>
+#include <cstdlib>
+#include <string>
+#include <vector>
+
+using nimblerun::AppEntry;
+using nimblerun::AppSource;
+using nimblerun::PanelAction;
+using nimblerun::PanelModel;
+
+namespace {
+
+void Expect(bool condition, const char* message) {
+    if (!condition) {
+        std::fprintf(stderr, "FAILED: %s\n", message);
+        std::exit(1);
+    }
+}
+
+AppEntry Entry(std::wstring id, std::wstring name) {
+    AppEntry entry;
+    entry.stable_id = std::move(id);
+    entry.display_name = name;
+    entry.normalized_name = name;
+    entry.launch_identity = L"C:\\Apps\\" + name + L".exe";
+    entry.source_path = entry.launch_identity;
+    entry.source = AppSource::UserFolder;
+    return entry;
+}
+
+std::vector<AppEntry> CatalogOf(int count) {
+    std::vector<AppEntry> catalog;
+    for (int i = 0; i < count; ++i) {
+        catalog.push_back(Entry(L"id" + std::to_wstring(i),
+                                L"App" + std::to_wstring(i)));
+    }
+    return catalog;
+}
+
+void TestEmptyQueryShowsRecent() {
+    const std::vector<AppEntry> catalog = {Entry(L"a", L"Alpha"), Entry(L"b", L"Beta")};
+    std::vector<AppEntry> recent = {Entry(L"b", L"Beta"), Entry(L"a", L"Alpha")};
+    PanelModel model(&catalog, std::move(recent));
+    Expect(model.Query().empty(), "query starts empty");
+    Expect(model.Rows().size() == 2, "recent rows shown on empty query");
+    Expect(model.Rows()[0].stable_id == L"b", "recent ordering newest first");
+    Expect(model.HasSelection(), "first recent row selected");
+}
+
+void TestEmptyStateNoRecords() {
+    const std::vector<AppEntry> catalog = {Entry(L"a", L"Alpha")};
+    PanelModel model(&catalog, {});
+    Expect(model.Rows().empty(), "no records -> empty state");
+    Expect(!model.HasSelection(), "empty state has no selection");
+    const PanelAction action = model.Activate();
+    Expect(!action.launch, "empty state never launches");
+}
+
+void TestQuerySwitchesToFilteredRows() {
+    const std::vector<AppEntry> catalog = {
+        Entry(L"1", L"Notepad"), Entry(L"2", L"Calculator"), Entry(L"3", L"Paint")};
+    PanelModel model(&catalog, {});
+    model.SetQuery(L"calc");
+    Expect(model.Rows().size() == 1, "query filters to one row");
+    Expect(model.Rows()[0].display_name == L"Calculator", "query row is the match");
+    Expect(model.HasSelection(), "first result selected");
+    // Selecting a row never auto-launches: only an explicit Activate() does.
+    model.MoveSelection(0);
+    model.MoveSelection(0);
+    Expect(model.HasSelection(), "moving selection keeps it selected");
+}
+
+void TestMoveSelectionClampsAndWraps() {
+    const std::vector<AppEntry> catalog = {
+        Entry(L"1", L"One"), Entry(L"2", L"Two"), Entry(L"3", L"Three")};
+    PanelModel model(&catalog, {});
+    model.SetQuery(L"");
+    // Recent list is empty; switch to query to get rows.
+    model.SetQuery(L"o");
+    const std::size_t count = model.Rows().size();
+    Expect(count == 2, "two rows match 'o'");
+    model.MoveSelection(1);
+    Expect(model.SelectionIndex() == 1, "down moves selection");
+    model.MoveSelection(1);
+    Expect(model.SelectionIndex() == 0, "down wraps to first");
+    model.MoveSelection(-1);
+    Expect(model.SelectionIndex() == count - 1, "up wraps to last");
+}
+
+void TestEnterLaunchesSelectedOnly() {
+    const std::vector<AppEntry> catalog = {
+        Entry(L"1", L"One"), Entry(L"2", L"Two")};
+    PanelModel model(&catalog, {});
+    model.SetQuery(L"two");
+    const PanelAction action = model.Activate();
+    Expect(action.launch, "Enter on a selection launches");
+    Expect(action.identity == catalog[1].launch_identity, "launches the selected entry");
+}
+
+void TestEnterEmptyResultNoLaunch() {
+    const std::vector<AppEntry> catalog = {Entry(L"1", L"One")};
+    PanelModel model(&catalog, {});
+    model.SetQuery(L"zzz-no-match");
+    Expect(model.Rows().empty(), "no match -> empty rows");
+    Expect(!model.HasSelection(), "no selection on empty rows");
+    const PanelAction action = model.Activate();
+    Expect(!action.launch, "no launch on empty result");
+}
+
+void TestEscClearsThenHides() {
+    const std::vector<AppEntry> catalog = {Entry(L"1", L"One")};
+    PanelModel model(&catalog, {});
+    model.SetQuery(L"on");
+    Expect(model.Esc() == false, "Esc with query clears, does not hide");
+    Expect(model.Query().empty(), "query cleared");
+    Expect(model.Esc() == true, "Esc with empty query requests hide");
+}
+
+void TestQueryChangeResetsSelection() {
+    const std::vector<AppEntry> catalog = {
+        Entry(L"1", L"One"), Entry(L"2", L"Two"), Entry(L"3", L"Three")};
+    PanelModel model(&catalog, {});
+    model.SetQuery(L"o");
+    model.MoveSelection(1);
+    Expect(model.SelectionIndex() == 1, "moved off first row");
+    model.SetQuery(L"e");
+    Expect(model.SelectionIndex() == 0, "query change resets to first row");
+}
+
+void TestFailureKeepsModelIntact() {
+    const std::vector<AppEntry> catalog = {Entry(L"1", L"One")};
+    PanelModel model(&catalog, {});
+    model.SetQuery(L"on");
+    // Simulate a launch failure: the model must stay queryable and the panel
+    // (caller) keeps showing rows.
+    Expect(model.Rows().size() == 1, "rows visible before failure");
+    Expect(model.HasSelection(), "selection present before failure");
+    Expect(model.Activate().launch, "activation succeeds at model level");
+    Expect(model.Rows().size() == 1, "rows still visible after a failed launch");
+    Expect(model.SelectionIndex() == 0, "selection intact after a failed launch");
+}
+
+// NR-020: visible-range (viewport) state is pure PanelModel state. The host
+// pushes the row count it derives from DPI/window size and only renders
+// [FirstVisibleRow(), FirstVisibleRow() + ViewportRows()).
+
+void TestSetViewportRowsClampsToOne() {
+    const std::vector<AppEntry> catalog = CatalogOf(5);
+    PanelModel model(&catalog, {});
+    model.SetQuery(L"App");
+    model.SetViewportRows(0);
+    Expect(model.ViewportRows() == 1, "viewport rows clamp to at least 1");
+    model.SetViewportRows(-3);
+    Expect(model.ViewportRows() == 1, "negative viewport rows clamp to 1");
+    Expect(model.FirstVisibleRow() == 0, "first visible stays 0");
+}
+
+void TestFewRowsKeepFirstVisibleZero() {
+    const std::vector<AppEntry> catalog = CatalogOf(2);
+    PanelModel model(&catalog, {});
+    model.SetQuery(L"App");
+    model.SetViewportRows(7);
+    // Selection moves inside the whole list; the window never needs to scroll.
+    model.MoveSelection(1);
+    Expect(model.FirstVisibleRow() == 0, "rows fewer than viewport keep first visible 0");
+    model.MoveSelection(-1);  // wraps to the last row
+    Expect(model.FirstVisibleRow() == 0, "wrap with rows fewer than viewport stays 0");
+}
+
+void TestMoveSelectionScrollsViewportByOne() {
+    const std::vector<AppEntry> catalog = CatalogOf(10);
+    PanelModel model(&catalog, {});
+    model.SetQuery(L"App");
+    model.SetViewportRows(3);
+    model.MoveSelection(1);  // 1
+    model.MoveSelection(1);  // 2
+    Expect(model.FirstVisibleRow() == 0, "selection inside viewport does not scroll");
+    model.MoveSelection(1);  // 3 -> below the window
+    Expect(model.FirstVisibleRow() == 1, "moving down out of view scrolls by exactly one");
+    model.MoveSelection(-1);  // 2, still visible in [1,4)
+    model.MoveSelection(-1);  // 1
+    Expect(model.FirstVisibleRow() == 1, "moving up inside viewport does not scroll");
+    model.MoveSelection(-1);  // 0 -> above the window
+    Expect(model.FirstVisibleRow() == 0, "moving up out of view scrolls by exactly one");
+}
+
+void TestWrapToLastRowScrollsToTail() {
+    const std::vector<AppEntry> catalog = CatalogOf(10);
+    PanelModel model(&catalog, {});
+    model.SetQuery(L"App");
+    model.SetViewportRows(3);
+    Expect(model.SelectionIndex() == 0 && model.FirstVisibleRow() == 0,
+           "starts at the first row");
+    model.MoveSelection(-1);  // up on the first row wraps to the last
+    Expect(model.SelectionIndex() == 9, "up from the first row wraps to the last");
+    Expect(model.FirstVisibleRow() == 7, "visible window jumps to the tail");
+    Expect(model.FirstVisibleRow() == 10 - 3, "tail window does not run past the end");
+}
+
+void TestResetOperationsClearScroll() {
+    const std::vector<AppEntry> catalog = CatalogOf(10);
+    PanelModel model(&catalog, {});
+    model.SetQuery(L"App");
+    model.SetViewportRows(3);
+    model.MoveSelection(1);
+    model.MoveSelection(1);
+    model.MoveSelection(1);
+    Expect(model.FirstVisibleRow() == 1, "viewport scrolled down");
+    model.SetQuery(L"App");
+    Expect(model.FirstVisibleRow() == 0, "SetQuery resets first visible");
+    model.MoveSelection(1);
+    model.MoveSelection(1);
+    model.MoveSelection(1);
+    model.Reset();
+    Expect(model.FirstVisibleRow() == 0, "Reset resets first visible");
+    model.SetQuery(L"App");
+    model.MoveSelection(1);
+    model.MoveSelection(1);
+    model.MoveSelection(1);
+    Expect(model.FirstVisibleRow() == 1, "viewport scrolled down again");
+    model.SetPins(std::vector<std::wstring>{L"id0"});
+    Expect(model.FirstVisibleRow() == 0, "SetPins resets first visible");
+}
+
+void TestViewportLargerThanRowsNeverNegative() {
+    const std::vector<AppEntry> catalog = CatalogOf(3);
+    PanelModel model(&catalog, {});
+    model.SetQuery(L"App");
+    model.SetViewportRows(10);
+    model.MoveSelection(-1);  // wraps 0 -> 2
+    Expect(model.FirstVisibleRow() == 0, "viewport larger than rows keeps first visible 0");
+    model.MoveSelection(-1);  // 2 -> 1
+    Expect(model.FirstVisibleRow() == 0, "first visible never goes negative");
+}
+
+void TestSelectRowBringsSelectionIntoView() {
+    const std::vector<AppEntry> catalog = CatalogOf(10);
+    PanelModel model(&catalog, {});
+    model.SetQuery(L"App");
+    model.SetViewportRows(3);
+    model.SelectRow(5);
+    Expect(model.SelectionIndex() == 5, "click selects the row");
+    Expect(model.FirstVisibleRow() == 3, "clicked row scrolled into view");
+    model.SelectRow(10);
+    Expect(model.SelectionIndex() == 5, "out-of-range click selection is a no-op");
+}
+
+// NR-021: paging scroll (PgUp/PgDn and the mouse wheel share ScrollBy; the
+// visible window is clamped to the list ends and never wraps).
+
+void TestScrollByPagesForward() {
+    const std::vector<AppEntry> catalog = CatalogOf(20);
+    PanelModel model(&catalog, {});
+    model.SetQuery(L"App");
+    model.SetViewportRows(5);
+    model.ScrollBy(5);
+    Expect(model.FirstVisibleRow() == 5, "PgDn advances the first visible row by the viewport");
+    Expect(model.SelectionIndex() == 5, "selection follows the new first visible row");
+    model.ScrollBy(5);
+    Expect(model.FirstVisibleRow() == 10, "a second PgDn advances another page");
+    Expect(model.SelectionIndex() == 10, "selection follows the second page");
+}
+
+void TestScrollByClampsAtTail() {
+    const std::vector<AppEntry> catalog = CatalogOf(20);
+    PanelModel model(&catalog, {});
+    model.SetQuery(L"App");
+    model.SetViewportRows(5);
+    model.ScrollBy(100);
+    Expect(model.FirstVisibleRow() == 15, "ScrollBy past the tail clamps to RowCount - viewport");
+    Expect(model.FirstVisibleRow() == 20 - 5, "clamped value equals RowCount - viewport");
+    model.ScrollBy(5);
+    Expect(model.FirstVisibleRow() == 15, "PgDn at the tail does not advance further");
+}
+
+void TestScrollByClampsAtStart() {
+    const std::vector<AppEntry> catalog = CatalogOf(20);
+    PanelModel model(&catalog, {});
+    model.SetQuery(L"App");
+    model.SetViewportRows(5);
+    model.ScrollBy(5);
+    Expect(model.FirstVisibleRow() == 5, "scrolled away from the start");
+    model.ScrollBy(-100);
+    Expect(model.FirstVisibleRow() == 0, "ScrollBy before the start clamps at 0");
+    model.ScrollBy(-5);
+    Expect(model.FirstVisibleRow() == 0, "PgUp at the start does not move");
+}
+
+void TestScrollByFewerRowsThanViewport() {
+    const std::vector<AppEntry> catalog = CatalogOf(3);
+    PanelModel model(&catalog, {});
+    model.SetQuery(L"App");
+    model.SetViewportRows(7);
+    model.ScrollBy(7);
+    Expect(model.FirstVisibleRow() == 0, "rows fewer than viewport never scroll down");
+    model.ScrollBy(-7);
+    Expect(model.FirstVisibleRow() == 0, "negative scroll keeps first visible 0");
+}
+
+void TestScrollByEmptyList() {
+    const std::vector<AppEntry> catalog = CatalogOf(1);
+    PanelModel model(&catalog, {});
+    model.SetQuery(L"zzz-no-match");
+    Expect(model.Rows().empty(), "empty result list");
+    model.ScrollBy(3);
+    Expect(model.FirstVisibleRow() == 0, "empty list keeps first visible 0");
+    Expect(!model.HasSelection(), "empty list has no selection");
+    model.ScrollBy(-3);
+    Expect(model.FirstVisibleRow() == 0, "empty list negative scroll is a no-op");
+}
+
+void TestScrollByRoundTripNoWrap() {
+    const std::vector<AppEntry> catalog = CatalogOf(20);
+    PanelModel model(&catalog, {});
+    model.SetQuery(L"App");
+    model.SetViewportRows(5);
+    model.ScrollBy(5);  // 5
+    model.ScrollBy(5);  // 10
+    model.ScrollBy(5);  // 15 (tail)
+    model.ScrollBy(5);  // stays 15 (clamped, no wrap)
+    model.ScrollBy(-5);  // 10
+    model.ScrollBy(-5);  // 5
+    model.ScrollBy(-5);  // 0
+    Expect(model.FirstVisibleRow() == 0, "scroll to the tail then back returns to the start");
+    Expect(model.SelectionIndex() == 0, "selection follows the returned first visible row");
+}
+
+} // namespace
+
+int wmain() {
+    TestEmptyQueryShowsRecent();
+    TestEmptyStateNoRecords();
+    TestQuerySwitchesToFilteredRows();
+    TestMoveSelectionClampsAndWraps();
+    TestEnterLaunchesSelectedOnly();
+    TestEnterEmptyResultNoLaunch();
+    TestEscClearsThenHides();
+    TestQueryChangeResetsSelection();
+    TestFailureKeepsModelIntact();
+    TestSetViewportRowsClampsToOne();
+    TestFewRowsKeepFirstVisibleZero();
+    TestMoveSelectionScrollsViewportByOne();
+    TestWrapToLastRowScrollsToTail();
+    TestResetOperationsClearScroll();
+    TestViewportLargerThanRowsNeverNegative();
+    TestSelectRowBringsSelectionIntoView();
+    TestScrollByPagesForward();
+    TestScrollByClampsAtTail();
+    TestScrollByClampsAtStart();
+    TestScrollByFewerRowsThanViewport();
+    TestScrollByEmptyList();
+    TestScrollByRoundTripNoWrap();
+    std::printf("NR-010/NR-020/NR-021 panel model check PASSED\n");
+    return 0;
+}
