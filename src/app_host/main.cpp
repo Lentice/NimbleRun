@@ -20,6 +20,7 @@
 #include "icons/shell_icon_provider.h"
 #include "launch/shell_launch.h"
 #include "pins/pin_store.h"
+#include "resources/resource.h"
 #include "settings/settings_editor.h"
 #include "settings/settings_store.h"
 #include "ui/panel_layout.h"
@@ -1054,7 +1055,8 @@ void AddTrayIcon(HWND window) {
     nid.uID = kTrayIconId;
     nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
     nid.uCallbackMessage = kTrayCallbackMessage;
-    nid.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
+    nid.hIcon = LoadIconW(GetModuleHandleW(nullptr),
+                          MAKEINTRESOURCEW(IDI_NIMBLERUN));
     wcsncpy(nid.szTip, L"NimbleRun", sizeof(nid.szTip) / sizeof(nid.szTip[0]) - 1);
     Shell_NotifyIconW(NIM_ADD, &nid);
 }
@@ -1537,6 +1539,8 @@ bool RegisterMainWindow(HINSTANCE instance) {
     window_class.lpfnWndProc = WindowProc;
     window_class.lpszClassName = kWindowClass;
     window_class.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    window_class.hIcon = LoadIconW(instance, MAKEINTRESOURCEW(IDI_NIMBLERUN));
+    window_class.hIconSm = window_class.hIcon;
     return RegisterClassExW(&window_class) != 0;
 }
 
