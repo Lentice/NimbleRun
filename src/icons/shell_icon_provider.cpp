@@ -69,7 +69,7 @@ IconBitmap BitmapFromHBITMAP(HBITMAP bitmap) {
 } // namespace
 
 IconBitmap ShellIconProvider::Load(const AppEntry& entry, const IconKey& key) {
-    if (entry.launch_identity.empty() || key.size <= 0) {
+    if (entry.launch_identity.empty() || key.variant <= 0) {
         return {};
     }
 
@@ -81,7 +81,7 @@ IconBitmap ShellIconProvider::Load(const AppEntry& entry, const IconKey& key) {
 
     HBITMAP hbitmap = nullptr;
     const HRESULT hr =
-        factory->GetImage(SIZE{key.size, key.size}, SIIGBF_ICONONLY | SIIGBF_RESIZETOFIT, &hbitmap);
+        factory->GetImage(SIZE{key.variant, key.variant}, SIIGBF_ICONONLY | SIIGBF_RESIZETOFIT, &hbitmap);
     factory->Release();
     if (FAILED(hr) || hbitmap == nullptr) {
         return {};

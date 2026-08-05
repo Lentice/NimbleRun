@@ -54,8 +54,8 @@ public:
     }
 };
 
-IconKey Key(const std::wstring& stable_id, int size = 32, float dpi = 96.0f) {
-    return IconKey{stable_id, size, dpi};
+IconKey Key(const std::wstring& stable_id, int variant = 48) {
+    return IconKey{stable_id, variant};
 }
 
 void TestMissThenInsertAndHit() {
@@ -124,29 +124,109 @@ void TestProviderFailureNotCached() {
     Expect(cache.Size() == 0, "still nothing cached after repeated failure");
 }
 
-void TestKeySeparatesSizeAndDpi() {
+void TestKeySeparatesVariant() {
     FakeIconProvider provider;
     IconCache cache(8);
 
-    cache.Resolve(Entry(L"app"), Key(L"app", 32, 96.0f), provider);
-    Expect(cache.Peek(Key(L"app", 32, 96.0f).Encode()) != nullptr, "exact key is cached");
-    Expect(cache.Peek(Key(L"app", 48, 96.0f).Encode()) == nullptr, "larger size is a distinct key");
-    Expect(cache.Peek(Key(L"app", 32, 144.0f).Encode()) == nullptr, "different dpi is a distinct key");
-    Expect(cache.Peek(Key(L"other", 32, 96.0f).Encode()) == nullptr, "different stable id is a distinct key");
+    cache.Resolve(Entry(L"app"), Key(L"app", 48), provider);
+    Expect(cache.Peek(Key(L"app", 48).Encode()) != nullptr, "exact variant is cached");
+    Expect(cache.Peek(Key(L"app", 96).Encode()) == nullptr, "next variant is a distinct key");
+    Expect(cache.Peek(Key(L"other", 48).Encode()) == nullptr, "different stable id is a distinct key");
 }
 
 void TestDefaultCap() {
     FakeIconProvider provider;
     IconCache cache;
-    for (int i = 0; i < static_cast<int>(IconCache::kDefaultMaxItems) + 5; ++i) {
+    const std::size_t cap = nimblerun::IconCacheCapacityFor(0, 20);
+    for (std::size_t i = 0; i < cap + 5; ++i) {
         cache.Resolve(Entry(std::to_wstring(i)), Key(std::to_wstring(i)), provider);
     }
-    Expect(cache.Size() == IconCache::kDefaultMaxItems, "default cap bounds the cache");
+    Expect(cache.Size() == cap, "default cap bounds the cache");
 }
 
 void TestKeyEncodingIsStable() {
-    Expect(Key(L"id", 32, 96.0f).Encode() == L"id|32|96", "encoded key is deterministic");
-    Expect(Key(L"id", 32, 96.4f).Encode() == L"id|32|96", "dpi rounds for a stable key");
+    Expect(Key(L"id", 48).Encode() == L"id|48", "encoded key is deterministic");
+    Expect(Key(L"id", 96).Encode() == L"id|96", "variant encodes without any dpi");
+}
+
+void TestVariantForPixels() {
+    const int small[] = {30, 40, 48};
+    for (const int px : small) {
+        Expect(nimblerun::IconVariantForPixels(px) == 48, "30/40/48 -> 48");
+    }
+    const int mid[] = {50, 60, 80, 96};
+    for (const int px : mid) {
+        Expect(nimblerun::IconVariantForPixels(px) == 96, "50/60/80/96 -> 96");
+    }
+    const int large[] = {97, 120, 256, 999};
+    for (const int px : large) {
+        Expect(nimblerun::IconVariantForPixels(px) == 256, "97/120/256/999 -> 256");
+    }
+    Expect(nimblerun::IconVariantForPixels(0) == 48, "0 -> 48");
+    Expect(nimblerun::IconVariantForPixels(-1) == 48, "negative -> 48");
+}
+
+void TestSameStableIdSameVariant() {
+    Expect(Key(L"app", nimblerun::IconVariantForPixels(30)).Encode() ==
+           Key(L"app", nimblerun::IconVariantForPixels(40)).Encode(),
+           "30px and 40px needs map to the same key");
+    Expect(Key(L"app", nimblerun::IconVariantForPixels(40)).Encode() !=
+           Key(L"app", nimblerun::IconVariantForPixels(60)).Encode(),
+           "40px and 60px needs map to different keys");
+}
+
+void TestCapacityFor() {
+    Expect(nimblerun::IconCacheCapacityFor(0, 20) == 44, "capacity (0,20) == 44");
+    Expect(nimblerun::IconCacheCapacityFor(12, 20) == 56, "capacity (12,20) == 56");
+    Expect(nimblerun::IconCacheCapacityFor(0, 8) == 32, "capacity (0,8) == 32");
+    Expect(nimblerun::IconCacheCapacityFor(0, 8) <= nimblerun::IconCacheCapacityFor(0, 20),
+           "capacity is monotonic in recent_count");
+    Expect(nimblerun::IconCacheCapacityFor(0, 20) <= nimblerun::IconCacheCapacityFor(12, 20),
+           "capacity is monotonic in pinned_count");
+}
+
+void TestSetMaxItemsShrink() {
+    FakeIconProvider provider;
+    IconCache cache(8);
+    cache.Resolve(Entry(L"a"), Key(L"a"), provider);
+    cache.Resolve(Entry(L"b"), Key(L"b"), provider);
+    cache.Resolve(Entry(L"c"), Key(L"c"), provider);
+    cache.Resolve(Entry(L"d"), Key(L"d"), provider);
+
+    cache.SetMaxItems(2);
+    Expect(cache.Size() == 2, "shrink evicts down to the new cap");
+    Expect(cache.Peek(Key(L"a").Encode()) == nullptr, "oldest entries are evicted first");
+    Expect(cache.Peek(Key(L"b").Encode()) == nullptr, "second oldest entry is evicted");
+    Expect(cache.Peek(Key(L"c").Encode()) != nullptr, "newer entries survive");
+    Expect(cache.Peek(Key(L"d").Encode()) != nullptr, "newest entry survives");
+
+    // Relative recency of the survivors is preserved: d is still more recent
+    // than c, so inserting another key evicts c, never d.
+    cache.Resolve(Entry(L"e"), Key(L"e"), provider);
+    Expect(cache.Peek(Key(L"c").Encode()) == nullptr, "shrink keeps recency order");
+    Expect(cache.Peek(Key(L"d").Encode()) != nullptr, "newest of the survivors stays");
+}
+
+void TestSetMaxItemsZero() {
+    FakeIconProvider provider;
+    IconCache cache(8);
+    cache.Resolve(Entry(L"a"), Key(L"a"), provider);
+    cache.Resolve(Entry(L"b"), Key(L"b"), provider);
+
+    cache.SetMaxItems(0);
+    Expect(cache.Size() <= 1, "zero cap degrades to a single item");
+}
+
+void TestSetMaxItemsGrow() {
+    FakeIconProvider provider;
+    IconCache cache(2);
+    cache.Resolve(Entry(L"a"), Key(L"a"), provider);
+    cache.Resolve(Entry(L"b"), Key(L"b"), provider);
+
+    cache.SetMaxItems(8);
+    Expect(cache.Size() == 2, "growing the cap evicts nothing");
+    Expect(cache.Peek(Key(L"a").Encode()) != nullptr, "grow keeps existing entries");
+    Expect(cache.Peek(Key(L"b").Encode()) != nullptr, "grow keeps all existing entries");
 }
 
 } // namespace
@@ -156,9 +236,15 @@ int wmain() {
     TestLruEviction();
     TestReinsertRefreshesRecency();
     TestProviderFailureNotCached();
-    TestKeySeparatesSizeAndDpi();
+    TestKeySeparatesVariant();
     TestDefaultCap();
     TestKeyEncodingIsStable();
-    std::printf("NR-012 icon cache check PASSED\n");
+    TestVariantForPixels();
+    TestSameStableIdSameVariant();
+    TestCapacityFor();
+    TestSetMaxItemsShrink();
+    TestSetMaxItemsZero();
+    TestSetMaxItemsGrow();
+    std::printf("NR-031 icon cache check PASSED\n");
     return 0;
 }

@@ -2,9 +2,9 @@
 
 #include "catalog/app_entry.h"
 
-#include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <list>
 #include <string>
 #include <unordered_map>
@@ -13,26 +13,25 @@
 
 namespace nimblerun {
 
-// Icon request key (design-spec §FR-009): stable ID + requested size (physical
-// pixels) + DPI. Two rows sharing a stable ID but requested at different
-// sizes/DPIs are distinct cache entries.
+// Standard on-disk / in-cache icon sizes in physical pixels. 48 is a native
+// Windows icon resource size; 96 and 256 are the escalation tiers. 96 is not a
+// native resource size (Shell derives it from 256) but keeps high-DPI machines
+// from paying ~5x the bytes and decode cost for an image drawn at 60-80 px.
+inline constexpr int kIconVariants[] = {48, 96, 256};
+
+// Smallest variant >= needed_px, clamped to the largest variant. needed_px <= 0
+// returns the smallest variant.
+int IconVariantForPixels(int needed_px);
+
+// Icon request key (design-spec §FR-009): stable ID + standard-size variant.
+// Neither the on-screen size nor the DPI is part of the key: the renderer
+// downscales at draw time, so one entry serves the 40 DIP grid cell and the
+// 30 DIP list row at every DPI within the same variant tier.
 struct IconKey {
     std::wstring stable_id;
-    int size = 0;
-    float dpi = 0.0f;
+    int variant = 0;   // one of kIconVariants
 
-    // Deterministic single-string key for map lookups. stable_id is a fixed
-    // width hex hash, so '|' separators are unambiguous. DPI is rounded to the
-    // nearest integer: per-monitor DPI values are integers in practice, and
-    // rounding keeps repeated queries for the same monitor hitting one entry.
-    std::wstring Encode() const {
-        std::wstring out = stable_id;
-        out.push_back(L'|');
-        out += std::to_wstring(size);
-        out.push_back(L'|');
-        out += std::to_wstring(static_cast<int>(std::lround(dpi)));
-        return out;
-    }
+    std::wstring Encode() const;  // stable_id + L'|' + variant
 };
 
 // A decoded 32bpp premultiplied BGRA image, ready to hand to a renderer
@@ -54,16 +53,25 @@ public:
     virtual IconBitmap Load(const AppEntry& entry, const IconKey& key) = 0;
 };
 
-// Bounded LRU of decoded bitmaps (default cap 64, design-spec §FR-009). Keys
-// are IconKey::Encode() strings. A cache hit refreshes recency; inserting a
+// Grid page size (design-spec §4.3): one full page of cells, i.e. the working
+// set of a single search result page.
+inline constexpr std::size_t kIconCacheWorkingSetItems = 24;
+
+// pinned_count + recent_count + one grid page. The first two terms are the
+// prewarm set; the third stops a search from evicting the prewarmed pins and
+// forcing a refetch on the next panel show.
+std::size_t IconCacheCapacityFor(std::size_t pinned_count, std::size_t recent_count);
+
+// Bounded LRU of decoded bitmaps (design-spec §FR-009). The default cap is
+// IconCacheCapacityFor(0, 20) = 44, a start value before the live pin count and
+// recent_count setting are known; ShowPanel re-derives it. Keys are
+// IconKey::Encode() strings. A cache hit refreshes recency; inserting a
 // new key beyond the cap evicts the least recently used key. Provider failures
 // are not cached: Resolve returns empty and leaves the cache unchanged, so the
 // caller may keep a fallback without polluting eviction state.
 class IconCache {
 public:
-    static constexpr std::size_t kDefaultMaxItems = 64;
-
-    explicit IconCache(std::size_t max_items = kDefaultMaxItems);
+    explicit IconCache(std::size_t max_items = IconCacheCapacityFor(0, 20));
 
     // Non-mutating lookup used by the renderer to decide fallback vs real icon.
     // Returns a pointer valid until the next mutation of this cache.
@@ -73,6 +81,12 @@ public:
     // on success. Returns empty only when the key is uncached and the provider
     // failed.
     IconBitmap Resolve(const AppEntry& entry, const IconKey& key, IconProvider& provider);
+
+    // Re-derives the LRU cap (design-spec §FR-009). Raising the cap never
+    // evicts; lowering it evicts from the LRU tail (least recently used) until
+    // the cache fits. max_items == 0 is treated as 1 so the cache is never
+    // disabled. The surviving entries keep their relative recency order.
+    void SetMaxItems(std::size_t max_items);
 
     std::size_t Size() const { return order_.size(); }
     void Clear();

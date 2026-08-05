@@ -590,25 +590,13 @@ void OpenFileLocation(HWND window, const nimblerun::AppEntry& entry) {
     }
 }
 
-// NR-012/NR-029: DIP icon size for the current layout state (30 DIP list tile,
-// 40 DIP grid cell), mapped to physical pixels at the render target's DPI.
-float CurrentIconSizeDip() {
-    return g_model && g_model->Columns() > 1
-        ? nimblerun::layout::kIconSizeDip
-        : nimblerun::layout::kTileSizeDip;
-}
-
-// NR-012: cache key for an entry's tile at the render target's current DPI.
-// The size is the physical pixel size that maps 1:1 to the DIP tile.
-nimblerun::IconKey IconKeyFor(const nimblerun::AppEntry& entry) {
-    float dpi_x = 96.0f;
-    float dpi_y = 96.0f;
-    if (g_render_target) {
-        g_render_target->GetDpi(&dpi_x, &dpi_y);
-    }
-    const int size = static_cast<int>(std::lround(
-        CurrentIconSizeDip() * dpi_x / nimblerun::layout::kDpi96));
-    return {entry.stable_id, size, dpi_x};
+// NR-012/NR-031: cache key for an entry at a physical-pixel need. The variant
+// is the smallest standard size >= needed_px (IconVariantForPixels); neither
+// DPI nor the exact on-screen size is part of the key, so one entry serves the
+// grid cell and list row at every DPI within the same variant tier
+// (design-spec §FR-009). needed_px comes from the caller's LayoutForDpi().
+nimblerun::IconKey IconKeyFor(const nimblerun::AppEntry& entry, int needed_px) {
+    return {entry.stable_id, nimblerun::IconVariantForPixels(needed_px)};
 }
 
 // Number of model items that intersect the list/grid viewport, for icon
@@ -660,17 +648,26 @@ void DrawDecodedIcon(const nimblerun::IconBitmap& icon,
 // COM, so it satisfies "icon loading does not block input state processing"
 // without thread lifecycle or COM marshaling. If Shell lookups ever stall the
 // panel measurably, move the load to a worker thread that CoInitializeEx's STA
-// itself and posts the plain IconBitmap back in a message.
+// itself and posts the plain IconBitmap back in a message. Moving the load to
+// that worker thread is NR-032, deliberately NOT done by this item.
 void LoadVisibleIcons(HWND window) {
     if (!g_model || !g_icon_cache || !g_icon_provider) {
         return;
     }
+    // NR-031: the physical-pixel need comes from the shared LayoutForDpi()
+    // geometry, not a render-loop scale; the layout state picks the icon size
+    // (40 DIP grid cell vs 30 DIP list tile, design-spec §4.2/§4.3).
+    const nimblerun::layout::LayoutPx layout =
+        nimblerun::layout::LayoutForDpi(GetDpiForWindow(window));
+    const int needed_px = g_model->Columns() > 1
+        ? static_cast<int>(std::lround(nimblerun::layout::kIconSizeDip * layout.scale))
+        : layout.tile_size;
     const auto& rows = g_model->Rows();
     const int first = g_model->FirstVisibleRow();
     const int count = VisibleItemCount();
     for (int i = 0; i < count; ++i) {
         const auto& entry = rows[static_cast<std::size_t>(first + i)];
-        const nimblerun::IconKey key = IconKeyFor(entry);
+        const nimblerun::IconKey key = IconKeyFor(entry, needed_px);
         const std::wstring encoded = key.Encode();
         if (g_icon_cache->Peek(encoded) != nullptr || g_requested_icon_keys.count(encoded) != 0) {
             continue;
@@ -876,6 +873,13 @@ void Render(HWND window) {
     float dpi_y = 96.0f;
     g_render_target->GetDpi(&dpi_x, &dpi_y);
     bool need_icon_request = false;
+    // NR-031: the icon need per layout state comes from the shared
+    // LayoutForDpi() geometry (40 DIP grid cell / 30 DIP list tile in physical
+    // pixels), never a scale inline in the render loop.
+    const nimblerun::layout::LayoutPx layout =
+        nimblerun::layout::LayoutForDpi(dpi_x);
+    const int grid_icon_needed_px = static_cast<int>(std::lround(
+        nimblerun::layout::kIconSizeDip * layout.scale));
 
     // NR-023: rounded search box behind the EDIT (design-spec §4.9). DIP
     // geometry; the EDIT child sits inset and covers the corners, so no text
@@ -946,7 +950,7 @@ void Render(HWND window) {
                     icon_left, icon_top,
                     icon_left + nimblerun::layout::kIconSizeDip,
                     icon_top + nimblerun::layout::kIconSizeDip);
-                const nimblerun::IconKey key = IconKeyFor(rows[i]);
+                const nimblerun::IconKey key = IconKeyFor(rows[i], grid_icon_needed_px);
                 const std::wstring encoded = key.Encode();
                 if (const nimblerun::IconBitmap* icon = g_icon_cache ? g_icon_cache->Peek(encoded) : nullptr) {
                     DrawDecodedIcon(*icon, tile, dpi_x, dpi_y);
@@ -1053,7 +1057,7 @@ void Render(HWND window) {
                     tile_left + nimblerun::layout::kTileSizeDip,
                     tile_top + nimblerun::layout::kTileSizeDip);
     
-                const nimblerun::IconKey key = IconKeyFor(rows[i]);
+                const nimblerun::IconKey key = IconKeyFor(rows[i], layout.tile_size);
                 const std::wstring encoded = key.Encode();
                 if (const nimblerun::IconBitmap* icon = g_icon_cache ? g_icon_cache->Peek(encoded) : nullptr) {
                     DrawDecodedIcon(*icon, tile, dpi_x, dpi_y);
@@ -1306,6 +1310,14 @@ void ShowPanel(HWND window) {
     // NR-018: reload pins on every open so restarts and external edits to
     // favorites.txt are reflected.
     RefreshPins();
+    // NR-031: derive the LRU cap from the live pin count + recent_count setting
+    // + one grid page (design-spec §FR-009), so a search result never evicts
+    // the prewarmed pins and forces a refetch on the next panel show.
+    if (g_icon_cache) {
+        g_icon_cache->SetMaxItems(nimblerun::IconCacheCapacityFor(
+            g_pins ? g_pins->OrderedPins().size() : 0,
+            g_settings.recent_count));
+    }
     if (g_model) {
         g_model->Reset();
     }
@@ -1689,6 +1701,13 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
             if (applied) {
                 StartWatchers();
                 RefreshPanelSnapshot();
+                // NR-031: recent_count (and the pin list) changed the derived
+                // LRU cap; re-derive it after settings are applied.
+                if (g_icon_cache) {
+                    g_icon_cache->SetMaxItems(nimblerun::IconCacheCapacityFor(
+                        g_pins ? g_pins->OrderedPins().size() : 0,
+                        g_settings.recent_count));
+                }
                 const std::vector<nimblerun::CatalogSource> all = {
                     nimblerun::CatalogSource::StartMenu,
                     nimblerun::CatalogSource::AppsFolder,
@@ -1848,6 +1867,11 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
                 // Refresh just the pin region: SetPins rebuilds the empty-query
                 // rows so the entry moves into/out of the pinned region.
                 g_model->SetPins(g_pins->OrderedPins());
+                // NR-031: the pin count drives the derived LRU cap; re-derive it.
+                if (g_icon_cache) {
+                    g_icon_cache->SetMaxItems(nimblerun::IconCacheCapacityFor(
+                        g_pins->OrderedPins().size(), g_settings.recent_count));
+                }
                 InvalidateRect(window, nullptr, FALSE);
             }
         } else if (command == kCmdOpenLocation) {
