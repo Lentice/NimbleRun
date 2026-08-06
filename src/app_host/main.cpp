@@ -1997,8 +1997,18 @@ LRESULT CALLBACK SearchEditProc(HWND edit, UINT message, WPARAM w_param, LPARAM 
                 return 0;
             }
             case VK_ESCAPE:
+                // NR-052: Esc's two-stage behavior lives in PanelModel::Esc()
+                // (design-spec §4.7), but the model's query is a derived value
+                // -- the EDIT control is what the user sees and types into.
+                // Clearing only the model left the old text on screen under the
+                // pinned/recent grid, and the next keystroke appended to it.
+                // Clear the EDIT and let the existing EN_UPDATE path push the
+                // empty query into the model, so there is still exactly one
+                // route from typed text to query state.
                 if (g_model->Esc()) {
                     HidePanel(GetParent(edit));
+                } else {
+                    SetWindowTextW(edit, L"");
                 }
                 return 0;
             case 'R':

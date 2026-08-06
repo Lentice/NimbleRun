@@ -1,6 +1,7 @@
 #pragma once
 
 #include "catalog/app_entry.h"
+#include "search/search_engine.h"
 
 #include <cstddef>
 #include <string>
@@ -61,7 +62,10 @@ public:
     // viewport/scroll/selection code (design-spec §4.2/§4.3). One page holds
     // ViewportRows() * Columns() items.
     void SetGridColumns(int columns);
-    int Columns() const { return query_.empty() ? grid_columns_ : 1; }
+    // NR-052: the grid/list split is the same §4.3/§4.4 decision RefreshRows
+    // makes -- a whitespace-only query normalizes to empty and stays in the
+    // grid, so this uses the one normalizer, not query_.empty().
+    int Columns() const { return NormalizeName(query_).empty() ? grid_columns_ : 1; }
 
     // First row currently visible in the viewport; clamped to
     // [0, max(0, RowCount() - viewport)] so the window never runs past the

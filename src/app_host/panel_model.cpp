@@ -39,7 +39,13 @@ void PanelModel::SetQuery(const std::wstring& query) {
 }
 
 void PanelModel::RefreshRows() {
-    if (query_.empty()) {
+    // NR-052: design-spec §4.3 switches layout when the box "contains a
+    // non-whitespace character", not when it is non-empty. A lone space used to
+    // drop out of the grid into the single-column list and then show "No
+    // matching apps", because SearchApps normalizes the query to empty and
+    // returns nothing. Reuse the one §4.4 normalizer rather than writing a
+    // second blank test that could drift from it.
+    if (NormalizeName(query_).empty()) {
         rows_.clear();
         // Pinned apps first, in pin order, resolved from the catalog snapshot
         // so a pin for an app currently absent from the catalog is not shown

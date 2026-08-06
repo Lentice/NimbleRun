@@ -121,6 +121,80 @@ void TestEscClearsThenHides() {
     Expect(model.Esc() == true, "Esc with empty query requests hide");
 }
 
+// NR-052: design-spec §4.3 switches layout when the search box "contains a
+// non-whitespace character". A whitespace-only query normalizes to empty
+// (§4.4), so it must stay in the grid and keep the pinned+recent rows.
+
+void TestWhitespaceQueryStaysInGrid() {
+    const std::vector<AppEntry> catalog = CatalogOf(8);
+    PanelModel model(&catalog, catalog);
+    model.SetGridColumns(6);
+    model.SetPins({L"id0", L"id1"});
+    const std::size_t rows_before = model.Rows().size();
+    const int columns_before = model.Columns();
+    Expect(columns_before == 6, "empty query uses the grid columns");
+    Expect(!model.Rows().empty(), "empty query shows grid rows");
+    model.SetQuery(L" ");
+    Expect(model.Columns() == 6, "a single space stays in the grid layout");
+    Expect(model.Rows().size() == rows_before, "a single space keeps the pinned+recent rows");
+    model.SetQuery(L"   ");
+    Expect(model.Columns() == 6, "multiple spaces stay in the grid layout");
+    Expect(model.Rows().size() == rows_before, "multiple spaces keep the pinned+recent rows");
+    model.SetQuery(L"\t");
+    Expect(model.Columns() == 6, "a tab stays in the grid layout");
+    Expect(model.Rows().size() == rows_before, "a tab keeps the pinned+recent rows");
+}
+
+void TestTrimmedQuerySameAsUntrimmed() {
+    const std::vector<AppEntry> catalog = {
+        Entry(L"1", L"Notepad"), Entry(L"2", L"Calculator"), Entry(L"3", L"Paint")};
+    PanelModel model(&catalog, {});
+    model.SetQuery(L"a");
+    const std::vector<AppEntry> untrimmed = model.Rows();
+    Expect(model.Columns() == 1, "a real query switches to the single-column list");
+    model.SetQuery(L" a ");
+    Expect(model.Columns() == 1, "a padded query is still a search");
+    Expect(model.Rows().size() == untrimmed.size(), "padded query matches the same row count");
+    for (std::size_t i = 0; i < untrimmed.size(); ++i) {
+        Expect(model.Rows()[i].stable_id == untrimmed[i].stable_id,
+               "padded query returns the same entries as the raw query");
+    }
+}
+
+void TestSetQueryEmptyMatchesReset() {
+    const std::vector<AppEntry> catalog = CatalogOf(6);
+    PanelModel model(&catalog, catalog);
+    model.SetPins({L"id0", L"id2"});
+    model.SetQuery(L"App");
+    Expect(model.Columns() == 1, "query switches to the list layout");
+    model.SetQuery(L"");
+    const std::vector<AppEntry> after_set_query = model.Rows();
+    model.SetQuery(L"App");
+    model.Reset();
+    const std::vector<AppEntry> after_reset = model.Rows();
+    Expect(after_set_query.size() == after_reset.size(),
+           "SetQuery(empty) and Reset produce the same row count");
+    for (std::size_t i = 0; i < after_set_query.size(); ++i) {
+        Expect(after_set_query[i].stable_id == after_reset[i].stable_id,
+               "SetQuery(empty) and Reset produce the same rows");
+    }
+}
+
+// NR-052: design-spec §4.7 clears the search box first whenever it "has
+// content" -- judged by the user-visible raw text, so a whitespace-only query
+// still counts and Esc must clear (return false) rather than hide the panel.
+
+void TestEscOnWhitespaceQueryClearsFirst() {
+    const std::vector<AppEntry> catalog = CatalogOf(4);
+    PanelModel model(&catalog, catalog);
+    model.SetGridColumns(6);
+    model.SetQuery(L" ");
+    Expect(model.Columns() == 6, "whitespace query is still the grid view");
+    Expect(model.Esc() == false, "Esc on whitespace clears, does not request hide");
+    Expect(model.Query().empty(), "whitespace query cleared by Esc");
+    Expect(model.Esc() == true, "Esc after clearing requests hide");
+}
+
 void TestQueryChangeResetsSelection() {
     const std::vector<AppEntry> catalog = {
         Entry(L"1", L"One"), Entry(L"2", L"Two"), Entry(L"3", L"Three")};
@@ -668,6 +742,10 @@ int wmain() {
     TestEnterLaunchesSelectedOnly();
     TestEnterEmptyResultNoLaunch();
     TestEscClearsThenHides();
+    TestWhitespaceQueryStaysInGrid();
+    TestTrimmedQuerySameAsUntrimmed();
+    TestSetQueryEmptyMatchesReset();
+    TestEscOnWhitespaceQueryClearsFirst();
     TestQueryChangeResetsSelection();
     TestFailureKeepsModelIntact();
     TestSetViewportRowsClampsToOne();

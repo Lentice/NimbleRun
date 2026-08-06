@@ -307,3 +307,78 @@ git diff --name-only
 （實作者填寫：修改的位置、`Esc()` 的實際 bool 語意、`SetWindowTextW` 是否
 真的觸發既有的 query 更新路徑（如何驗證的）、是否需要 CMake 連結變更、
 建置與 CTest 結果、6 條手動驗收結果、sanity greps、偏差、未完成事項。）
+
+### 修改的位置
+
+- `src/app_host/main.cpp:1999-2013` — `SearchEditProc` 的 `VK_ESCAPE` 分支：保留既有
+  `if (g_model->Esc()) { HidePanel(...) }`，else 臂新增 `SetWindowTextW(edit, L"")`。
+- `src/app_host/panel_model.cpp:48` — `RefreshRows()` 的版面分支條件改
+  `NormalizeName(query_).empty()`。
+- `src/app_host/panel_model.h` — `Columns()` getter（原 `query_.empty() ? grid_columns_ : 1`）
+  改 `NormalizeName(query_).empty() ? grid_columns_ : 1`，並補 `#include "search/search_engine.h"`。
+- `tests/unit/panel_model_test.cpp` — 新增 `TestWhitespaceQueryStaysInGrid`、
+  `TestTrimmedQuerySameAsUntrimmed`、`TestSetQueryEmptyMatchesReset`、
+  `TestEscOnWhitespaceQueryClearsFirst` 四函式＋註冊（既有 `TestEscClearsThenHides` 已覆蓋
+  Esc 兩段語意回歸）。
+- `docs/design-spec.md` — §4.3「版面切換點唯一」bullet 後補一句、§4.7 鍵盤表後補一句。
+
+### `Esc()` 的實際 bool 語意
+
+`panel_model.cpp:192-198`：**回傳 true ＝「query 已空，該隱藏面板」**；非空時內部
+`SetQuery(L"")` 清空後回傳 false。與 §1 給的分支方向一致（true→HidePanel、false→清 EDIT）。
+空白 query 也非空 → 回傳 false，先清空再隱藏，符合 §4.7「搜尋欄有內容時清空」；因此
+**未改 `Esc()`**，§3「Esc 在只有空白 query 上的行為」以 `Esc()==false` 為預期值，測試通過。
+
+### `SetWindowTextW` 是否真的觸發既有的 query 更新路徑
+
+是。以讀程式碼驗證（未下中斷點／未加 `OutputDebugStringW`）：`SetWindowTextW` 會對父視窗
+送出 `WM_COMMAND`/`EN_UPDATE`（Win32 文件化的 EDIT 行為）；`main.cpp:2181-2193` 的
+`WM_COMMAND` case 正是 `LOWORD(w_param)==kSearchId && HIWORD(w_param)==EN_UPDATE`，讀回
+`g_search_edit` 全文 → `g_model->SetQuery` → `UpdateViewportRows` → `InvalidateRect`。因此
+Esc 清 EDIT 後空 query 自動推進模型，不需要在 `Esc()` 後另行 `SetQuery`。EDIT 子視窗的
+通知行為無法單元測試，由手動驗收 #1／#2／#5 覆蓋。
+
+### 是否需要 CMake 連結變更
+
+**否**。`nimblerun_panel_model` 已 `PUBLIC nimblerun_search`
+（CMakeLists.txt:273-276），`panel_model.cpp` 本已 `#include "search/search_engine.h"`。
+共用 `NormalizeName` 可行，未動用 §2 的三行 `IsBlank` 退路。
+
+### 建置與 CTest 結果
+
+- configure＋build（Release, LLVM-MinGW）：成功，無新增警告。
+- `ctest --test-dir build --output-on-failure`：**23/23 全綠**。
+- `ctest --test-dir build -R panel_model`：回傳「No tests were found!!!」——既有註冊名是
+  `nimblerun_list_vertical_slice_test`（執行檔名 `nimblerun_panel_model_test`），regex 不含
+  `panel_model`；此命名屬既有狀態（NR-055 的清理範圍）。改以直接執行
+  `build\tests\nimblerun_panel_model_test.exe` 驗證 exit 0（含新案例）。
+
+### 6 條手動驗收結果
+
+全部為人工視覺／操作驗證，依 `AGENTS.md` 交付規則不在 Agent 範圍，未執行。
+
+### sanity greps
+
+- `panel_model.cpp` 的 `query_.empty()|NormalizeName`：`RefreshRows` 用
+  `NormalizeName(query_).empty()`（:48）；其餘兩處 `query_.empty()`（:163 prewarm guard、
+  :199 `Esc()` 兩段語意）非版面判斷，符合預期。
+- `IsBlank|iswspace`（src/）：唯一 `iswspace` 命中 `search_engine.cpp:20`（§4.4 正規化器的
+  `CollapseWhitespace` 既有實作，本 item 未改）；無第二套空白判斷。
+- `VK_ESCAPE`（-A 8）：分支內含 `SetWindowTextW(edit, L"")`（:2011）。
+- `SetQuery`（main.cpp）：僅 `:2194`（`EN_UPDATE` 臂）一處，無繞過單一資料流。
+- `git diff src/search/`：空。
+- `git diff --name-only`：`docs/design-spec.md`、`src/app_host/main.cpp`、
+  `src/app_host/panel_model.cpp`、`src/app_host/panel_model.h`、`tests/unit/panel_model_test.cpp`。
+
+### 偏差
+
+item §2 只列 `RefreshRows()`；實作額外改 `panel_model.h` 的 `Columns()` getter。理由：
+§3 驗收測試明寫「`SetQuery(L" ")` → `Columns() > 1`（仍在格狀）」，而 `Columns()` 是版面
+決定的**第二個**判定點，原樣保留 `query_.empty()` 時空白 query 仍回傳 1（切單欄）、第一條
+新測試即紅。此變更與 §2「判定點只有一處」的決策一致（兩處版面判斷共用唯一正規化器），
+非新增抽象層；header 僅補 include＋getter 一行。其餘與 item 無出入。
+
+### 未完成事項
+
+無。6 條手動驗收為人工操作；`ctest -R panel_model` 的命名錯位屬既有狀態，若要讓 item 的
+Agent check 原樣可跑，屬 NR-055（測試 CMake 樣板清理）的範圍。
