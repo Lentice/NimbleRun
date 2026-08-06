@@ -78,6 +78,8 @@
 | NR-042 | Search caret erased by the panel repaint | 3 | `ready` | — | [NR-042](work-items/NR-042-search-caret-clipped.md) |
 | NR-043 | Key-hint box labels: centered, border-colored, keycap font | 3 | `ready` | — | [NR-043](work-items/NR-043-key-box-label-polish.md) |
 | NR-044 | Rounded panel corners via DWM | 3 | `ready` | — | [NR-044](work-items/NR-044-rounded-panel-corners.md) |
+| NR-045 | Grid quick-select hints appear only while Alt is held | 3 | `ready` | — | [NR-045](work-items/NR-045-alt-gated-grid-hints.md) |
+| NR-046 | Drag pinned cells to reorder them in the grid | 3 | `ready` | NR-018, NR-029, NR-040 | [NR-046](work-items/NR-046-pin-drag-reorder.md) |
 
 ## Dependency lanes
 
