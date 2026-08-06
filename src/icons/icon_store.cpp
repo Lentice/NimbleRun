@@ -15,6 +15,23 @@ std::wstring KeyFor(const std::wstring& stable_id, int variant) {
     return stable_id + L'|' + std::to_wstring(variant);
 }
 
+// The atomic replace can transiently fail with a sharing/access error when a
+// real-time scanner opens the freshly written pack for a look. Retry a few
+// times with a short pause; a persistent failure still degrades to "no cache"
+// and the next Flush retries the compaction.
+bool ReplaceFileWithRetry(const std::wstring& tmp_path, const std::wstring& pack_path) {
+    for (int attempt = 0; attempt < 5; ++attempt) {
+        if (MoveFileExW(tmp_path.c_str(), pack_path.c_str(),
+                        MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != FALSE) {
+            return true;
+        }
+        if (attempt < 4) {
+            Sleep(10);
+        }
+    }
+    return false;
+}
+
 } // namespace
 
 IconStore::IconStore(IconStorePaths paths, std::uint64_t max_bytes, DiagnosticLog* log)
@@ -96,8 +113,7 @@ bool IconStore::CreateEmptyPack() {
         DeleteFileW(tmp_path.c_str());
         return false;
     }
-    if (MoveFileExW(tmp_path.c_str(), pack_path_.c_str(),
-                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) == FALSE) {
+    if (!ReplaceFileWithRetry(tmp_path, pack_path_.wstring())) {
         DeleteFileW(tmp_path.c_str());
         return false;
     }
@@ -535,7 +551,11 @@ bool IconStore::Compact() {
         PackEntry rewritten = entry;
         rewritten.payload_offset = offset;
         EncodeEntry(rewritten, content.data() + kIndexOffset + slot * kIndexEntrySize);
-        entries_by_slot_[slot] = rewritten;
+        // NOTE: entries_by_slot_ is deliberately left untouched here. A failed
+        // compaction must not rewrite the in-memory index, because eviction is
+        // in-memory-only (the evicted slot still reads in_use on disk) and a
+        // rescan would resurrect it. On success ScanIndex rebuilds from the new
+        // file; on failure the existing index (with evictions) stays correct.
         offset += entry.payload_len;
     }
     content.resize(offset);
@@ -554,9 +574,7 @@ bool IconStore::Compact() {
     const HANDLE file = CreateFileW(tmp_path.c_str(), GENERIC_WRITE, 0, nullptr,
                                     CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (file == INVALID_HANDLE_VALUE) {
-        if (MapFile()) {
-            ScanIndex();  // restore the in-memory index from the original file
-        }
+        MapFile();  // restore the mapping; keep the in-memory index as-is
         return false;
     }
     DWORD written = 0;
@@ -566,17 +584,12 @@ bool IconStore::Compact() {
     const bool close_ok = CloseHandle(file) != FALSE;
     if (!wrote_ok || !close_ok) {
         DeleteFileW(tmp_path.c_str());
-        if (MapFile()) {
-            ScanIndex();
-        }
+        MapFile();
         return false;
     }
-    if (MoveFileExW(tmp_path.c_str(), pack_path_.c_str(),
-                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) == FALSE) {
+    if (!ReplaceFileWithRetry(tmp_path, pack_path_.wstring())) {
         DeleteFileW(tmp_path.c_str());
-        if (MapFile()) {
-            ScanIndex();  // the original file is still there; remap and rescan
-        }
+        MapFile();  // the original file is still there; remap, keep index as-is
         return false;
     }
 
