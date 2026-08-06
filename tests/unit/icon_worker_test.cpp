@@ -1,25 +1,44 @@
 // NR-032: IconWorker delivers decoded icons off the UI thread as posted
 // messages. Pure Win32 test with a message-only window; no visible UI.
+// NR-036: with an IconStore wired in, the disk layer sits between the worker
+// and the provider -- a second session on the same pack never touches the
+// provider. The store points at %TEMP%\NimbleRunTest\<pid>, never the real
+// %LOCALAPPDATA%\NimbleRun.
 #include "icons/icon_cache.h"
+#include "icons/icon_pack_format.h"
+#include "icons/icon_store.h"
 #include "icons/icon_worker.h"
 
 #include <windows.h>
 
 #include <atomic>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cwchar>
+#include <filesystem>
 #include <memory>
 #include <set>
 #include <string>
 #include <vector>
 
+namespace fs = std::filesystem;
+
 using nimblerun::AppEntry;
+using nimblerun::EncodeHeader;
 using nimblerun::IconBitmap;
 using nimblerun::IconKey;
 using nimblerun::IconProvider;
 using nimblerun::IconRequest;
 using nimblerun::IconResult;
+using nimblerun::IconStore;
+using IconStorePaths = nimblerun::IconStore::IconStorePaths;
 using nimblerun::IconWorker;
+using nimblerun::kIndexCapacity;
+using nimblerun::kPayloadStart;
+using nimblerun::MakeEmptyPack;
+using nimblerun::PackHeader;
+using StoreState = nimblerun::IconStore::StoreState;
 
 namespace {
 
@@ -248,6 +267,345 @@ void TestStopDropsQueueAndSilencesNewPosts() {
     DestroyWindow(window);
 }
 
+// --- NR-036: disk-layer round trips through a temp pack. ---
+
+fs::path TestDir() {
+    const fs::path dir =
+        fs::temp_directory_path() / L"NimbleRunTest" / std::to_wstring(GetCurrentProcessId());
+    fs::create_directories(dir);
+    return dir;
+}
+
+fs::path PackPath() {
+    return TestDir() / L"icons.cache";
+}
+
+// A stable ID the store's ParseStableIdHash accepts: 16 lowercase hex digits.
+std::wstring Id(int n) {
+    wchar_t buf[24];
+    std::swprintf(buf, 24, L"%016x", n);
+    return buf;
+}
+
+void ResetCache() {
+    DeleteFileW(PackPath().c_str());
+    DeleteFileW((PackPath().wstring() + L".tmp").c_str());
+}
+
+// An entry whose source is a real temp file, so the worker's GetFileAttributesExW
+// produces a stable source stamp across two sessions.
+AppEntry FileEntry(const std::wstring& stable_id, const fs::path& source) {
+    AppEntry entry;
+    entry.stable_id = stable_id;
+    entry.display_name = stable_id;
+    entry.launch_identity = source.wstring();
+    entry.source_path = source.wstring();
+    return entry;
+}
+
+void WriteSourceFile(const fs::path& path, int content) {
+    const std::string bytes = "nimblerun-icon-source-" + std::to_string(content);
+    const HANDLE file = CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ,
+                                    nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    Expect(file != INVALID_HANDLE_VALUE, "create source file");
+    DWORD written = 0;
+    const BOOL ok = WriteFile(file, bytes.data(), static_cast<DWORD>(bytes.size()),
+                              &written, nullptr);
+    CloseHandle(file);
+    Expect(ok != FALSE && written == bytes.size(), "write source file");
+}
+
+void BumpSourceMtime(const fs::path& path) {
+    const HANDLE file = CreateFileW(path.c_str(), FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ,
+                                    nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    Expect(file != INVALID_HANDLE_VALUE, "open source for mtime bump");
+    FILETIME ft{};
+    Expect(GetFileTime(file, nullptr, nullptr, &ft) != FALSE, "read source mtime");
+    ULARGE_INTEGER value{};
+    value.HighPart = ft.dwHighDateTime;
+    value.LowPart = ft.dwLowDateTime;
+    value.QuadPart += 3600ull * 10'000'000ull;  // +1 hour
+    ft.dwHighDateTime = value.HighPart;
+    ft.dwLowDateTime = value.LowPart;
+    Expect(SetFileTime(file, nullptr, nullptr, &ft) != FALSE, "bump source mtime");
+    CloseHandle(file);
+}
+
+std::vector<std::uint8_t> ReadFileBytes(const fs::path& path) {
+    const HANDLE file = CreateFileW(path.c_str(), GENERIC_READ,
+                                    FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                    nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) {
+        return {};
+    }
+    std::vector<std::uint8_t> bytes;
+    std::uint8_t buffer[4096];
+    DWORD read = 0;
+    while (ReadFile(file, buffer, sizeof(buffer), &read, nullptr) != FALSE && read > 0) {
+        bytes.insert(bytes.end(), buffer, buffer + read);
+    }
+    CloseHandle(file);
+    return bytes;
+}
+
+void WriteFileBytes(const fs::path& path, const std::vector<std::uint8_t>& bytes) {
+    const HANDLE file = CreateFileW(path.c_str(), GENERIC_WRITE,
+                                    FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, CREATE_ALWAYS,
+                                    FILE_ATTRIBUTE_NORMAL, nullptr);
+    Expect(file != INVALID_HANDLE_VALUE, "write file handle");
+    DWORD written = 0;
+    const BOOL ok = WriteFile(file, bytes.data(), static_cast<DWORD>(bytes.size()),
+                              &written, nullptr);
+    CloseHandle(file);
+    Expect(ok != FALSE && written == bytes.size(), "write file bytes");
+}
+
+// NR-036: the bitmap must be valid PNG-encodable input and decode back to the
+// exact same pixels (the worker hands it to EncodeIconPng on the first miss),
+// so the bitmap is key.variant-sized, opaque, and colored per stable_id.
+class CountingProvider : public IconProvider {
+public:
+    std::atomic<int> calls{0};
+    std::vector<std::wstring> failing;
+    int delay_ms = 0;
+
+    IconBitmap Load(const AppEntry& entry, const IconKey& key) override {
+        calls.fetch_add(1);
+        if (delay_ms > 0) {
+            Sleep(static_cast<DWORD>(delay_ms));
+        }
+        for (const std::wstring& fail_key : failing) {
+            if (fail_key == key.Encode()) {
+                return {};
+            }
+        }
+        const std::size_t size = key.variant > 0 ? key.variant : 2;
+        const std::uint32_t color =
+            0xFF000000u | ((0x1u + static_cast<std::uint32_t>(std::stoul(entry.stable_id)) * 0x23u) & 0xFFFFFFu);
+        IconBitmap bitmap;
+        bitmap.width = static_cast<std::uint32_t>(size);
+        bitmap.height = static_cast<std::uint32_t>(size);
+        bitmap.pixels.assign(size * size, color);
+        return bitmap;
+    }
+};
+
+// Runs one session over `store` with the given entries/keys: posts every key,
+// waits for every result, then (optionally) posts a flush signal and stops the
+// worker. Returns each result's pixels in arrival order.
+std::vector<std::vector<std::uint32_t>> RunRound(
+    HWND window, IconStore& store, CountingProvider& provider,
+    const std::vector<AppEntry>& entries, const std::vector<IconKey>& keys,
+    bool flush_then_stop) {
+    IconWorker worker(window, kReadyMessage, provider, &store);
+    worker.Start();
+    for (std::size_t i = 0; i < entries.size(); ++i) {
+        worker.Post({entries[i], keys[i], /*visible=*/true});
+    }
+    std::vector<std::unique_ptr<IconResult>> results;
+    Expect(PumpResults(window, results, static_cast<int>(entries.size())),
+           "every posted request reports a result");
+    std::vector<std::vector<std::uint32_t>> pixels;
+    for (const auto& result : results) {
+        pixels.push_back(result->bitmap.pixels);
+    }
+    if (flush_then_stop) {
+        worker.PostFlush({}, 1);  // fixed wall clock; the stamp path ignores it
+    }
+    worker.Stop();
+    return pixels;
+}
+
+void TestDiskRoundTripServesSecondSessionFromDisk() {
+    const HWND window = CreateMessageWindow();
+    const fs::path dir = TestDir();
+    ResetCache();
+
+    constexpr int kCount = 4;
+    std::vector<AppEntry> entries;
+    std::vector<IconKey> keys;
+    for (int i = 0; i < kCount; ++i) {
+        const fs::path source = dir / (L"app" + std::to_wstring(i) + L".exe");
+        WriteSourceFile(source, i);
+        entries.push_back(FileEntry(Id(i), source));
+        keys.push_back(Key(Id(i)));
+    }
+    const IconStorePaths paths{PackPath()};
+
+    std::vector<std::vector<std::uint32_t>> first;
+    {
+        IconStore store(paths);
+        CountingProvider provider;
+        first = RunRound(window, store, provider, entries, keys, /*flush_then_stop=*/true);
+        Expect(provider.calls.load() == kCount, "round 1 calls the provider once per key");
+    }
+
+    {
+        IconStore store(paths);
+        CountingProvider provider;
+        const std::vector<std::vector<std::uint32_t>> second =
+            RunRound(window, store, provider, entries, keys, /*flush_then_stop=*/false);
+        Expect(provider.calls.load() == 0, "round 2 is served entirely from the disk pack");
+        Expect(second.size() == first.size(), "round 2 delivers every result");
+        for (std::size_t i = 0; i < first.size(); ++i) {
+            Expect(!first[i].empty() && first[i] == second[i],
+                   "round 2 pixels are byte-identical to round 1");
+        }
+    }
+
+    DestroyWindow(window);
+}
+
+void TestSourceStampChangeRefetchesFromProvider() {
+    const HWND window = CreateMessageWindow();
+    const fs::path dir = TestDir();
+    ResetCache();
+    const fs::path source = dir / L"app.exe";
+    WriteSourceFile(source, 1);
+    const AppEntry entry = FileEntry(Id(0), source);
+    const IconKey key = Key(Id(0));
+    const IconStorePaths paths{PackPath()};
+
+    {
+        IconStore store(paths);
+        CountingProvider provider;
+        RunRound(window, store, provider, {entry}, {key}, /*flush_then_stop=*/true);
+        Expect(provider.calls.load() == 1, "round 1 calls the provider");
+    }
+
+    BumpSourceMtime(source);  // same bytes, newer last-write-time -> new stamp
+
+    {
+        IconStore store(paths);
+        CountingProvider provider;
+        const auto pixels = RunRound(window, store, provider, {entry}, {key},
+                                     /*flush_then_stop=*/false);
+        Expect(provider.calls.load() == 1, "a stale source stamp refetches from the provider");
+        Expect(pixels.size() == 1 && !pixels[0].empty(), "a fresh result arrives");
+    }
+
+    DestroyWindow(window);
+}
+
+void TestDisabledStoreAlwaysCallsProviderAndNeverWrites() {
+    const HWND window = CreateMessageWindow();
+    const fs::path dir = TestDir();
+    const fs::path pack = PackPath();
+    ResetCache();
+
+    // A valid pack whose schema_version is newer than the codec supports: the
+    // store must open as Disabled, leave the file untouched, and the worker
+    // must keep serving every icon through the provider.
+    std::vector<std::uint8_t> bytes = MakeEmptyPack();
+    PackHeader newer;
+    newer.schema_version = 2;
+    newer.generation = 1;
+    newer.index_capacity = static_cast<std::uint32_t>(kIndexCapacity);
+    newer.payload_end = kPayloadStart;
+    EncodeHeader(newer, bytes.data());
+    WriteFileBytes(pack, bytes);
+    const std::vector<std::uint8_t> before = ReadFileBytes(pack);
+
+    const fs::path source = dir / L"app.exe";
+    WriteSourceFile(source, 1);
+    const AppEntry entry = FileEntry(Id(0), source);
+    const IconKey key = Key(Id(0));
+    const IconStorePaths paths{pack};
+
+    {
+        IconStore store(paths);
+        CountingProvider provider;
+        RunRound(window, store, provider, {entry}, {key}, /*flush_then_stop=*/true);
+        Expect(provider.calls.load() == 1, "disabled store round 1 calls the provider");
+    }
+    {
+        IconStore store(paths);
+        CountingProvider provider;
+        RunRound(window, store, provider, {entry}, {key}, /*flush_then_stop=*/false);
+        Expect(provider.calls.load() == 1, "disabled store round 2 calls the provider again");
+    }
+
+    Expect(ReadFileBytes(pack) == before, "a disabled store never modifies the pack");
+    DestroyWindow(window);
+}
+
+void TestEmptyResultIsNotPersisted() {
+    const HWND window = CreateMessageWindow();
+    const fs::path dir = TestDir();
+    ResetCache();
+    const fs::path source = dir / L"app.exe";
+    WriteSourceFile(source, 1);
+    const AppEntry entry = FileEntry(Id(0), source);
+    const IconKey key = Key(Id(0));
+    const IconStorePaths paths{PackPath()};
+
+    {
+        IconStore store(paths);
+        CountingProvider provider;
+        provider.failing.push_back(key.Encode());
+        const auto pixels = RunRound(window, store, provider, {entry}, {key},
+                                     /*flush_then_stop=*/true);
+        Expect(pixels.size() == 1 && pixels[0].empty(),
+               "the failing key reports an empty bitmap");
+        Expect(provider.calls.load() == 1, "round 1 calls the provider");
+    }
+    {
+        IconStore store(paths);
+        CountingProvider provider;
+        RunRound(window, store, provider, {entry}, {key}, /*flush_then_stop=*/false);
+        Expect(provider.calls.load() == 1,
+               "round 2 calls the provider again: an empty result is never written");
+    }
+
+    DestroyWindow(window);
+}
+
+void TestStopWithPendingDataFlushesAndDoesNotHang() {
+    const HWND window = CreateMessageWindow();
+    const fs::path dir = TestDir();
+    ResetCache();
+    const fs::path source = dir / L"app.exe";
+    WriteSourceFile(source, 1);
+    const AppEntry entry = FileEntry(Id(0), source);
+
+    {
+        IconStore store(IconStorePaths{PackPath()});
+        CountingProvider provider;
+        provider.delay_ms = 100;  // long enough to observe the in-flight request
+        IconWorker worker(window, kReadyMessage, provider, &store);
+        worker.Start();
+
+        // Six requests: the worker is busy on the first (delayed), the rest stay
+        // queued. Stop() must not hang: the in-flight request finishes
+        // (buffering a Put), then the final flush persists it before joining.
+        for (int i = 0; i < 6; ++i) {
+            worker.Post({entry, Key(Id(i)), false});
+        }
+        const DWORD entered_deadline = GetTickCount() + 2000;
+        while (provider.calls.load() == 0 && GetTickCount() < entered_deadline) {
+            Sleep(1);
+        }
+        Expect(provider.calls.load() >= 1, "the worker is processing the first request");
+        const DWORD start = GetTickCount();
+        worker.Stop();
+        const DWORD elapsed = GetTickCount() - start;
+        Expect(elapsed < 2000, "Stop with a non-empty queue and pending data does not hang");
+        Expect(provider.calls.load() >= 1 && provider.calls.load() <= 6,
+               "only queued-then-processed requests reach the provider");
+        // worker and store are destroyed here (Stop then Unmap) so the pack is
+        // no longer mapped when the verification store below opens it.
+    }
+
+    // The final flush persisted whatever had been buffered before the stop.
+    {
+        IconStore verify(IconStorePaths{PackPath()});
+        Expect(verify.Open() == StoreState::Ready, "the pack opens after the final flush");
+        Expect(verify.Stats().entries >= 1, "the final flush wrote the buffered icons");
+    }
+
+    DestroyWindow(window);
+}
+
 } // namespace
 
 int wmain() {
@@ -259,6 +617,12 @@ int wmain() {
     TestVisibleJumpsTheQueue();
     TestStopDropsQueueAndSilencesNewPosts();
 
-    std::printf("NR-032 icon worker check PASSED\n");
+    TestDiskRoundTripServesSecondSessionFromDisk();
+    TestSourceStampChangeRefetchesFromProvider();
+    TestDisabledStoreAlwaysCallsProviderAndNeverWrites();
+    TestEmptyResultIsNotPersisted();
+    TestStopWithPendingDataFlushesAndDoesNotHang();
+
+    std::printf("NR-032/NR-036 icon worker check PASSED\n");
     return 0;
 }

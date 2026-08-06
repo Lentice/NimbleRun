@@ -17,6 +17,7 @@
 #include "catalog/user_folder_catalog.h"
 #include "diagnostics/diagnostic_log.h"
 #include "icons/icon_cache.h"
+#include "icons/icon_store.h"
 #include "icons/icon_worker.h"
 #include "icons/shell_icon_provider.h"
 #include "launch/shell_launch.h"
@@ -36,6 +37,7 @@
 #include <cmath>
 #include <ctime>
 #include <cwchar>
+#include <filesystem>
 #include <memory>
 #include <set>
 #include <string>
@@ -533,6 +535,21 @@ void ShowErrorDialog(HWND window, const std::wstring& message) {
 // below, forward-declared for the NR-022 launch-failure refresh path.
 void StartRebuild(HWND window, std::vector<nimblerun::CatalogSource> sources);
 
+// NR-036: the single hide path. Every way the panel disappears (Esc second
+// stage, WM_KILLFOCUS auto-hide, hide-after-launch, hotkey/tray toggle) funnels
+// through here so the freshly fetched icons are flushed exactly once per hide
+// -- never once per call site. The pinned list is the in-memory copy ShowPanel
+// already loaded (design-spec §10.2); it rides the flush task as a pure-value
+// copy and the worker never re-reads favorites.txt.
+void HidePanel(HWND window) {
+    ShowWindow(window, SW_HIDE);
+    if (g_icon_worker) {
+        const std::vector<std::wstring> pins =
+            g_pins ? g_pins->OrderedPins() : std::vector<std::wstring>{};
+        g_icon_worker->PostFlush(pins, static_cast<std::uint64_t>(std::time(nullptr)));
+    }
+}
+
 void ActivateRow(std::size_t index, HWND window) {
     if (!g_model || index >= g_model->Rows().size()) {
         return;
@@ -575,7 +592,7 @@ void ActivateRow(std::size_t index, HWND window) {
         g_usage->Save();
     }
     if (g_hide_after_launch) {
-        ShowWindow(window, SW_HIDE);
+        HidePanel(window);
     }
 }
 
@@ -1540,7 +1557,7 @@ LRESULT CALLBACK SearchEditProc(HWND edit, UINT message, WPARAM w_param, LPARAM 
             }
             case VK_ESCAPE:
                 if (g_model->Esc()) {
-                    ShowWindow(GetParent(edit), SW_HIDE);
+                    HidePanel(GetParent(edit));
                 }
                 return 0;
             case 'R':
@@ -1713,7 +1730,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
     case WM_HOTKEY:
         if (w_param == static_cast<WPARAM>(g_hotkey.ActiveId())) {
             if (IsWindowVisible(window)) {
-                ShowWindow(window, SW_HIDE);
+                HidePanel(window);
             } else {
                 ShowPanel(window);
             }
@@ -1868,7 +1885,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
         // modal loop is exempt so the panel stays up while a choice is made.
         if (!g_context_menu_active && !g_dialog_active && g_search_edit &&
             GetFocus() != g_search_edit) {
-            ShowWindow(window, SW_HIDE);
+            HidePanel(window);
         }
         return 0;
     case WM_PAINT:
@@ -1898,10 +1915,11 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
     case WM_DESTROY:
         RemoveTrayIcon(window);
         g_hotkey.Shutdown();
-        // NR-032: stop the icon worker before the D2D resources are released
-        // (that happens below the message loop), so no kIconReadyMessage can
-        // arrive after teardown. Drain results already queued so no heap
-        // IconResult leaks.
+        // NR-032/NR-036: stop the icon worker before the D2D resources and the
+        // store are released (that happens below the message loop), so no
+        // kIconReadyMessage can arrive after teardown. Stop() also performs the
+        // final best-effort cache flush on the worker. Drain results already
+        // queued so no heap IconResult leaks.
         if (g_icon_worker) {
             g_icon_worker->Stop();
             MSG leftover{};
@@ -2039,10 +2057,21 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     nimblerun::ShellIconProvider shell_icon_provider;
     g_icon_cache = &icon_cache;
 
+    // NR-036: file-backed decoded-icon cache (%LOCALAPPDATA%\NimbleRun\icons.cache,
+    // design-spec §10.1). The store is opened and driven exclusively by the
+    // icon worker; the UI thread only owns the pointer and never calls it.
+    // Declared before the worker so it is destroyed after it.
+    nimblerun::IconStore::IconStorePaths icon_store_paths;
+    icon_store_paths.pack =
+        std::filesystem::path(nimblerun::DefaultSettingsDir()) / L"icons.cache";
+    nimblerun::IconStore icon_store(icon_store_paths,
+                                    nimblerun::IconStore::kMaxPackBytes, &diag);
+
     // NR-032: one persistent icon worker. Both it and the provider are function
     // locals destroyed after the message loop exits; WM_DESTROY stops the worker
     // while both are still alive.
-    nimblerun::IconWorker icon_worker(window, kIconReadyMessage, shell_icon_provider);
+    nimblerun::IconWorker icon_worker(window, kIconReadyMessage, shell_icon_provider,
+                                      &icon_store);
     g_icon_worker = &icon_worker;
     icon_worker.Start();
 
