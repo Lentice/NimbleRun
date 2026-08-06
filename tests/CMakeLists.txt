@@ -323,6 +323,32 @@ endif()
 
 add_test(NAME nimblerun_icon_pack_format_test COMMAND nimblerun_icon_pack_format_test)
 
+# NR-035. Named nimblerun_icon_store_test so `ctest -R icon_store` matches.
+add_executable(nimblerun_icon_store_test
+    unit/icon_store_test.cpp
+)
+
+target_link_libraries(nimblerun_icon_store_test PRIVATE nimblerun_icons)
+
+target_compile_definitions(nimblerun_icon_store_test
+    PRIVATE
+        UNICODE
+        _UNICODE
+        WIN32_LEAN_AND_MEAN
+        NOMINMAX
+        WINVER=0x0A00
+        _WIN32_WINNT=0x0A00
+)
+
+if(MSVC OR CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
+    target_compile_options(nimblerun_icon_store_test PRIVATE /W4 /permissive- /EHsc)
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    target_compile_options(nimblerun_icon_store_test PRIVATE -Wall -Wextra -Wpedantic)
+    target_link_options(nimblerun_icon_store_test PRIVATE -municode -static)
+endif()
+
+add_test(NAME nimblerun_icon_store_test COMMAND nimblerun_icon_store_test)
+
 # NR-034. Named nimblerun_png_codec_test so `ctest -R png_codec` matches.
 add_executable(nimblerun_png_codec_test
     unit/png_codec_test.cpp
