@@ -1,253 +1,77 @@
-add_executable(nimblerun_search_test
-    unit/search_engine_test.cpp
+# NR-055: 22 test targets used to carry a verbatim copy of the same 25 lines of
+# definitions, warning flags and link options. The only thing that actually
+# varied was the source file and the libraries. A list plus one loop keeps the
+# per-target facts visible in one place and makes a toolchain change a one-line
+# edit instead of 22 identical ones -- the drift this prevents is silent: a
+# missed target simply compiles under different flags with no error.
+#
+# Each entry: <test name>|<source file>|<libraries, space separated>
+# nimblerun_panel_model_test is NOT in this list; see the exception below.
+set(NIMBLERUN_TESTS
+    "nimblerun_search_test|unit/search_engine_test.cpp|nimblerun_search"
+    "nimblerun_hotkey_test|unit/hotkey_registration_test.cpp|nimblerun_hotkey"
+    "nimblerun_start_menu_catalog_test|unit/start_menu_catalog_test.cpp|nimblerun_catalog"
+    "nimblerun_settings_test|unit/settings_store_test.cpp|nimblerun_settings"
+    "nimblerun_appsfolder_catalog_test|unit/appsfolder_catalog_test.cpp|nimblerun_catalog"
+    "nimblerun_app_filter_test|unit/app_filter_test.cpp|nimblerun_catalog"
+    "nimblerun_user_folder_catalog_test|unit/user_folder_catalog_test.cpp|nimblerun_catalog"
+    "nimblerun_identity_dedup_test|unit/identity_dedup_test.cpp|nimblerun_catalog"
+    "nimblerun_shell_launch_test|unit/shell_launch_test.cpp|nimblerun_launch"
+    "nimblerun_recent_usage_test|unit/recent_usage_test.cpp|nimblerun_usage"
+    "nimblerun_icons_cache_test|unit/icon_cache_test.cpp|nimblerun_icons"
+    "nimblerun_icon_pack_format_test|unit/icon_pack_format_test.cpp|nimblerun_icons"
+    # NR-035. Named nimblerun_icon_store_test so `ctest -R icon_store` matches.
+    "nimblerun_icon_store_test|unit/icon_store_test.cpp|nimblerun_icons"
+    # NR-034. Named nimblerun_png_codec_test so `ctest -R png_codec` matches.
+    "nimblerun_png_codec_test|unit/png_codec_test.cpp|nimblerun_icons"
+    # NR-032. Named nimblerun_icon_worker_test so `ctest -R icons` matches.
+    "nimblerun_icon_worker_test|unit/icon_worker_test.cpp|nimblerun_icons"
+    "nimblerun_dpi_theme_accessibility_test|unit/ui_palette_layout_test.cpp|nimblerun_ui nimblerun_panel_model"
+    "nimblerun_settings_ui_test|unit/settings_editor_test.cpp|nimblerun_settings nimblerun_usage"
+    "nimblerun_startup_option_test|unit/startup_option_test.cpp|nimblerun_settings"
+    "nimblerun_catalog_refresh_test|unit/catalog_refresh_test.cpp|nimblerun_catalog"
+    # NR-018. Named nimblerun_pinning_test (not *_pin_store_*) so `ctest -R pinning`
+    # matches the CTest name regex.
+    "nimblerun_pinning_test|unit/pin_store_test.cpp|nimblerun_pins nimblerun_panel_model"
+    "nimblerun_diagnostic_log_test|unit/diagnostic_log_test.cpp|nimblerun_diagnostics"
 )
 
-target_link_libraries(nimblerun_search_test PRIVATE nimblerun_search)
+# The exception block below must stay in its original registration position so
+# ctest test numbers do not shift; the loop is split around it.
+list(SUBLIST NIMBLERUN_TESTS 0 10 NIMBLERUN_TESTS_HEAD)
+list(SUBLIST NIMBLERUN_TESTS 10 11 NIMBLERUN_TESTS_TAIL)
 
-target_compile_definitions(nimblerun_search_test
-    PRIVATE
-        UNICODE
-        _UNICODE
-        WIN32_LEAN_AND_MEAN
-        NOMINMAX
-        WINVER=0x0A00
-        _WIN32_WINNT=0x0A00
-)
+foreach(entry IN LISTS NIMBLERUN_TESTS_HEAD)
+    string(REPLACE "|" ";" parts "${entry}")
+    list(GET parts 0 test_name)
+    list(GET parts 1 test_source)
+    list(GET parts 2 test_libs)
+    string(REPLACE " " ";" test_libs "${test_libs}")
 
-if(MSVC OR CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
-    target_compile_options(nimblerun_search_test PRIVATE /W4 /permissive- /EHsc)
-elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    target_compile_options(nimblerun_search_test PRIVATE -Wall -Wextra -Wpedantic)
-    target_link_options(nimblerun_search_test PRIVATE -municode -static)
-endif()
+    add_executable(${test_name} ${test_source})
+    target_link_libraries(${test_name} PRIVATE ${test_libs})
+    target_compile_definitions(${test_name}
+        PRIVATE
+            UNICODE
+            _UNICODE
+            WIN32_LEAN_AND_MEAN
+            NOMINMAX
+            WINVER=0x0A00
+            _WIN32_WINNT=0x0A00
+    )
+    if(MSVC OR CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
+        target_compile_options(${test_name} PRIVATE /W4 /permissive- /EHsc)
+    elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        target_compile_options(${test_name} PRIVATE -Wall -Wextra -Wpedantic)
+        target_link_options(${test_name} PRIVATE -municode -static)
+    endif()
+    add_test(NAME ${test_name} COMMAND ${test_name})
+endforeach()
 
-add_test(NAME nimblerun_search_test COMMAND nimblerun_search_test)
-
-add_executable(nimblerun_hotkey_test
-    unit/hotkey_registration_test.cpp
-)
-
-target_link_libraries(nimblerun_hotkey_test PRIVATE nimblerun_hotkey)
-
-target_compile_definitions(nimblerun_hotkey_test
-    PRIVATE
-        UNICODE
-        _UNICODE
-        WIN32_LEAN_AND_MEAN
-        NOMINMAX
-        WINVER=0x0A00
-        _WIN32_WINNT=0x0A00
-)
-
-if(MSVC OR CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
-    target_compile_options(nimblerun_hotkey_test PRIVATE /W4 /permissive- /EHsc)
-elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    target_compile_options(nimblerun_hotkey_test PRIVATE -Wall -Wextra -Wpedantic)
-    target_link_options(nimblerun_hotkey_test PRIVATE -municode -static)
-endif()
-
-add_test(NAME nimblerun_hotkey_test COMMAND nimblerun_hotkey_test)
-
-add_executable(nimblerun_start_menu_catalog_test
-    unit/start_menu_catalog_test.cpp
-)
-
-target_link_libraries(nimblerun_start_menu_catalog_test PRIVATE nimblerun_catalog)
-
-target_compile_definitions(nimblerun_start_menu_catalog_test
-    PRIVATE
-        UNICODE
-        _UNICODE
-        WIN32_LEAN_AND_MEAN
-        NOMINMAX
-        WINVER=0x0A00
-        _WIN32_WINNT=0x0A00
-)
-
-if(MSVC OR CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
-    target_compile_options(nimblerun_start_menu_catalog_test PRIVATE /W4 /permissive- /EHsc)
-elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    target_compile_options(nimblerun_start_menu_catalog_test PRIVATE -Wall -Wextra -Wpedantic)
-    target_link_options(nimblerun_start_menu_catalog_test PRIVATE -municode -static)
-endif()
-
-add_test(NAME nimblerun_start_menu_catalog_test COMMAND nimblerun_start_menu_catalog_test)
-
-add_executable(nimblerun_settings_test
-    unit/settings_store_test.cpp
-)
-
-target_link_libraries(nimblerun_settings_test PRIVATE nimblerun_settings)
-
-target_compile_definitions(nimblerun_settings_test
-    PRIVATE
-        UNICODE
-        _UNICODE
-        WIN32_LEAN_AND_MEAN
-        NOMINMAX
-        WINVER=0x0A00
-        _WIN32_WINNT=0x0A00
-)
-
-if(MSVC OR CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
-    target_compile_options(nimblerun_settings_test PRIVATE /W4 /permissive- /EHsc)
-elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    target_compile_options(nimblerun_settings_test PRIVATE -Wall -Wextra -Wpedantic)
-    target_link_options(nimblerun_settings_test PRIVATE -municode -static)
-endif()
-
-add_test(NAME nimblerun_settings_test COMMAND nimblerun_settings_test)
-
-add_executable(nimblerun_appsfolder_catalog_test
-    unit/appsfolder_catalog_test.cpp
-)
-
-target_link_libraries(nimblerun_appsfolder_catalog_test PRIVATE nimblerun_catalog)
-
-target_compile_definitions(nimblerun_appsfolder_catalog_test
-    PRIVATE
-        UNICODE
-        _UNICODE
-        WIN32_LEAN_AND_MEAN
-        NOMINMAX
-        WINVER=0x0A00
-        _WIN32_WINNT=0x0A00
-)
-
-if(MSVC OR CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
-    target_compile_options(nimblerun_appsfolder_catalog_test PRIVATE /W4 /permissive- /EHsc)
-elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    target_compile_options(nimblerun_appsfolder_catalog_test PRIVATE -Wall -Wextra -Wpedantic)
-    target_link_options(nimblerun_appsfolder_catalog_test PRIVATE -municode -static)
-endif()
-
-add_test(NAME nimblerun_appsfolder_catalog_test COMMAND nimblerun_appsfolder_catalog_test)
-
-add_executable(nimblerun_app_filter_test
-    unit/app_filter_test.cpp
-)
-
-target_link_libraries(nimblerun_app_filter_test PRIVATE nimblerun_catalog)
-
-target_compile_definitions(nimblerun_app_filter_test
-    PRIVATE
-        UNICODE
-        _UNICODE
-        WIN32_LEAN_AND_MEAN
-        NOMINMAX
-        WINVER=0x0A00
-        _WIN32_WINNT=0x0A00
-)
-
-if(MSVC OR CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
-    target_compile_options(nimblerun_app_filter_test PRIVATE /W4 /permissive- /EHsc)
-elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    target_compile_options(nimblerun_app_filter_test PRIVATE -Wall -Wextra -Wpedantic)
-    target_link_options(nimblerun_app_filter_test PRIVATE -municode -static)
-endif()
-
-add_test(NAME nimblerun_app_filter_test COMMAND nimblerun_app_filter_test)
-
-add_executable(nimblerun_user_folder_catalog_test
-    unit/user_folder_catalog_test.cpp
-)
-
-target_link_libraries(nimblerun_user_folder_catalog_test PRIVATE nimblerun_catalog)
-
-target_compile_definitions(nimblerun_user_folder_catalog_test
-    PRIVATE
-        UNICODE
-        _UNICODE
-        WIN32_LEAN_AND_MEAN
-        NOMINMAX
-        WINVER=0x0A00
-        _WIN32_WINNT=0x0A00
-)
-
-if(MSVC OR CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
-    target_compile_options(nimblerun_user_folder_catalog_test PRIVATE /W4 /permissive- /EHsc)
-elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    target_compile_options(nimblerun_user_folder_catalog_test PRIVATE -Wall -Wextra -Wpedantic)
-    target_link_options(nimblerun_user_folder_catalog_test PRIVATE -municode -static)
-endif()
-
-add_test(NAME nimblerun_user_folder_catalog_test COMMAND nimblerun_user_folder_catalog_test)
-
-add_executable(nimblerun_identity_dedup_test
-    unit/identity_dedup_test.cpp
-)
-
-target_link_libraries(nimblerun_identity_dedup_test PRIVATE nimblerun_catalog)
-
-target_compile_definitions(nimblerun_identity_dedup_test
-    PRIVATE
-        UNICODE
-        _UNICODE
-        WIN32_LEAN_AND_MEAN
-        NOMINMAX
-        WINVER=0x0A00
-        _WIN32_WINNT=0x0A00
-)
-
-if(MSVC OR CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
-    target_compile_options(nimblerun_identity_dedup_test PRIVATE /W4 /permissive- /EHsc)
-elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    target_compile_options(nimblerun_identity_dedup_test PRIVATE -Wall -Wextra -Wpedantic)
-    target_link_options(nimblerun_identity_dedup_test PRIVATE -municode -static)
-endif()
-
-add_test(NAME nimblerun_identity_dedup_test COMMAND nimblerun_identity_dedup_test)
-
-add_executable(nimblerun_shell_launch_test
-    unit/shell_launch_test.cpp
-)
-
-target_link_libraries(nimblerun_shell_launch_test PRIVATE nimblerun_launch)
-
-target_compile_definitions(nimblerun_shell_launch_test
-    PRIVATE
-        UNICODE
-        _UNICODE
-        WIN32_LEAN_AND_MEAN
-        NOMINMAX
-        WINVER=0x0A00
-        _WIN32_WINNT=0x0A00
-)
-
-if(MSVC OR CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
-    target_compile_options(nimblerun_shell_launch_test PRIVATE /W4 /permissive- /EHsc)
-elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    target_compile_options(nimblerun_shell_launch_test PRIVATE -Wall -Wextra -Wpedantic)
-    target_link_options(nimblerun_shell_launch_test PRIVATE -municode -static)
-endif()
-
-add_test(NAME nimblerun_shell_launch_test COMMAND nimblerun_shell_launch_test)
-
-add_executable(nimblerun_recent_usage_test
-    unit/recent_usage_test.cpp
-)
-
-target_link_libraries(nimblerun_recent_usage_test PRIVATE nimblerun_usage)
-
-target_compile_definitions(nimblerun_recent_usage_test
-    PRIVATE
-        UNICODE
-        _UNICODE
-        WIN32_LEAN_AND_MEAN
-        NOMINMAX
-        WINVER=0x0A00
-        _WIN32_WINNT=0x0A00
-)
-
-if(MSVC OR CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
-    target_compile_options(nimblerun_recent_usage_test PRIVATE /W4 /permissive- /EHsc)
-elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    target_compile_options(nimblerun_recent_usage_test PRIVATE -Wall -Wextra -Wpedantic)
-    target_link_options(nimblerun_recent_usage_test PRIVATE -municode -static)
-endif()
-
-add_test(NAME nimblerun_recent_usage_test COMMAND nimblerun_recent_usage_test)
-
+# NR-055 exception: this target registers its CTest test as
+# nimblerun_list_vertical_slice_test (NAME differs from the executable name), so
+# the loop's single add_test(NAME ${test_name} COMMAND ${test_name}) line cannot
+# produce it. Kept verbatim, in its original registration position.
 add_executable(nimblerun_panel_model_test
     unit/panel_model_test.cpp
 )
@@ -273,285 +97,32 @@ endif()
 
 add_test(NAME nimblerun_list_vertical_slice_test COMMAND nimblerun_panel_model_test)
 
-add_executable(nimblerun_icons_cache_test
-    unit/icon_cache_test.cpp
-)
+foreach(entry IN LISTS NIMBLERUN_TESTS_TAIL)
+    string(REPLACE "|" ";" parts "${entry}")
+    list(GET parts 0 test_name)
+    list(GET parts 1 test_source)
+    list(GET parts 2 test_libs)
+    string(REPLACE " " ";" test_libs "${test_libs}")
 
-target_link_libraries(nimblerun_icons_cache_test PRIVATE nimblerun_icons)
-
-target_compile_definitions(nimblerun_icons_cache_test
-    PRIVATE
-        UNICODE
-        _UNICODE
-        WIN32_LEAN_AND_MEAN
-        NOMINMAX
-        WINVER=0x0A00
-        _WIN32_WINNT=0x0A00
-)
-
-if(MSVC OR CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
-    target_compile_options(nimblerun_icons_cache_test PRIVATE /W4 /permissive- /EHsc)
-elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    target_compile_options(nimblerun_icons_cache_test PRIVATE -Wall -Wextra -Wpedantic)
-    target_link_options(nimblerun_icons_cache_test PRIVATE -municode -static)
-endif()
-
-add_test(NAME nimblerun_icons_cache_test COMMAND nimblerun_icons_cache_test)
-
-add_executable(nimblerun_icon_pack_format_test
-    unit/icon_pack_format_test.cpp
-)
-
-target_link_libraries(nimblerun_icon_pack_format_test PRIVATE nimblerun_icons)
-
-target_compile_definitions(nimblerun_icon_pack_format_test
-    PRIVATE
-        UNICODE
-        _UNICODE
-        WIN32_LEAN_AND_MEAN
-        NOMINMAX
-        WINVER=0x0A00
-        _WIN32_WINNT=0x0A00
-)
-
-if(MSVC OR CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
-    target_compile_options(nimblerun_icon_pack_format_test PRIVATE /W4 /permissive- /EHsc)
-elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    target_compile_options(nimblerun_icon_pack_format_test PRIVATE -Wall -Wextra -Wpedantic)
-    target_link_options(nimblerun_icon_pack_format_test PRIVATE -municode -static)
-endif()
-
-add_test(NAME nimblerun_icon_pack_format_test COMMAND nimblerun_icon_pack_format_test)
-
-# NR-035. Named nimblerun_icon_store_test so `ctest -R icon_store` matches.
-add_executable(nimblerun_icon_store_test
-    unit/icon_store_test.cpp
-)
-
-target_link_libraries(nimblerun_icon_store_test PRIVATE nimblerun_icons)
-
-target_compile_definitions(nimblerun_icon_store_test
-    PRIVATE
-        UNICODE
-        _UNICODE
-        WIN32_LEAN_AND_MEAN
-        NOMINMAX
-        WINVER=0x0A00
-        _WIN32_WINNT=0x0A00
-)
-
-if(MSVC OR CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
-    target_compile_options(nimblerun_icon_store_test PRIVATE /W4 /permissive- /EHsc)
-elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    target_compile_options(nimblerun_icon_store_test PRIVATE -Wall -Wextra -Wpedantic)
-    target_link_options(nimblerun_icon_store_test PRIVATE -municode -static)
-endif()
-
-add_test(NAME nimblerun_icon_store_test COMMAND nimblerun_icon_store_test)
-
-# NR-034. Named nimblerun_png_codec_test so `ctest -R png_codec` matches.
-add_executable(nimblerun_png_codec_test
-    unit/png_codec_test.cpp
-)
-
-target_link_libraries(nimblerun_png_codec_test PRIVATE nimblerun_icons)
-
-target_compile_definitions(nimblerun_png_codec_test
-    PRIVATE
-        UNICODE
-        _UNICODE
-        WIN32_LEAN_AND_MEAN
-        NOMINMAX
-        WINVER=0x0A00
-        _WIN32_WINNT=0x0A00
-)
-
-if(MSVC OR CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
-    target_compile_options(nimblerun_png_codec_test PRIVATE /W4 /permissive- /EHsc)
-elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    target_compile_options(nimblerun_png_codec_test PRIVATE -Wall -Wextra -Wpedantic)
-    target_link_options(nimblerun_png_codec_test PRIVATE -municode -static)
-endif()
-
-add_test(NAME nimblerun_png_codec_test COMMAND nimblerun_png_codec_test)
-
-# NR-032. Named nimblerun_icon_worker_test so `ctest -R icons` matches.
-add_executable(nimblerun_icon_worker_test
-    unit/icon_worker_test.cpp
-)
-
-target_link_libraries(nimblerun_icon_worker_test PRIVATE nimblerun_icons)
-
-target_compile_definitions(nimblerun_icon_worker_test
-    PRIVATE
-        UNICODE
-        _UNICODE
-        WIN32_LEAN_AND_MEAN
-        NOMINMAX
-        WINVER=0x0A00
-        _WIN32_WINNT=0x0A00
-)
-
-if(MSVC OR CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
-    target_compile_options(nimblerun_icon_worker_test PRIVATE /W4 /permissive- /EHsc)
-elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    target_compile_options(nimblerun_icon_worker_test PRIVATE -Wall -Wextra -Wpedantic)
-    target_link_options(nimblerun_icon_worker_test PRIVATE -municode -static)
-endif()
-
-add_test(NAME nimblerun_icon_worker_test COMMAND nimblerun_icon_worker_test)
-
-add_executable(nimblerun_dpi_theme_accessibility_test
-    unit/ui_palette_layout_test.cpp
-)
-
-target_link_libraries(nimblerun_dpi_theme_accessibility_test PRIVATE nimblerun_ui nimblerun_panel_model)
-
-target_compile_definitions(nimblerun_dpi_theme_accessibility_test
-    PRIVATE
-        UNICODE
-        _UNICODE
-        WIN32_LEAN_AND_MEAN
-        NOMINMAX
-        WINVER=0x0A00
-        _WIN32_WINNT=0x0A00
-)
-
-if(MSVC OR CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
-    target_compile_options(nimblerun_dpi_theme_accessibility_test PRIVATE /W4 /permissive- /EHsc)
-elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    target_compile_options(nimblerun_dpi_theme_accessibility_test PRIVATE -Wall -Wextra -Wpedantic)
-    target_link_options(nimblerun_dpi_theme_accessibility_test PRIVATE -municode -static)
-endif()
-
-add_test(NAME nimblerun_dpi_theme_accessibility_test COMMAND nimblerun_dpi_theme_accessibility_test)
-
-add_executable(nimblerun_settings_ui_test
-    unit/settings_editor_test.cpp
-)
-
-target_link_libraries(nimblerun_settings_ui_test PRIVATE nimblerun_settings nimblerun_usage)
-
-target_compile_definitions(nimblerun_settings_ui_test
-    PRIVATE
-        UNICODE
-        _UNICODE
-        WIN32_LEAN_AND_MEAN
-        NOMINMAX
-        WINVER=0x0A00
-        _WIN32_WINNT=0x0A00
-)
-
-if(MSVC OR CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
-    target_compile_options(nimblerun_settings_ui_test PRIVATE /W4 /permissive- /EHsc)
-elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    target_compile_options(nimblerun_settings_ui_test PRIVATE -Wall -Wextra -Wpedantic)
-    target_link_options(nimblerun_settings_ui_test PRIVATE -municode -static)
-endif()
-
-add_test(NAME nimblerun_settings_ui_test COMMAND nimblerun_settings_ui_test)
-
-add_executable(nimblerun_startup_option_test
-    unit/startup_option_test.cpp
-)
-
-target_link_libraries(nimblerun_startup_option_test PRIVATE nimblerun_settings)
-
-target_compile_definitions(nimblerun_startup_option_test
-    PRIVATE
-        UNICODE
-        _UNICODE
-        WIN32_LEAN_AND_MEAN
-        NOMINMAX
-        WINVER=0x0A00
-        _WIN32_WINNT=0x0A00
-)
-
-if(MSVC OR CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
-    target_compile_options(nimblerun_startup_option_test PRIVATE /W4 /permissive- /EHsc)
-elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    target_compile_options(nimblerun_startup_option_test PRIVATE -Wall -Wextra -Wpedantic)
-    target_link_options(nimblerun_startup_option_test PRIVATE -municode -static)
-endif()
-
-add_test(NAME nimblerun_startup_option_test COMMAND nimblerun_startup_option_test)
-
-add_executable(nimblerun_catalog_refresh_test
-    unit/catalog_refresh_test.cpp
-)
-
-target_link_libraries(nimblerun_catalog_refresh_test PRIVATE nimblerun_catalog)
-
-target_compile_definitions(nimblerun_catalog_refresh_test
-    PRIVATE
-        UNICODE
-        _UNICODE
-        WIN32_LEAN_AND_MEAN
-        NOMINMAX
-        WINVER=0x0A00
-        _WIN32_WINNT=0x0A00
-)
-
-if(MSVC OR CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
-    target_compile_options(nimblerun_catalog_refresh_test PRIVATE /W4 /permissive- /EHsc)
-elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    target_compile_options(nimblerun_catalog_refresh_test PRIVATE -Wall -Wextra -Wpedantic)
-    target_link_options(nimblerun_catalog_refresh_test PRIVATE -municode -static)
-endif()
-
-add_test(NAME nimblerun_catalog_refresh_test COMMAND nimblerun_catalog_refresh_test)
-
-# NR-018. Named nimblerun_pinning_test (not *_pin_store_*) so `ctest -R pinning`
-# matches the CTest name regex.
-add_executable(nimblerun_pinning_test
-    unit/pin_store_test.cpp
-)
-
-target_link_libraries(nimblerun_pinning_test PRIVATE nimblerun_pins nimblerun_panel_model)
-
-target_compile_definitions(nimblerun_pinning_test
-    PRIVATE
-        UNICODE
-        _UNICODE
-        WIN32_LEAN_AND_MEAN
-        NOMINMAX
-        WINVER=0x0A00
-        _WIN32_WINNT=0x0A00
-)
-
-if(MSVC OR CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
-    target_compile_options(nimblerun_pinning_test PRIVATE /W4 /permissive- /EHsc)
-elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    target_compile_options(nimblerun_pinning_test PRIVATE -Wall -Wextra -Wpedantic)
-    target_link_options(nimblerun_pinning_test PRIVATE -municode -static)
-endif()
-
-add_test(NAME nimblerun_pinning_test COMMAND nimblerun_pinning_test)
-
-add_executable(nimblerun_diagnostic_log_test
-    unit/diagnostic_log_test.cpp
-)
-
-target_link_libraries(nimblerun_diagnostic_log_test PRIVATE nimblerun_diagnostics)
-
-target_compile_definitions(nimblerun_diagnostic_log_test
-    PRIVATE
-        UNICODE
-        _UNICODE
-        WIN32_LEAN_AND_MEAN
-        NOMINMAX
-        WINVER=0x0A00
-        _WIN32_WINNT=0x0A00
-)
-
-if(MSVC OR CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
-    target_compile_options(nimblerun_diagnostic_log_test PRIVATE /W4 /permissive- /EHsc)
-elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    target_compile_options(nimblerun_diagnostic_log_test PRIVATE -Wall -Wextra -Wpedantic)
-    target_link_options(nimblerun_diagnostic_log_test PRIVATE -municode -static)
-endif()
-
-add_test(NAME nimblerun_diagnostic_log_test COMMAND nimblerun_diagnostic_log_test)
+    add_executable(${test_name} ${test_source})
+    target_link_libraries(${test_name} PRIVATE ${test_libs})
+    target_compile_definitions(${test_name}
+        PRIVATE
+            UNICODE
+            _UNICODE
+            WIN32_LEAN_AND_MEAN
+            NOMINMAX
+            WINVER=0x0A00
+            _WIN32_WINNT=0x0A00
+    )
+    if(MSVC OR CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
+        target_compile_options(${test_name} PRIVATE /W4 /permissive- /EHsc)
+    elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        target_compile_options(${test_name} PRIVATE -Wall -Wextra -Wpedantic)
+        target_link_options(${test_name} PRIVATE -municode -static)
+    endif()
+    add_test(NAME ${test_name} COMMAND ${test_name})
+endforeach()
 
 if(CMAKE_HOST_WIN32)
     find_program(PWSH_EXECUTABLE pwsh)

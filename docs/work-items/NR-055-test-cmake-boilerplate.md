@@ -264,6 +264,74 @@ git diff --name-only
 
 ## 交接區
 
-（實作者填寫：改動前後的行數、`ctest -N` 比對結果、編譯命令列比對的方法與
-結果、22 個區塊中發現的所有差異、留在迴圈外的例外及理由、建置與 CTest
-結果、sanity greps、偏差、未完成事項。）
+### 實作摘要
+
+把 `tests/CMakeLists.txt` 的 22 份逐字相同測試 target 樣板整併成「一份清單＋foreach 迴圈」。
+
+### 改動前後行數
+
+- 改動前：**566 行**（item Why 寫 456，實測檔案為 566 行——item 數字有誤，以實際為準）。
+- 改動後：**126 行**（item Acceptance 期待「約 80 以下」**未達成**，原因：例外 target 必須留在原註冊位置、迫使迴圈拆成兩個 pass，加上 25 行的例外塊。這是行為零變更的代價；若把例外移到檔尾則 `ctest -N` 的 `Test #N:` 編號會位移，§Scope 3 的逐位元比對就過不了）。淨刪除 **440 行**。
+
+### 22 個區塊中發現的所有差異
+
+逐塊程式化比對（`add_executable` 拆塊、檢查 definitions/警告分支/連結/add_test）結果：
+
+1. **六個 compile definitions 全部逐字相同**（`UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX WINVER=0x0A00 _WIN32_WINNT=0x0A00`），22 塊無一例外。
+2. **`if(MSVC ...)/elseif(Clang)` 兩個分支的所有選項全部逐字相同**（MSVC：`/W4 /permissive- /EHsc`；Clang：`-Wall -Wextra -Wpedantic`＋`-municode -static`），22 塊無一例外。無任何塊多一行或少一行。
+3. 連結項差異（與 item 已知變異點完全吻合）：
+   - `nimblerun_catalog` 6 個：start_menu_catalog、appsfolder_catalog、app_filter、user_folder_catalog、identity_dedup、catalog_refresh。
+   - `nimblerun_icons` 5 個：icons_cache、icon_pack_format、icon_store、png_codec、icon_worker。
+   - `nimblerun_settings` 2 個：settings、startup_option。
+   - 連結兩個 library 的 3 個：`dpi_theme_accessibility → nimblerun_ui nimblerun_panel_model`、`settings_ui → nimblerun_settings nimblerun_usage`、`pinning → nimblerun_pins nimblerun_panel_model`。
+   - 其餘各 1 個：search→nimblerun_search、hotkey→nimblerun_hotkey、shell_launch→nimblerun_launch、recent_usage→nimblerun_usage、panel_model→nimblerun_panel_model、diagnostic_log→nimblerun_diagnostics。
+4. **非 item 已知的差異——`nimblerun_panel_model_test` 的 `add_test` NAME 是 `nimblerun_list_vertical_slice_test`**（第 274 行 `add_test(NAME nimblerun_list_vertical_slice_test COMMAND nimblerun_panel_model_test)`），不是執行檔名。這是唯一的例外 target，留在迴圈外。
+5. 四個命名理由註解（`# NR-032`、`# NR-034`、`# NR-035`、`# NR-018`）說明「執行檔名故意與內容不符以便 `ctest -R` 命中」，隨對應 entry 原樣保留在清單內。
+
+### 留在迴圈外的例外及理由
+
+**`nimblerun_panel_model_test`（1 個）**：它的 `add_test` NAME（`nimblerun_list_vertical_slice_test`）與執行檔名不同，迴圈的 `add_test(NAME ${test_name} COMMAND ${test_name})` 無法產生該行。若硬放進迴圈就得給清單加「CTest 名稱」參數，把例外塞進迴圈參數——item §2 明文禁止。故保持完整 25 行塊（含空白行）原樣、加註解說明理由。
+
+**配套調整**：該例外塊必須留在**原註冊位置**（`nimblerun_recent_usage_test` 與 `nimblerun_icons_cache_test` 之間），否則 CTest 的 `Test #N:` 編號全部位移、`ctest -N` 輸出不再逐位元相同。因此把清單用 `list(SUBLIST NIMBLERUN_TESTS 0 10 ...)`／`list(SUBLIST NIMBLERUN_TESTS 10 11 ...)` 拆成 head（10 筆）／tail（11 筆）兩個 foreach pass，包住中間的例外塊。清單仍是一份、順序與原檔一致。
+
+`tests/integration/lifecycle_check.ps1` 的註冊（`if(CMAKE_HOST_WIN32)` 區塊）原樣保留在迴圈外、未動。
+
+### `ctest -N` 比對結果
+
+- `build_before`／`build_after` 各自 `ctest -N`，輸出寫入 `before_tests.txt`／`after_tests.txt`。
+- 原始 `Compare-Object` 有輸出（所有「Could not find executable .../build_before|build_after/...」路徑行）——這是建置目錄名雜訊，item §3 明示要比對時正規化掉。
+- **正規化 `build_before`→`BUILDDIR`／`build_after`→`BUILDDIR` 後 `Compare-Object` 零輸出**：23 個測試名稱、數量、`Test #N:` 編號、順序全部相同。
+
+### 編譯命令列比對結果
+
+- 方法：`-DCMAKE_EXPORT_COMPILE_COMMANDS=ON` 產出 `compile_commands.json`，存 `before_commands.json`／`after_commands.json`。
+- **整檔 raw 文字在把 `build_before`/`build_after` 正規化為 `BUILDDIR` 後逐位元相同**（51 筆 entry，含欄位順序與排序）。
+- 另取 22 個 `tests/unit` 的 `command` 字串、正規化建置目錄、排序後比對，**零差異**。每個測試的 command 字串完全相同，證明編譯選項、definitions、include 路徑、輸出物件路徑皆未變。
+
+### 建置與 CTest 結果
+
+- Release clean build：85/85 target 完成、exit 0、**無新增警告**。
+- `ctest --test-dir build --output-on-failure`：**23/23 全綠**（含 `nimblerun_lifecycle_check` 29.1 s）。
+- `ctest --test-dir build -N`：23 項、exit 0。
+
+### sanity greps
+
+- 行數：**126**（item 期待 `< 80`；偏差原因見上，因拆雙 pass＋例外塊，行為零變更的代價）。
+- `target_compile_definitions`：**3**（head pass＋例外＋tail pass；item 期待 1＋例外——雙 pass 使迴圈內出現兩次）。
+- `add_executable`：**3**（head pass＋例外＋tail pass）。
+- `add_test`：**5**（head pass＋tail pass＋例外＋lifecycle＋例外註解文字裡的 `add_test(NAME ${test_name}` 字串；grep 為子字串命中）。
+- `_test\|`：**21**（迴圈清單的 21 筆；item 期待 22——例外 `nimblerun_panel_model_test` 在迴圈外、不在清單，故不含 `|`，依「以你讀到的實際數量為準」）。
+- 選項 `/W4|/permissive-|/EHsc|-Wall|-Wextra|-Wpedantic|-municode|-static`：**9** 行命中（head pass 3＋例外 3＋tail pass 3），選項集合與原檔相同、各出現三次（兩 pass＋例外）。
+- `git diff --name-only`：只動 **`tests/CMakeLists.txt`**（99 insertions / 528 deletions）。
+
+### 硬性約束遵守
+
+未改任何測試名稱、未增刪合併測試執行檔、未動 `tests/integration/`／`tests/release/` 註冊、未動根 `CMakeLists.txt`、toolchain、任何 `src/`、任何 `tests/*.cpp` 或 `.ps1`、未抽 `Expect()` 共用庫、`search_engine_test.cpp` 的 pragma 未動。`docs/testing.md` 只引通用 build/ctest 命令、不受影響。**未 commit、未 push。**
+
+### 清理
+
+`build_before`／`build_after`、`before_tests.txt`／`after_tests.txt`、`before_commands.json`／`after_commands.json` 皆已刪除（基準檔不入 repo）。
+
+### 未完成事項
+
+無。所有 Automated Acceptance 與 Agent checks 已執行並符合預期（除行數因上述原因高於 80，已在文中逐條說明）。
