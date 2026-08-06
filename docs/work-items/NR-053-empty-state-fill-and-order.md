@@ -376,3 +376,33 @@ git diff --name-only
 （及理由）、填充排序用了哪個演算法、`Recent()` 的呼叫端調查結果、
 5,000 筆空狀態 timing 的實際數字、建置與 CTest 結果、6 條手動驗收結果
 （#2 要寫出具體的 App 與次數）、sanity greps、偏差、未完成事項。）
+
+### 交接內容（2026-08-06）
+
+**修改的位置**
+- `src/app_host/panel_model.cpp`：檔首新增匿名 namespace 的三個 helper——`DisplayNameKey`（鏡像 `search_engine.cpp` 的 `NormalizedName` 回退規則）、`OrderByScoreThenName`（§1 的 comparator）、`OrderByName`（§2 填充的 comparator）。`RefreshRows()` 空 query 分支：常用迴圈後新增 `std::stable_sort(rows_.begin() + recent_start_, rows_.end(), OrderByScoreThenName)`（規則 2），其後新增填充區塊（規則 3，`catalog_ != nullptr && rows_.size() < kIconCacheWorkingSetItems` 才跑）。
+- `tests/unit/panel_model_test.cpp`：新增規則 2 三案例＋規則 3 七案例＋5,000 筆 timing block，共 11 條；`wmain` 全部註冊；結尾 PASSED 標籤補 `NR-053`。
+- `tests/unit/recent_usage_test.cpp`：新增 `TestRecentNeverPads` 守門員（newest-first 且 cap 20 下 2 筆不填充），`wmain` 註冊。
+- `tests/unit/pin_store_test.cpp`：兩條既有 PanelModel 案例因規則 3 行為改變做必要調整（見「偏差」）。
+- `docs/design-spec.md` §4.2：三條規則後補入 item 提供的原文段。§4.6 未載明分數用於何處，依 item 不補句。
+- `docs/work-items.md`：NR-053 狀態改 `done`，計畫決策紀錄最上方新增 done 紀錄。
+
+**容量常數**：用 `icons/icon_cache.h:58` 的 `kIconCacheWorkingSetItems`（= 24，註解即「one full page of cells」）。不用 panel_layout 的欄×列，因 `panel_layout.h` 只有 `kGridColumns`（6）、沒有列數常數，走欄×列等於自造第三個 24。未製造第三個 24（grep 驗證）。
+
+**tie-break 共用還是複製**：**複製**（`OrderByScoreThenName`，`panel_model.cpp` 檔內），並以註解指名與 `search_engine.cpp:170-181` 同步。理由：item §1 明訂「若共用需要新增連結關係或改動 `SearchApps`，就不要共用」；抽出共用具名函式雖不需新增連結（`nimblerun_panel_model` 已 PUBLIC `nimblerun_search`），但會改動 `SearchApps` 的 comparator 主體讓它呼叫外部函式，屬「改動 SearchApps」，故照 item 的 fallback 路徑複製。複製內容去掉 pinned 層後為：分數高→名稱短→大小寫不敏感名稱（`DisplayNameKey`，即正規化名、空時回退 display name）→ stable id，與 search 的尾段逐鍵一致。
+
+**填充排序演算法**：`std::partial_sort`（`candidates` 收集 catalog 內既非釘選也不在 `rows_` 的項目，只取前 `needed = min(容量 - rows 數, 候選數)`）。選它而非全量 `sort`：同為一行、是 stdlib 給「top-N of larger set」的專用演算法，且只在空狀態 rows < 24 時執行；`ponytail:` 註解已載明。候選為 `std::vector<const AppEntry*>`（避免拷貝 5,000 筆），comparator 以 lambda 解參考轉呼叫 `OrderByName`。
+
+**`Recent()` 呼叫端調查**：grep `Recent\(` 於 `src/`——`usage_store.h:63`（宣告）、`usage_store.cpp:248`（定義）、`main.cpp:912`（`RefreshPanelSnapshot`，唯一生產呼叫端）、`main.cpp:925`（`SetRecent`，非 `Recent()` 呼叫）。確認 `UsageStore::Recent()` 只有 `RefreshPanelSnapshot` 一個呼叫端，但依決策 4（呈現順序屬 model）仍在 model 層排序，不改 `UsageStore::Recent()`；`recent_usage_test` 的 `TestRecentNeverPads` 守門員防止未來被「順手」改動。
+
+**5,000 筆空狀態 timing 實測**：**67 µs（0 ms）**，rows 24（`NR-053: RefreshRows over 5000-entry empty state took 67 us (0 ms), rows 24`），遠低於 50 ms 上限。`docs/performance-baseline.md` 無空狀態 RefreshRows 相關列，依 item「若沒有相關列就不要新增列」，未動該檔。
+
+**建置與 CTest 結果**：Release（LLVM-MinGW + Ninja）configure＋`--clean-first` 全量重建成功、**0 warning / 0 error**；`ctest` **23/23 全綠**（含 `nimblerun_lifecycle_check`）；`ctest -R "nimblerun_recent_usage_test|nimblerun_list_vertical_slice_test"` 2/2 通過（panel_model 的 CTest 註冊名確為 `nimblerun_list_vertical_slice_test`，執行檔 `nimblerun_panel_model_test`，另直接執行 exe 驗證 exit 0）。`nimblerun_pinning_test` 最初因規則 3 新行為紅燈，調整 fixture 後全綠。
+
+**sanity greps**：全符合——`stable_sort|partial_sort` 命中 `std::stable_sort(rows_.begin() + recent_start_, ...)`（起點確在釘選區之後）；`UsageStore|UsageScore` 於 `panel_model.cpp` **零命中**（含 PowerShell 預設大小寫不敏感，欄位名 `usage_score` 帶底線不會誤配 `UsageScore`）；`git diff src/usage/` 空、`git diff src/search/` 空（comparator 採複製故未碰 search 路徑）；`= 24|24;` 只命中既有 `kIconCacheWorkingSetItems`、panel_layout 既有幾何註解與無關的 `1024`/`kSearchFontDip`/`kDay`，無第三個 24；`git diff --name-only` 為 design-spec.md、panel_model.cpp、panel_model_test.cpp、pin_store_test.cpp、recent_usage_test.cpp（＋未追蹤的 item 文件交接區與 work-items.md）。
+
+**偏差**（兩處必要調整，皆為 item 自身驗收強制的行為改變所致，設計決策零偏差）：
+1. `panel_model_test.cpp` 既有 `TestEmptyStateNoRecords` 原本用非空 catalog（1 筆）斷言「無紀錄→空狀態」，而規則 3 現在會把非空 catalog 補滿、該案例會紅；fixture 改為空 catalog 以維持「空狀態」原意（規則 3 的「空 catalog 兩形」已由新案例 `TestEmptyStateEmptyCatalogNoCrash` 覆蓋）。
+2. `pin_store_test.cpp` 兩條既有案例被規則 3 填滿行為推翻（不在 item 的 `git diff --name-only` 預期清單，屬必要調整）：`TestPanelModelPinnedFirst` 的 `rows.size()==2` 因填充變 3——改斷言 rows[0]=p、rows[1]=r1、rows[2]=r2（填充）與 p 只出現一次，測試主旨（釘選在前、不重複）不變；`TestPanelModelHidesAbsentPin` 的 `Rows().empty()` 因填充顯示 catalog 項目——改斷言 rows=[a]（填充）且 ghost pin 永不渲染，主旨（absent pin 不顯示）不變。
+
+**未完成事項**：6 條手動驗收（全新狀態填滿、啟動次數排序、釘選固定＋拖曳、超過一頁後不再填充、Esc 回到填滿格狀、200% DPI）屬人工視覺／操作驗證，依 `AGENTS.md` 交付規則不在 Agent 範圍；未 git commit／未 push。

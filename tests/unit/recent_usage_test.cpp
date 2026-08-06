@@ -337,6 +337,23 @@ void TestForgetThenRelaunch() {
     fs::remove_all(dir);
 }
 
+// NR-053: guard rail -- this item reordered the empty state in PanelModel,
+// not UsageStore. Recent() must keep its contract: newest last-launch first,
+// and never padded up to the cap with other apps.
+
+void TestRecentNeverPads() {
+    const std::wstring dir = MakeTempDir("nopad");
+    UsageStore store(dir);
+    store.Load();
+    store.RecordLaunch(L"aaa", 100);
+    store.RecordLaunch(L"bbb", 200);
+    const std::vector<UsageRecord> recent = store.Recent(20);
+    Expect(recent.size() == 2, "recent never pads up to the cap");
+    Expect(SameRecord(recent[0], {L"bbb", 1, 200}), "newest first");
+    Expect(SameRecord(recent[1], {L"aaa", 1, 100}), "oldest last");
+    fs::remove_all(dir);
+}
+
 // design-spec §4.6: recency bonus 8 / 4 / 1 / 0 on top of the launch count.
 void TestUsageScore() {
     constexpr std::int64_t kDay = 24 * 60 * 60;
@@ -379,6 +396,7 @@ int wmain() {
     TestForgetEmpty();
     TestForgetPersists();
     TestForgetThenRelaunch();
+    TestRecentNeverPads();
     TestUsageScore();
     std::printf("NR-009 recent usage check PASSED\n");
     return 0;
