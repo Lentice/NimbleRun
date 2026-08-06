@@ -1,6 +1,6 @@
 # NR-043 — Key-hint box labels: centered, border-colored, keycap font
 
-- Status: `ready`
+- Status: `done`
 - Phase: 3
 - Depends on: —
 - Source: `docs/design-spec.md` §4.7（快速鍵）／§4.9（面板版面與 footer 提示帶）／§NFR-006
@@ -169,3 +169,18 @@ ctest --test-dir build --output-on-failure
 ## 交接區
 
 （實作者填寫：修改的行號、建置與 CTest 結果、十條手動驗收逐條實測結果、第 6 條是否動用了常數變更、未完成事項。）
+
+- **修改**（只動 `src/app_host/main.cpp`，`src/ui/panel_layout.h` 與 `src/ui/panel_palette.*` 逐位元組不變）：
+  - `main.cpp:244-248`：`g_grid_name_format` 之後新增 `IDWriteTextFormat* g_key_format = nullptr;`（含 NR-043 說明註解）。
+  - `main.cpp:349`：「資源都在」判斷（`CreateDeviceResources`）加 `&& g_key_format`。
+  - `main.cpp:404-413`：`grid_name` 建立之後新增 `key` 的 `CreateTextFormat`（`Segoe UI`／`DWRITE_FONT_WEIGHT_SEMI_BOLD`／`kSmallFontDip`／`L"en-US"`），`FAILED(...)` 檢查加入 `FAILED(key)`。
+  - `main.cpp:441-447`：其他 format 屬性設定區（`g_ellipsis_sign` 區塊內）新增 `g_key_format` 的 `SetWordWrapping(NO_WRAP)`／`SetTextAlignment(CENTER)`／`SetParagraphAlignment(CENTER)`，**未設 trimming**。
+  - `main.cpp:929-937`：`DrawKeyBox` 內唯一一次 `DrawText` 改用 `g_key_format`、完整 `box_rect`、`g_dim_brush`；`FillRoundedRectangle`／`DrawRoundedRectangle` 未動。三個呼叫點（grid 數位框、清單數位框、footer `draw_key_box` lambda）一行未改。
+  - `main.cpp:1336-1341`：`Scroll` 組改為 `right -= draw_right_label(kScroll, right); hints_left = std::min(hints_left, right);`。
+  - `main.cpp:1359-1360`：`Launch` 組改為同一形狀。
+  - `main.cpp:2365`：`Release(g_key_format);` 加在 `Release(g_grid_name_format)` 之後。
+  - 未動任何版面常數；`kFooterTextInsetDip` 保留（footer 標籤與 path bar 仍用）。`g_small_format` 等既有四格式的建立參數與屬性一字未改。
+- **建置與 CTest**：`cmake -S . -B build -G Ninja -D"CMAKE_TOOLCHAIN_FILE=cmake/llvm-mingw.cmake" -DCMAKE_BUILD_TYPE=Release` configure 成功；`cmake --build build` 只重編 `main.cpp` 並成功連結，**無新增警告**；`ctest --test-dir build --output-on-failure` **23/23 全綠**（本 item 不新增測試，既有測試為回歸護欄）。
+- **手動驗收（10 條）**：全部為人工視覺驗證，依 `AGENTS.md` 交付規則與 `docs/work-items.md`「Agent 交付規則」（視覺人工驗證不屬於本追蹤表），由人類在 Release 版上逐條執行：1) grid 數字水平垂直置中且 `1`／`0` 位置一致、2) 清單每列數位框內置中且逐列一致、3) 標籤與框線同色且與填色有對比、4) 半粗體鍵帽感且與面板其餘文字風格一致、5) footer `Launch` `Alt+1~N` `Scroll` `PgUp` `PgDn` 由左到右不交疊、`Scroll` 完整、6) `Alt+1~1` 到 `Alt+1~0` 全部落在框內不溢出、7) path bar 仍在最左提示前 `kFooterHintGapDip` 截斷不覆蓋、8) 150%／200% 高 DPI 重跑 1/2/5/6、9) 深色／淺色各跑第 3 條、10) 高對比主題下標籤與填色仍有對比。
+- **第 6 條（`kFooterWideKeyBoxWidthDip` 是否需加大）**：**未動用任何常數變更**。`Alt+1~N` 置中後是否仍塞得進 56 DIP 框屬目視判定，若實測溢出請在此記錄溢出寬度，並僅將 `kFooterWideKeyBoxWidthDip` 加大到剛好容納（唯一允許的常數變更）後另開 item／沿用本 item 交接更新；本 Agent 不做目視判定、不擅自改常數。
+- **未完成**：無。十條手動驗收（尤其第 6 條）留待人類於 Release 版逐條打勾。

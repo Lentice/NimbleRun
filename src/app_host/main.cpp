@@ -241,6 +241,10 @@ IDWriteTextFormat* g_text_format = nullptr;
 IDWriteTextFormat* g_small_format = nullptr;
 // NR-029: centered single-line format for grid cell names.
 IDWriteTextFormat* g_grid_name_format = nullptr;
+// NR-043: semi-bold centered format for the key-hint boxes (footer and
+// per-row digits); kept distinct from g_small_format, which is left-aligned
+// on purpose for row subtitles and the path bar.
+IDWriteTextFormat* g_key_format = nullptr;
 // NR-020: character-granularity ellipsis for single-line row text; kept alive
 // as long as the text formats above (see SetTrimming lifetime requirements).
 IDWriteInlineObject* g_ellipsis_sign = nullptr;
@@ -342,7 +346,7 @@ bool CreateDeviceResources(HWND window) {
         g_selected_brush && g_selected_border_brush && g_hover_brush &&
         g_search_fill_brush && g_search_border_brush &&
         g_title_format && g_text_format && g_small_format &&
-        g_grid_name_format) {
+        g_grid_name_format && g_key_format) {
         return true;
     }
     if (g_render_target) {
@@ -400,7 +404,16 @@ bool CreateDeviceResources(HWND window) {
     const HRESULT grid_name = g_write_factory->CreateTextFormat(
         L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
         DWRITE_FONT_STRETCH_NORMAL, nimblerun::layout::kTextFontDip, L"en-US", &g_grid_name_format);
-    if (FAILED(title) || FAILED(text) || FAILED(small) || FAILED(grid_name)) {
+    // NR-043: key-hint boxes get their own format. Semi-bold reads as a keycap
+    // at 20 DIP and Segoe UI's digits are tabular, so single digits land in the
+    // same place in every box; centered on both axes so the label no longer
+    // depends on the kFooterTextInsetDip nudge. g_small_format cannot be reused
+    // -- it is left-aligned on purpose for row subtitles and the path bar.
+    const HRESULT key = g_write_factory->CreateTextFormat(
+        L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL,
+        DWRITE_FONT_STRETCH_NORMAL, nimblerun::layout::kSmallFontDip, L"en-US", &g_key_format);
+    if (FAILED(title) || FAILED(text) || FAILED(small) || FAILED(grid_name) ||
+        FAILED(key)) {
         return false;
     }
 
@@ -425,6 +438,12 @@ bool CreateDeviceResources(HWND window) {
         g_grid_name_format->SetTrimming(&trimming, g_ellipsis_sign);
         g_grid_name_format->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
         g_grid_name_format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+        // NR-043: the key-hint format centers the label on both axes inside the
+        // full box rect; no trimming so an overflowing label stays visible at
+        // acceptance instead of being hidden behind an ellipsis.
+        g_key_format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+        g_key_format->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+        g_key_format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
     }
 
     // Brushes are built from the palette resolved for this frame; when the
@@ -907,12 +926,13 @@ void DrawKeyBox(const wchar_t* label, const D2D1_RECT_F& box_rect) {
     g_render_target->FillRoundedRectangle(box, g_card_brush);
     g_render_target->DrawRoundedRectangle(box, g_dim_brush,
                                           nimblerun::layout::kFooterDividerWidthDip);
+    // NR-043: the label is centered in the full box rect (both axes come from
+    // g_key_format) and drawn in the border color so the box reads as one
+    // element. The box itself -- fill, border, position -- still carries the
+    // hint, so this is not color-only signalling (design-spec §NFR-006).
     g_render_target->DrawText(
-        label, static_cast<UINT32>(wcslen(label)), g_small_format,
-        D2D1::RectF(box_rect.left,
-                    box_rect.top + nimblerun::layout::kFooterTextInsetDip,
-                    box_rect.right, box_rect.bottom),
-        g_text_brush);
+        label, static_cast<UINT32>(wcslen(label)), g_key_format, box_rect,
+        g_dim_brush);
 }
 
 void Render(HWND window) {
@@ -1313,8 +1333,12 @@ void Render(HWND window) {
         return 0.0f;
     };
 
-    hints_left = std::min(hints_left,
-                          right - draw_right_label(footer_strings::kScroll, right));
+    // NR-043: draw_right_label measures the label and draws it ending at
+    // `right`; `right` has to move past it too, or the next group to the left
+    // (NR-024's Alt+1~N box) lands on top of the label -- which is what clipped
+    // "Scroll" to "oll".
+    right -= draw_right_label(footer_strings::kScroll, right);
+    hints_left = std::min(hints_left, right);
 
     // NR-024: "Launch" group to the left of "Scroll", separated by the hint
     // gap. The wide box content is "Alt+1~" followed by the last digit bound
@@ -1332,8 +1356,8 @@ void Render(HWND window) {
                          nimblerun::layout::kFooterWideKeyBoxWidthDip);
     hints_left = std::min(hints_left, right);
     right -= nimblerun::layout::kFooterKeyGapDip;
-    hints_left = std::min(hints_left,
-                          right - draw_right_label(footer_strings::kLaunch, right));
+    right -= draw_right_label(footer_strings::kLaunch, right);
+    hints_left = std::min(hints_left, right);
 
     // NR-029: path bar on the left half of the footer band (grid state only).
     // Hover wins over the keyboard selection; packaged apps show the source
@@ -2338,6 +2362,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     Release(g_text_format);
     Release(g_small_format);
     Release(g_grid_name_format);
+    Release(g_key_format);
     Release(g_ellipsis_sign);
     Release(g_write_factory);
     Release(g_d2d_factory);
