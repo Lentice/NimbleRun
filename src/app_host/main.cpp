@@ -1532,6 +1532,28 @@ LRESULT CALLBACK SearchEditProc(HWND edit, UINT message, WPARAM w_param, LPARAM 
         CallWindowProcW(g_search_original_proc, edit, message, w_param, l_param);
         DestroyCaret();
         return 0;
+    case WM_LBUTTONDOWN: {
+        // NR-039: the search box doubles as the panel's drag handle. DragDetect
+        // blocks until the user either moves past the system drag threshold
+        // (SM_CXDRAG/SM_CYDRAG -> TRUE) or releases without dragging (FALSE), and
+        // it consumes the mouse messages either way -- so the plain-click path has
+        // to place the caret itself. Cost accepted in NR-039: drag-selecting text
+        // with the mouse is gone; double-click, Shift+arrows and Ctrl+A are not.
+        const POINT client{GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param)};
+        POINT screen = client;
+        ClientToScreen(edit, &screen);  // DragDetect takes screen coordinates
+        if (DragDetect(edit, screen)) {
+            ReleaseCapture();
+            SendMessageW(GetParent(edit), WM_NCLBUTTONDOWN, HTCAPTION, 0);
+            return 0;
+        }
+        const LRESULT hit = SendMessageW(edit, EM_CHARFROMPOS, 0,
+                                         MAKELPARAM(client.x, client.y));
+        const int index = static_cast<int>(LOWORD(hit));
+        SendMessageW(edit, EM_SETSEL, index, index);
+        SetFocus(edit);
+        return 0;
+    }
     case WM_SYSKEYDOWN:
         // NR-024: Alt+digit directly launches the corresponding visible row,
         // exactly like Enter on that row (design-spec §4.7; reuses the same
@@ -1864,13 +1886,21 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
         return 0;
     case WM_LBUTTONDOWN: {
         // NR-020/NR-029: a single click selects and launches the row (list) or
-        // cell (grid) under the cursor (design-spec §4.8). CellAtPoint maps the
-        // client point through the current first visible item.
+        // cell (grid) under the cursor (design-spec §4.8).
         const int cell = CellAtPoint(window, GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param));
-        if (cell >= 0) {
-            g_model->SelectRow(static_cast<std::size_t>(cell));
-            ActivateRow(static_cast<std::size_t>(cell), window);
+        if (cell < 0) {
+            // NR-039: nothing under the cursor -> the panel itself is the drag
+            // handle, so it can be moved off whatever it happens to be covering.
+            // WM_NCLBUTTONDOWN/HTCAPTION hands the window to the shell's own move
+            // loop; DefWindowProc takes the live cursor position from the system,
+            // so lParam is unused here (client coords would be wrong anyway --
+            // WM_NCLBUTTONDOWN's lParam is in screen coordinates).
+            ReleaseCapture();
+            SendMessageW(window, WM_NCLBUTTONDOWN, HTCAPTION, 0);
+            return 0;
         }
+        g_model->SelectRow(static_cast<std::size_t>(cell));
+        ActivateRow(static_cast<std::size_t>(cell), window);
         return 0;
     }
     case WM_RBUTTONDOWN: {
