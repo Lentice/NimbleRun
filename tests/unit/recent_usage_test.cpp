@@ -337,6 +337,29 @@ void TestForgetThenRelaunch() {
     fs::remove_all(dir);
 }
 
+// design-spec §4.6: recency bonus 8 / 4 / 1 / 0 on top of the launch count.
+void TestUsageScore() {
+    constexpr std::int64_t kDay = 24 * 60 * 60;
+    constexpr std::int64_t kNow = 100 * kDay;
+    const auto score = [](std::uint64_t launches, std::int64_t last) {
+        return nimblerun::UsageScore({L"alpha", launches, last}, kNow);
+    };
+    Expect(score(1, kNow) == 1 + 8, "launched now gets the 24h bonus");
+    Expect(score(1, kNow - kDay + 1) == 1 + 8, "just inside 24h");
+    Expect(score(1, kNow - kDay) == 1 + 4, "24h boundary drops to the 7-day tier");
+    Expect(score(1, kNow - 7 * kDay) == 1 + 1, "7-day boundary drops to the 30-day tier");
+    Expect(score(1, kNow - 30 * kDay) == 1, "beyond 30 days there is no bonus");
+    Expect(score(5, kNow - 30 * kDay) > score(1, kNow - 30 * kDay),
+           "with equal recency the busier app wins");
+    Expect(score(1, kNow) > score(2, kNow - 30 * kDay),
+           "a fresh launch outranks a slightly busier stale one");
+    Expect(score(1, kNow + kDay) == 1 + 8, "a backwards clock counts as just now");
+    Expect(score(~0ull, 0) > 0, "an absurd launch count does not overflow to negative");
+    // usage.tsv can carry any int64_t, so the extremes must not overflow.
+    Expect(score(1, INT64_MIN) == 1, "the oldest possible timestamp gets no bonus");
+    Expect(score(1, INT64_MAX) == 1 + 8, "the newest possible timestamp gets the top bonus");
+}
+
 } // namespace
 
 int wmain() {
@@ -356,6 +379,7 @@ int wmain() {
     TestForgetEmpty();
     TestForgetPersists();
     TestForgetThenRelaunch();
+    TestUsageScore();
     std::printf("NR-009 recent usage check PASSED\n");
     return 0;
 }

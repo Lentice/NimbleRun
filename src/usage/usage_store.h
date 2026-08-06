@@ -62,9 +62,25 @@ public:
     // there are no records; never pads with other apps.
     std::vector<UsageRecord> Recent(int cap = 20) const;
 
+    // All records, unordered. For scoring the whole catalog the caller needs
+    // every record, not just the capped recent window.
+    const std::vector<UsageRecord>& Records() const { return records_; }
+
 private:
     std::wstring directory_;
     std::vector<UsageRecord> records_;
 };
+
+// Usage score for one record at `now_utc` (design-spec §4.6): a launch-count
+// term plus a recency bonus of 8 within 24h, 4 within 7 days, 1 within 30 days,
+// 0 beyond. Pure, so the boundaries are testable without a clock.
+//
+// ponytail: §4.6 asks for launch_count_30d + 3 x launch_count_7d, but usage.tsv
+// only keeps a lifetime total and the last launch time, so the total stands in
+// for the 30-day count and the 7-day term is dropped. The recency bonus is what
+// makes a just-launched app win a tie, which is the point. Upgrade path if the
+// ordering ever feels wrong: bump the usage.tsv schema to keep per-window
+// counters (or a bounded launch-timestamp log) and compute both terms here.
+int UsageScore(const UsageRecord& record, std::int64_t now_utc);
 
 } // namespace nimblerun

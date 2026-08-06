@@ -263,4 +263,25 @@ std::vector<UsageRecord> UsageStore::Recent(int cap) const {
     return result;
 }
 
+int UsageScore(const UsageRecord& record, std::int64_t now_utc) {
+    constexpr std::int64_t kDay = 24 * 60 * 60;
+    // Compare timestamps rather than subtracting them: usage.tsv can carry any
+    // int64_t, and `now_utc - INT64_MIN` is signed overflow. A last_launch in the
+    // future (a clock that moved backwards) lands in the top tier, which is the
+    // right answer for "most recently launched".
+    int bonus = 0;
+    if (record.last_launch_utc > now_utc - kDay) {
+        bonus = 8;
+    } else if (record.last_launch_utc > now_utc - 7 * kDay) {
+        bonus = 4;
+    } else if (record.last_launch_utc > now_utc - 30 * kDay) {
+        bonus = 1;
+    }
+    // Clamp the count term: a corrupt or absurd total must not overflow int and
+    // flip the comparison in the search tie-break.
+    const std::uint64_t clamped =
+        record.total_launches < 1000000u ? record.total_launches : 1000000u;
+    return static_cast<int>(clamped) + bonus;
+}
+
 } // namespace nimblerun

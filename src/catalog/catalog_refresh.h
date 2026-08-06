@@ -68,6 +68,12 @@ public:
     // Current atomic merged snapshot (deduplicated across sources).
     const std::vector<AppEntry>& Snapshot() const { return merged_; }
 
+    // Same snapshot, for stamping the host-derived ranking fields (is_pinned,
+    // usage_score) onto it. Every rebuild recomputes merged_ from the source
+    // entries and so drops those fields; the host restamps them at its single
+    // post-rebuild choke point. Not for adding or removing entries.
+    std::vector<AppEntry>& MutableSnapshot() { return merged_; }
+
     // Best-known entries per source.
     const std::vector<AppEntry>& SourceEntries(CatalogSource source) const;
 

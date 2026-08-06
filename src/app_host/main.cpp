@@ -42,6 +42,8 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -675,6 +677,10 @@ void PrewarmEmptyStatePage(HWND window) {
     }
 }
 
+// Defined below, next to the panel-refresh path it is also part of; the launch
+// path needs it before that point.
+void StampRankingFields();
+
 // NR-036: the single hide path. Every way the panel disappears (Esc second
 // stage, WM_KILLFOCUS auto-hide, hide-after-launch, hotkey/tray toggle) funnels
 // through here so the freshly fetched icons are flushed exactly once per hide
@@ -733,6 +739,10 @@ void ActivateRow(std::size_t index, HWND window) {
     if (g_usage) {
         g_usage->RecordLaunch(entry.stable_id, static_cast<std::int64_t>(std::time(nullptr)));
         g_usage->Save();
+        // The new score has to reach the snapshot the next search reads. With
+        // hide-after-launch off the panel stays open, so waiting for the next
+        // show would rank the app the user just launched on its old score.
+        StampRankingFields();
     }
     if (g_hide_after_launch) {
         HidePanel(window);
@@ -852,13 +862,46 @@ void RefreshPins() {
     g_model->SetPins(g_pins->OrderedPins());
 }
 
+// design-spec §4.5: among equal text matches the order is pinned first, then
+// higher usage score. Both fields live on AppEntry but are derived from the pin
+// and usage stores, so they have to be stamped onto the merged snapshot after
+// anything that changes either store -- and after every rebuild, which
+// recomputes the snapshot from the source entries and drops them. Without this
+// the two tie-breaks in SearchApps compare zero against zero and a
+// just-launched app keeps sinking below alphabetically luckier ones.
+//
+// One linear pass over the snapshot with a hashed score lookup; the pin list is
+// a handful of entries, so it is scanned directly.
+void StampRankingFields() {
+    if (!g_refresh || !g_usage) {
+        return;
+    }
+    const std::int64_t now = static_cast<std::int64_t>(std::time(nullptr));
+    std::unordered_map<std::wstring_view, int> scores;
+    scores.reserve(g_usage->Records().size());
+    for (const nimblerun::UsageRecord& record : g_usage->Records()) {
+        scores.emplace(record.stable_id, nimblerun::UsageScore(record, now));
+    }
+    const std::vector<std::wstring> pins =
+        g_pins ? g_pins->OrderedPins() : std::vector<std::wstring>{};
+    for (nimblerun::AppEntry& entry : g_refresh->MutableSnapshot()) {
+        const auto score = scores.find(entry.stable_id);
+        entry.usage_score = score == scores.end() ? 0 : score->second;
+        entry.is_pinned =
+            std::find(pins.begin(), pins.end(), entry.stable_id) != pins.end();
+    }
+}
+
 // NR-011: repoints the panel model at the coordinator's current snapshot and
 // refreshes the recent list, so a swapped-in catalog appears immediately.
 void RefreshPanelSnapshot() {
     if (!g_model || !g_refresh || !g_usage) {
         return;
     }
-    g_model->SetCatalog(&g_refresh->Snapshot());
+    // Pins are loaded first because they feed the is_pinned stamp.
+    RefreshPins();
+    StampRankingFields();
+    g_model->SetCatalog(&g_refresh->MutableSnapshot());
     std::vector<nimblerun::UsageRecord> recent_records = g_usage->Recent(g_settings.recent_count);
     std::vector<nimblerun::AppEntry> recent_entries;
     recent_entries.reserve(recent_records.size());
@@ -870,8 +913,9 @@ void RefreshPanelSnapshot() {
             }
         }
     }
+    // SetRecent is last, so its RefreshRows is the one that decides the visible
+    // rows; RefreshPins above already handed the pin list to the model.
     g_model->SetRecent(std::move(recent_entries));
-    RefreshPins();
 }
 
 // NR-011: starts one background thread per source in `sources` for a rebuild
@@ -1755,9 +1799,41 @@ LRESULT CALLBACK SearchEditProc(HWND edit, UINT message, WPARAM w_param, LPARAM 
         // solid caret is drawn inverted against the background, so it stays
         // visible in both light and dark mode. No timers: the caret only blinks
         // via the system's own mechanism.
+        //
+        // Both CreateCaret arguments matter here: (HBITMAP)1 asks for a *gray*
+        // caret -- the blending this override exists to avoid -- and a zero
+        // height collapses the caret to the system window border height, which
+        // is a 1-2 px stub. NULL gives the solid inverting caret, and the height
+        // has to be stated: use the font's line height, not the client height,
+        // which would also swallow the input box's vertical padding.
+        //
+        // CreateCaret destroys the caret the default handler just created and
+        // positioned, and the replacement's position is undefined until it is
+        // set, so carry the position across (the EDIT owns it from here on).
         const LRESULT result =
             CallWindowProcW(g_search_original_proc, edit, message, w_param, l_param);
-        CreateCaret(edit, reinterpret_cast<HBITMAP>(1), 0, 0);
+        POINT caret{};
+        GetCaretPos(&caret);
+        TEXTMETRICW metrics{};
+        int height = 0;
+        if (const HDC dc = GetDC(edit)) {
+            const HGDIOBJ previous =
+                g_search_font ? SelectObject(dc, g_search_font) : nullptr;
+            if (GetTextMetricsW(dc, &metrics)) {
+                height = metrics.tmHeight;
+            }
+            if (previous) {
+                SelectObject(dc, previous);
+            }
+            ReleaseDC(edit, dc);
+        }
+        if (height <= 0) {
+            RECT client{};
+            GetClientRect(edit, &client);
+            height = client.bottom - client.top;
+        }
+        CreateCaret(edit, nullptr, 0, height);
+        SetCaretPos(caret.x, caret.y);
         ShowCaret(edit);
         return result;
     }
@@ -2309,6 +2385,9 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
                             static_cast<std::int64_t>(std::time(nullptr)));
             }
             if (g_pins->Save()) {
+                // The catalog's is_pinned stamp drives the §4.5 pinned-first
+                // tie-break in search results, so it has to follow the store.
+                StampRankingFields();
                 // Refresh just the pin region: SetPins rebuilds the empty-query
                 // rows so the entry moves into/out of the pinned region.
                 g_model->SetPins(g_pins->OrderedPins());
