@@ -117,6 +117,9 @@ target_link_libraries(nimblerun_settings
 # user_folder_catalog consumes the settings types and DefaultExtensions().
 target_link_libraries(nimblerun_catalog PUBLIC nimblerun_settings)
 
+# catalog_refresh fills AppEntry::normalized_name via search_engine (NR-038).
+target_link_libraries(nimblerun_catalog PUBLIC nimblerun_search)
+
 add_library(nimblerun_launch STATIC
     src/launch/shell_launch.cpp
 )

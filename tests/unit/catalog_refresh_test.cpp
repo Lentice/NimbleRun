@@ -1,5 +1,6 @@
 #include "catalog/catalog_cache.h"
 #include "catalog/catalog_refresh.h"
+#include "search/search_engine.h"
 
 #include <windows.h>
 
@@ -200,6 +201,65 @@ void TestSnapshotIsAtomicAndDeterministic() {
     Expect(c.Snapshot().size() == second.size(), "later snapshot stays until the next swap");
 }
 
+// NR-038: entries without a prefilled normalized_name (the real catalog
+// sources never set it) get it filled from display_name by the published
+// snapshot, via a completed generation.
+void TestSnapshotFillsNormalizedName() {
+    CatalogRefreshCoordinator c;
+    AppEntry entry;
+    entry.stable_id = L"paint";
+    entry.display_name = L"  Paint   3D  ";
+    entry.launch_identity = L"C:\\Apps\\paint.exe";
+    entry.source_path = entry.launch_identity;
+    entry.source = AppSource::UserStartMenu;
+
+    const std::uint64_t gen = c.BeginGeneration({CatalogSource::StartMenu});
+    c.ApplySourceResult(gen, CatalogSource::StartMenu, {entry});
+
+    const auto& snapshot = c.Snapshot();
+    Expect(snapshot.size() == 1, "generation publishes one snapshot entry");
+    Expect(!snapshot[0].normalized_name.empty(), "snapshot fills normalized_name");
+    Expect(snapshot[0].normalized_name ==
+               nimblerun::NormalizeName(snapshot[0].display_name),
+           "snapshot normalized_name equals NormalizeName(display_name)");
+}
+
+// NR-038: direct SetSnapshot (the startup cache-load path) fills names the
+// same way.
+void TestSetSnapshotFillsNormalizedName() {
+    CatalogRefreshCoordinator c;
+    AppEntry entry;
+    entry.stable_id = L"upper";
+    entry.display_name = L"ABC";
+    entry.launch_identity = L"C:\\Apps\\upper.exe";
+    entry.source_path = entry.launch_identity;
+    entry.source = AppSource::UserStartMenu;
+
+    c.SetSnapshot({entry});
+
+    const auto& snapshot = c.Snapshot();
+    Expect(snapshot.size() == 1 && snapshot[0].normalized_name == L"abc",
+           "SetSnapshot fills normalized_name from display_name");
+}
+
+// NR-038: a prefilled non-empty normalized_name is never overwritten.
+void TestSetSnapshotRespectsPrefilledNormalizedName() {
+    CatalogRefreshCoordinator c;
+    AppEntry entry;
+    entry.stable_id = L"zebra";
+    entry.display_name = L"Zebra";
+    entry.normalized_name = L"notepad";
+    entry.launch_identity = L"C:\\Apps\\zebra.exe";
+    entry.source_path = entry.launch_identity;
+    entry.source = AppSource::UserStartMenu;
+
+    c.SetSnapshot({entry});
+
+    const auto& snapshot = c.Snapshot();
+    Expect(snapshot.size() == 1 && snapshot[0].normalized_name == L"notepad",
+           "SetSnapshot keeps a prefilled normalized_name");
+}
+
 // NR-022: a failed launch with no rebuild running triggers exactly one refresh.
 void TestFailureNoRebuildTriggersOnce() {
     nimblerun::LaunchFailureRefreshGate gate;
@@ -308,6 +368,9 @@ int wmain() {
     TestAppsFolderStaleness();
     TestSnapshotIsAtomicAndDeterministic();
     TestNoPartialSnapshotBeforeAllSourcesReport();
+    TestSnapshotFillsNormalizedName();
+    TestSetSnapshotFillsNormalizedName();
+    TestSetSnapshotRespectsPrefilledNormalizedName();
     TestCacheRoundTrip();
     TestCorruptCacheRebuilds();
     TestNewerSchemaCacheRebuilds();

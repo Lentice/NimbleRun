@@ -1,6 +1,7 @@
 #include "catalog/catalog_refresh.h"
 
 #include "catalog/dedup.h"
+#include "search/search_engine.h"
 
 #include <algorithm>
 #include <limits>
@@ -111,6 +112,15 @@ const std::vector<AppEntry>& CatalogRefreshCoordinator::SourceEntries(
 }
 
 void CatalogRefreshCoordinator::SetSnapshot(std::vector<AppEntry> merged) {
+    // NR-038: the sole place a published snapshot gets its normalized names, so
+    // SearchApps never re-normalizes per keystroke. Only fill when empty: the disk
+    // cache already carries the value (catalog_cache field 3), and a test may
+    // supply its own.
+    for (AppEntry& entry : merged) {
+        if (entry.normalized_name.empty()) {
+            entry.normalized_name = NormalizeName(entry.display_name);
+        }
+    }
     merged_ = std::move(merged);
 }
 
@@ -138,7 +148,7 @@ void CatalogRefreshCoordinator::RebuildMerged() {
             merged.insert(merged.end(), it->second.begin(), it->second.end());
         }
     }
-    merged_ = DeduplicateCatalog(merged).entries;
+    SetSnapshot(DeduplicateCatalog(merged).entries);
 }
 
 bool LaunchFailureRefreshGate::OnLaunchAttempt(bool launch_succeeded,

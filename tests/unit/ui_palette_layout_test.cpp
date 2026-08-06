@@ -1,4 +1,5 @@
 #include "app_host/panel_model.h"
+#include "search/search_engine.h"
 #include "ui/panel_layout.h"
 #include "ui/panel_palette.h"
 #include "ui/quick_select.h"
@@ -50,7 +51,9 @@ AppEntry Entry(std::wstring id, std::wstring name) {
     AppEntry entry;
     entry.stable_id = std::move(id);
     entry.display_name = name;
-    entry.normalized_name = name;
+    // NR-038: a prefilled normalized_name is used verbatim (no re-normalization
+    // in the search loop), so it must already be the normalized form.
+    entry.normalized_name = nimblerun::NormalizeName(name);
     entry.launch_identity = L"C:\\Apps\\" + name + L".exe";
     entry.source_path = entry.launch_identity;
     entry.source = AppSource::UserFolder;

@@ -3,6 +3,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <cwctype>
 #include <string>
 #include <utility>
@@ -26,40 +27,6 @@ std::wstring CollapseWhitespace(std::wstring_view value) {
         }
         result.push_back(character);
     }
-    return result;
-}
-
-std::wstring Normalize(std::wstring_view value) {
-    const std::wstring collapsed = CollapseWhitespace(value);
-    if (collapsed.empty()) {
-        return {};
-    }
-
-    const int required = LCMapStringEx(
-        LOCALE_NAME_INVARIANT,
-        LCMAP_LOWERCASE,
-        collapsed.data(),
-        static_cast<int>(collapsed.size()),
-        nullptr,
-        0,
-        nullptr,
-        nullptr,
-        0);
-    if (required <= 0) {
-        return collapsed;
-    }
-
-    std::wstring result(static_cast<std::size_t>(required), L'\0');
-    LCMapStringEx(
-        LOCALE_NAME_INVARIANT,
-        LCMAP_LOWERCASE,
-        collapsed.data(),
-        static_cast<int>(collapsed.size()),
-        result.data(),
-        required,
-        nullptr,
-        nullptr,
-        0);
     return result;
 }
 
@@ -117,52 +84,95 @@ std::wstring_view NormalizedName(const AppEntry& entry) {
 
 } // namespace
 
+std::wstring NormalizeName(std::wstring_view value) {
+    const std::wstring collapsed = CollapseWhitespace(value);
+    if (collapsed.empty()) {
+        return {};
+    }
+
+    const int required = LCMapStringEx(
+        LOCALE_NAME_INVARIANT,
+        LCMAP_LOWERCASE,
+        collapsed.data(),
+        static_cast<int>(collapsed.size()),
+        nullptr,
+        0,
+        nullptr,
+        nullptr,
+        0);
+    if (required <= 0) {
+        return collapsed;
+    }
+
+    std::wstring result(static_cast<std::size_t>(required), L'\0');
+    LCMapStringEx(
+        LOCALE_NAME_INVARIANT,
+        LCMAP_LOWERCASE,
+        collapsed.data(),
+        static_cast<int>(collapsed.size()),
+        result.data(),
+        required,
+        nullptr,
+        nullptr,
+        0);
+    return result;
+}
+
 std::vector<AppEntry> SearchApps(const std::vector<AppEntry>& catalog,
                                  std::wstring_view query) {
-    const std::wstring normalized_query = Normalize(query);
+    // ponytail: full O(catalog) scan per keystroke. Measured sub-millisecond for a
+    // 5k catalog once names are pre-normalized (see search_engine_test). If a real
+    // catalog ever makes this visible, the next step is incremental narrowing (a
+    // longer query's match set is a subset of the shorter one's, for every tier),
+    // not a debounce -- a debounce only makes the first keystroke slower.
+    const std::wstring normalized_query = NormalizeName(query);
     if (normalized_query.empty()) {
         return {};
     }
 
-    struct RankedEntry {
-        AppEntry entry;
+    struct Ranked {
         MatchRank rank;
-        std::wstring normalized_name;
+        std::uint32_t index;
     };
 
-    std::vector<RankedEntry> ranked;
+    std::vector<Ranked> ranked;
     ranked.reserve(catalog.size());
-    for (const AppEntry& entry : catalog) {
-        const std::wstring name = Normalize(NormalizedName(entry));
+    for (std::uint32_t i = 0; i < catalog.size(); ++i) {
+        const std::wstring_view name = NormalizedName(catalog[i]);
         const MatchRank rank = Rank(name, normalized_query);
         if (rank != MatchRank::NoMatch) {
-            ranked.push_back({entry, rank, name});
+            ranked.push_back({rank, i});
         }
     }
 
-    std::sort(ranked.begin(), ranked.end(), [](const RankedEntry& left, const RankedEntry& right) {
-        if (left.rank != right.rank) {
-            return left.rank < right.rank;
-        }
-        if (left.entry.is_pinned != right.entry.is_pinned) {
-            return left.entry.is_pinned > right.entry.is_pinned;
-        }
-        if (left.entry.usage_score != right.entry.usage_score) {
-            return left.entry.usage_score > right.entry.usage_score;
-        }
-        if (left.entry.display_name.size() != right.entry.display_name.size()) {
-            return left.entry.display_name.size() < right.entry.display_name.size();
-        }
-        if (left.normalized_name != right.normalized_name) {
-            return left.normalized_name < right.normalized_name;
-        }
-        return left.entry.stable_id < right.entry.stable_id;
-    });
+    std::sort(ranked.begin(), ranked.end(),
+              [&catalog](const Ranked& left, const Ranked& right) {
+                  const AppEntry& left_entry = catalog[left.index];
+                  const AppEntry& right_entry = catalog[right.index];
+                  if (left.rank != right.rank) {
+                      return left.rank < right.rank;
+                  }
+                  if (left_entry.is_pinned != right_entry.is_pinned) {
+                      return left_entry.is_pinned > right_entry.is_pinned;
+                  }
+                  if (left_entry.usage_score != right_entry.usage_score) {
+                      return left_entry.usage_score > right_entry.usage_score;
+                  }
+                  if (left_entry.display_name.size() != right_entry.display_name.size()) {
+                      return left_entry.display_name.size() < right_entry.display_name.size();
+                  }
+                  const std::wstring_view left_name = NormalizedName(left_entry);
+                  const std::wstring_view right_name = NormalizedName(right_entry);
+                  if (left_name != right_name) {
+                      return left_name < right_name;
+                  }
+                  return left_entry.stable_id < right_entry.stable_id;
+              });
 
     std::vector<AppEntry> result;
     result.reserve(ranked.size());
-    for (RankedEntry& item : ranked) {
-        result.push_back(std::move(item.entry));
+    for (const Ranked& item : ranked) {
+        result.push_back(catalog[item.index]);
     }
     return result;
 }
