@@ -2,6 +2,8 @@
 #include "catalog/stable_id.h"
 #include "catalog/start_menu_catalog.h"
 
+#include "win/com.h"
+
 #include <windows.h>
 #include <objbase.h>
 #include <objidl.h>
@@ -41,38 +43,18 @@ bool ShortcutIsWeb(IShellLinkW& link) {
         return false;
     }
     bool web = false;
-    IShellItem* item = nullptr;
-    if (SUCCEEDED(SHCreateItemFromIDList(pidl, IID_PPV_ARGS(&item)))) {
+    IShellItem* raw_item = nullptr;
+    if (SUCCEEDED(SHCreateItemFromIDList(pidl, IID_PPV_ARGS(&raw_item)))) {
+        ComPtr<IShellItem> item(raw_item);
         wchar_t* url = nullptr;
         if (SUCCEEDED(item->GetDisplayName(SIGDN_URL, &url))) {
             web = IsWebUrl(url);
             CoTaskMemFree(url);
         }
-        item->Release();
     }
     CoTaskMemFree(pidl);
     return web;
 }
-
-class ComGuard {
-public:
-    ComGuard() {
-        const HRESULT hr =
-            CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
-        own_ = hr == S_OK;
-        usable_ = SUCCEEDED(hr) || hr == RPC_E_CHANGED_MODE;
-    }
-    ~ComGuard() {
-        if (own_) {
-            CoUninitialize();
-        }
-    }
-    bool Usable() const { return usable_; }
-
-private:
-    bool own_ = false;
-    bool usable_ = false;
-};
 
 // "C:\A\B\app.exe" -> "C:\A\B". Empty when there is no separator.
 std::wstring ParentDirectory(std::wstring_view path) {
@@ -101,31 +83,40 @@ struct ResolvedLink {
 // be resolved is still kept, because the .lnk path is itself Shell-launchable.
 ResolvedLink ResolveShortcut(const std::wstring& path) {
     ResolvedLink result;
-    IShellLinkW* shell_link = nullptr;
+    IShellLinkW* raw_link = nullptr;
     if (FAILED(CoCreateInstance(
-            CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&shell_link)))) {
+            CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&raw_link)))) {
         return result;
     }
-    IPersistFile* persist = nullptr;
-    HRESULT hr = shell_link->QueryInterface(IID_PPV_ARGS(&persist));
+    ComPtr<IShellLinkW> shell_link(raw_link);
+    IPersistFile* raw_persist = nullptr;
+    HRESULT hr = shell_link->QueryInterface(IID_PPV_ARGS(&raw_persist));
+    ComPtr<IPersistFile> persist(raw_persist);
     if (SUCCEEDED(hr)) {
         hr = persist->Load(path.c_str(), STGM_READ);
-        persist->Release();
     }
     if (SUCCEEDED(hr)) {
-        wchar_t target[1024];
-        if (SUCCEEDED(shell_link->GetPath(target, 1024, nullptr, SLGP_UNCPRIORITY)) &&
+        // NR-051: GetPath / GetArguments / GetWorkingDirectory return S_FALSE
+        // for a link that has no such value (a PIDL-only shortcut to a control
+        // panel item or a packaged app), and SUCCEEDED(S_FALSE) is true. The
+        // buffers used to be uninitialized, so assign() scanned leftover stack
+        // bytes for a NUL -- undefined behavior that feeds garbage into
+        // search_alias and the §10.3 identity key, making the same shortcut
+        // hash differently between scans. Zero-init makes the existing
+        // `[0] != L'\0'` test meaningful, and every buffer now has one.
+        wchar_t target[1024] = {};
+        if (shell_link->GetPath(target, 1024, nullptr, SLGP_UNCPRIORITY) == S_OK &&
             target[0] != L'\0') {
             result.target.assign(target);
         } else {
             result.web = ShortcutIsWeb(*shell_link);
         }
-        wchar_t arguments[1024];
-        if (SUCCEEDED(shell_link->GetArguments(arguments, 1024))) {
+        wchar_t arguments[1024] = {};
+        if (shell_link->GetArguments(arguments, 1024) == S_OK && arguments[0] != L'\0') {
             result.arguments.assign(arguments);
         }
-        wchar_t working[1024];
-        if (SUCCEEDED(shell_link->GetWorkingDirectory(working, 1024)) && working[0] != L'\0') {
+        wchar_t working[1024] = {};
+        if (shell_link->GetWorkingDirectory(working, 1024) == S_OK && working[0] != L'\0') {
             const std::wstring normalized = NormalizePathKey(working);
             const std::wstring target_directory =
                 NormalizePathKey(ParentDirectory(result.target));
@@ -135,7 +126,6 @@ ResolvedLink ResolveShortcut(const std::wstring& path) {
         }
         result.loadable = true;
     }
-    shell_link->Release();
     return result;
 }
 

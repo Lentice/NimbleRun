@@ -2,6 +2,8 @@
 
 #include "icons/icon_pack_format.h"
 
+#include "win/com.h"
+
 #include <windows.h>
 #include <ole2.h>
 #include <wincodec.h>
@@ -15,17 +17,6 @@
 
 namespace nimblerun {
 namespace {
-
-// Releases any COM interface pointer owned through std::unique_ptr. Plain
-// single-Release ownership, same as the manual factory->Release() calls in
-// shell_icon_provider.cpp, but safe on every early-return path.
-struct ComRelease {
-    void operator()(IUnknown* ptr) const noexcept {
-        if (ptr != nullptr) {
-            ptr->Release();
-        }
-    }
-};
 
 // Bounds shared by encode and decode: larger than the largest variant (256)
 // by a wide margin, yet small enough that a corrupted size field cannot ask

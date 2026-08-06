@@ -157,6 +157,14 @@ void TestFixtureEnumeration() {
     Expect(CreateShortcut(root + L"\\Uninstall Helper.lnk",
                           L"C:\\Program Files\\Some App\\uninstall.exe", L""),
            "create uninstaller shortcut");
+    // NR-051: a shortcut with no file path target. CreateShortcut cannot build
+    // a true PIDL-only link (it only calls SetPath), so target the empty
+    // string -- SetPath succeeds and the saved link's GetPath returns S_FALSE
+    // on reload, which the old SUCCEEDED() check treated as success. The entry
+    // must stay (FR-004), with an empty search_alias and a stable id that does
+    // not change between scans.
+    Expect(CreateShortcut(root + L"\\No Target.lnk", L"", L""),
+           "create no-target shortcut");
     // Corrupt .lnk (garbage bytes) must be skipped, not abort the walk.
     WriteBytes(root + L"\\Broken.lnk", "this is not a shell link file");
     // ClickOnce app reference is kept as-is; the path is the launch identity.
@@ -212,12 +220,17 @@ void TestFixtureEnumeration() {
     Expect(portable != nullptr, "bare exe entry present");
     Expect(portable->search_alias.empty(), "bare exe has no search alias");
 
+    const AppEntry* no_target = FindByName(entries, L"No Target");
+    Expect(no_target != nullptr, "no-target entry present");
+    Expect(no_target->search_alias.empty(), "no-target search alias is empty");
+    Expect(no_target->stable_id.size() == 16, "no-target stable id");
+
     Expect(FindByName(entries, L"Broken") == nullptr, "corrupt shortcut skipped");
     Expect(FindByName(entries, L"Homepage") == nullptr, "website shortcut excluded");
     Expect(FindByName(entries, L"Uninstall Helper") == nullptr, "uninstaller shortcut excluded");
     Expect(FindByName(entries, L"readme") == nullptr, "non-app extension ignored");
 
-    Expect(entries.size() == 7, "expected entry count");
+    Expect(entries.size() == 8, "expected entry count");
 
     // Determinism: a second run produces the same stable ids.
     {
@@ -227,6 +240,11 @@ void TestFixtureEnumeration() {
         const AppEntry* again = FindByName(second, L"Notepad");
         Expect(again != nullptr && again->stable_id == notepad->stable_id,
                "stable id reproducible across runs");
+        // NR-051: the no-target link's identity must be reproducible across
+        // scans too -- the old uninitialized buffers could make it differ.
+        const AppEntry* no_target_again = FindByName(second, L"No Target");
+        Expect(no_target_again != nullptr && no_target_again->stable_id == no_target->stable_id,
+               "no-target stable id reproducible across runs");
     }
 
     RemoveTreeBestEffort(root);

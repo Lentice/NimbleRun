@@ -385,7 +385,20 @@ git diff src/catalog/stable_id.h src/catalog/dedup.cpp
 
 ## 交接區
 
-（實作者填寫：修改的位置、兩份 `ComGuard` 是否真的逐字相同、是否需要 CMake
-變更、PIDL-only fixture 是否造得出來（若否，試了什麼）、建置與 CTest 結果、
-4 條手動驗收結果（特別是 #2 的 handle 數前後對比與 #3 的釘選存活情形）、
-未被自動化覆蓋的部分、sanity greps、偏差、未完成事項。）
+**修改位置**：新增 `src/win/com.h`（header-only，照 `src/storage/atomic_text_file.h` 先例）；`src/catalog/start_menu_catalog.cpp`（刪逐字 `ComGuard`、`ResolveShortcut` 三緩衝區零初始化＋`== S_OK`＋`ComPtr`、`ShortcutIsWeb` 的 `item` 轉 `ComPtr`）；`src/catalog/appsfolder_catalog.cpp`（刪逐字 `ComGuard`）；`src/icons/png_codec.cpp`（刪 `ComRelease`）；`tests/unit/start_menu_catalog_test.cpp`（新增 `No Target.lnk` fixture＋斷言）。`icon_worker.cpp`、`main.cpp`、`shell_icon_provider.cpp` 未動。
+
+**兩份 `ComGuard` 是否逐字相同**：是，逐字比對確認完全相同（`start_menu_catalog.cpp:57-75` 與 `appsfolder_catalog.cpp:22-40`，建構子旗標、`own_ = hr == S_OK`、`usable_`、解構、private 兩旗標一字不差），共用版本無需保留任何差異。
+
+**是否需要 CMake 變更**：不需要。本 repo include 以 repo 根為基準，`#include "win/com.h"` 由 `nimblerun_catalog`／`nimblerun_icons` 既有的 `target_include_directories(src)` 覆蓋；純 header 無 target 需求。
+
+**PIDL-only fixture 是否造得出來**：造得出來，用 item 明訂的 fallback（空字串目標）。實測：`CreateShortcut`（只會 `SetPath`）對空字串——`SetPath(L"")` 回 SUCCEEDED、`Save` 成功、reload 後 `GetPath` 回 **`S_FALSE`**（`GetArgs`/`GetWorkingDirectory`/`GetIDList` 回 S_OK），且 `ShortcutIsWeb` 為 false（項目不會被當網站丟掉）。另試「不存在路徑」→ `GetPath` 回 `S_OK`（不觸發 S_FALSE，不符合本 item 的目標），控制台 CLSID `::{26EE0668-A00A-44D7-9371-BEB064C98683}` → 也回 `S_FALSE`，但空字串最直接。測試斷言項目仍在、`search_alias` 空、連續兩次列舉 stable id 相同；`arguments` 在 `AppEntry` 無欄位，依 item「若測試可觀察到」略過。
+
+**建置與 CTest**：Release 建置無新增警告；`ctest` **23/23 全綠**；`ctest -R "start_menu_catalog|appsfolder_catalog|png_codec"` 3/3。
+
+**未被自動化覆蓋**：`ComGuard` 的 `S_FALSE` 計數平衡無法在單元測試觀察（要能讀 COM 內部計數），依 item 不加測試，正確性靠 `own_ = SUCCEEDED(hr)` 一行與 Agent checks 的 grep。4 條手動驗收（Alt+Space 面板、Ctrl+R 十次 handle 數不回昇、釘選存活、控制台項目捷徑顯示）為人工操作，不在 Agent 範圍。
+
+**sanity greps**：全符合——repo 內 `class ComGuard`／`struct ComRelease` 各只命中 `src/win/com.h` 一次；`own_ = SUCCEEDED(hr);`；三緩衝區全帶 `= {}`；`SUCCEEDED(shell_link->` 零命中；`git diff --name-only` 恰為 5 個預期路徑（新增 `src/win/com.h`）；`git diff stable_id.h dedup.cpp` 為空。
+
+**偏差**：`ComPtr` 配 `IID_PPV_ARGS` 不能用 `&ptr.get()`（clang 對 rvalue 取址編不過），採「raw 中間指標給 `IID_PPV_ARGS`，成功後包進 `ComPtr`」的既有標準寫法——這是唯一偏離 item 文字描寫的實作細節，行為不變。item §2 提到「理論上某些捷徑的 stable id 會改變」：本機開發 Start Menu 無 PIDL-only 捷徑，實測不到受影響數量，判定為修復原本不穩定的 id。
+
+**未完成事項**：無。

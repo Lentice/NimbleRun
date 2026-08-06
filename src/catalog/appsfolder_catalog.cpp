@@ -3,6 +3,8 @@
 #include "catalog/app_filter.h"
 #include "catalog/stable_id.h"
 
+#include "win/com.h"
+
 #include <windows.h>
 #include <objbase.h>
 #include <objidl.h>
@@ -18,26 +20,6 @@
 
 namespace nimblerun {
 namespace {
-
-class ComGuard {
-public:
-    ComGuard() {
-        const HRESULT hr =
-            CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
-        own_ = hr == S_OK;
-        usable_ = SUCCEEDED(hr) || hr == RPC_E_CHANGED_MODE;
-    }
-    ~ComGuard() {
-        if (own_) {
-            CoUninitialize();
-        }
-    }
-    bool Usable() const { return usable_; }
-
-private:
-    bool own_ = false;
-    bool usable_ = false;
-};
 
 // CoTaskMem string -> std::wstring, releasing the Shell allocation.
 std::wstring TakeCoTaskString(wchar_t* raw) {
