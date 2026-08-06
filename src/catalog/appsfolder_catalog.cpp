@@ -71,6 +71,11 @@ bool BuildAppsFolderEntry(const std::wstring& display_name,
     // resolve only inside the AppsFolder namespace.
     out.launch_identity = L"shell:AppsFolder\\" + parsing_name;
     out.source_path = parsing_name;
+    // NR-047: the package-family part of the AUMID is a secondary search key
+    // ("Microsoft.WindowsCalculator" reachable by "calc"). Cut at the first '_'
+    // to drop the publisher hash, which is identical across every Store app and
+    // would otherwise make queries like "8wekyb" return the whole Store.
+    out.search_alias = parsing_name.substr(0, parsing_name.find(L'_'));
     out.source = AppSource::AppsFolder;
     // Identity key stays the bare parsing name (design-spec §10.3): the prefix
     // is launch-assembly, not identity, so pins and usage survive unchanged.

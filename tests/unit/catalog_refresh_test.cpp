@@ -357,6 +357,73 @@ void TestNewerSchemaCacheRebuilds() {
     RemoveTreeBestEffort(dir);
 }
 
+// NR-047: SetSnapshot normalizes search_alias the way it normalizes
+// normalized_name, and leaves an empty alias empty (UserFolder entries).
+void TestSetSnapshotNormalizesSearchAlias() {
+    CatalogRefreshCoordinator c;
+    AppEntry calc;
+    calc.stable_id = L"calc";
+    calc.display_name = L"計算機";
+    calc.search_alias = L"  CALC  ";
+    calc.launch_identity = L"C:\\Apps\\calc.exe";
+    calc.source_path = calc.launch_identity;
+    calc.source = AppSource::UserStartMenu;
+
+    AppEntry user;
+    user.stable_id = L"user";
+    user.display_name = L"User Folder App";
+    user.launch_identity = L"C:\\Apps\\user.exe";
+    user.source_path = user.launch_identity;
+    user.source = AppSource::UserFolder;
+
+    c.SetSnapshot({calc, user});
+
+    const auto& snapshot = c.Snapshot();
+    Expect(snapshot.size() == 2 && snapshot[0].search_alias == L"calc",
+           "SetSnapshot normalizes search_alias");
+    Expect(snapshot[1].search_alias.empty(),
+           "SetSnapshot leaves an empty search_alias empty");
+}
+
+// NR-047: SaveCatalogCache -> LoadCatalogCache preserves search_alias,
+// including an empty one and one needing escape-text round-tripping.
+void TestCacheRoundTripSearchAlias() {
+    const std::wstring dir = TempDir();
+    std::vector<AppEntry> entries = {
+        Entry(L"id1", AppSource::UserStartMenu),
+        Entry(L"id2", AppSource::AppsFolder),
+        Entry(L"id3", AppSource::UserFolder),
+    };
+    entries[0].search_alias = L"calc";
+    entries[1].search_alias = L"";
+    entries[2].search_alias = L"foo\tbar\\baz";
+
+    SaveCatalogCache(dir, entries);
+    std::vector<AppEntry> loaded;
+    Expect(LoadCatalogCache(dir, loaded), "alias cache loads");
+    Expect(loaded.size() == 3, "alias cache round-trips the entry count");
+    Expect(loaded[0].search_alias == L"calc", "plain alias preserved");
+    Expect(loaded[1].search_alias.empty(), "empty alias preserved as empty");
+    Expect(loaded[2].search_alias == L"foo\tbar\\baz",
+           "tab and backslash in the alias survive the round trip");
+    RemoveTreeBestEffort(dir);
+}
+
+// NR-047: an older schema is a valid file this build cannot read; loading it
+// fails and the file is left in place, not quarantined as corrupt.
+void TestOlderSchemaCacheRebuilds() {
+    const std::wstring dir = TempDir();
+    std::ofstream cache(fs::path(dir) / L"catalog.cache", std::ios::binary | std::ios::trunc);
+    cache << "schema=1\n";
+    std::vector<AppEntry> loaded;
+    Expect(!LoadCatalogCache(dir, loaded), "older schema cache is not loaded");
+    Expect(fs::exists(fs::path(dir) / L"catalog.cache"),
+           "older schema file is left in place");
+    Expect(!fs::exists(fs::path(dir) / L"catalog.cache.corrupt"),
+           "older schema file is not quarantined as corrupt");
+    RemoveTreeBestEffort(dir);
+}
+
 } // namespace
 
 int wmain() {
@@ -371,9 +438,12 @@ int wmain() {
     TestSnapshotFillsNormalizedName();
     TestSetSnapshotFillsNormalizedName();
     TestSetSnapshotRespectsPrefilledNormalizedName();
+    TestSetSnapshotNormalizesSearchAlias();
     TestCacheRoundTrip();
+    TestCacheRoundTripSearchAlias();
     TestCorruptCacheRebuilds();
     TestNewerSchemaCacheRebuilds();
+    TestOlderSchemaCacheRebuilds();
     TestFailureNoRebuildTriggersOnce();
     TestFailureWithRebuildMerges();
     TestConsecutiveFailuresTriggerOnce();

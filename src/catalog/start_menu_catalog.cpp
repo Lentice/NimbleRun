@@ -143,6 +143,13 @@ void ProcessFile(const std::wstring& path, AppSource source, std::vector<AppEntr
     // The shortcut/file path is the Shell-launchable identity (NR-008). The
     // resolved target plus arguments feed the stable id (design-spec §10.3).
     entry.launch_identity = path;
+    // NR-047: the resolved target's stem is a secondary search key, so a
+    // localized shortcut name ("計算機.lnk") is still reachable by what it
+    // actually launches ("calc"). Stem only, never the full path (see the item's
+    // Non-goals). Empty for an unresolvable target, which stays in the catalog.
+    if (!link.target.empty()) {
+        entry.search_alias = FileStem(link.target);
+    }
     std::wstring identity_key = NormalizePathKey(path);
     if (!link.target.empty()) {
         // The resolved target is the identity (design-spec §10.3), normalized

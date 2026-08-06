@@ -560,3 +560,36 @@ The worst-path timing number from §7 must appear in the test output; paste both
 ```powershell
 ctest --test-dir build -R search_engine --output-on-failure
 ```
+
+## 交接區
+
+（實作者填寫：修改的位置、建置與 CTest 結果、sanity greps、偏差、手動驗收、未完成事項。）
+
+- **修改**：
+  - `src/catalog/app_entry.h:24-31`：`AppEntry` 在 `usage_score` 後**附加最後一欄** `std::wstring search_alias`（含 NR-047 註解），其餘欄位與順序未動。
+  - `src/catalog/start_menu_catalog.cpp:148-153`：`ProcessFile` 在 `entry.launch_identity = path;` 之後、`identity_key` block 之前，非空 `link.target` 時設 `entry.search_alias = FileStem(link.target)`；identity block（`identity_key`、`HashStableId`）一字未改。bare `.exe` 無 `link` 故 alias 為空。
+  - `src/catalog/appsfolder_catalog.cpp:78`：`BuildAppsFolderEntry` 在 `out.source_path = parsing_name;` 旁設 `out.search_alias = parsing_name.substr(0, parsing_name.find(L'_'))`（AUMID 的 package-family 部分，無 `_` 時為整串）。
+  - `src/catalog/catalog_refresh.cpp:126-130`：`SetSnapshot` 迴圈內新增**唯一的** alias 正規化點——無條件 `entry.search_alias = NormalizeName(entry.search_alias);`（空 alias 是合法值，故不像 normalized_name 有 empty 判斷）。
+  - `src/catalog/catalog_cache.cpp`：`kSchemaVersion` 1→2（:22）、`kFieldCount` 6→7 並於註解列出 search_alias（:24-26）、`SerializeEntry` 在 `SourceNumber(entry.source)` 後 append `L'\t'`＋`EscapeText(entry.search_alias)`（:82）、parse 迴圈 `entry.search_alias = UnescapeText(fields[6])`（:182，空欄合法、不加入 `stable_id.empty()` 有效性判斷）、舊 schema arm 由 `PreserveCorrupt` 改為裸 `return false;`＋NR-047 註解（:151-157）。無遷移碼。另把 `WriteCache` 註解「cache version 1 is just merged entries」改為「the cache is just merged entries」（schema 已非 1，屬同改動的註解準確化）。
+  - `src/search/search_engine.cpp`：`MatchRank` 於 `Subsequence = 4` 下、`NoMatch` 上插入 `Alias = 5`（:43，`NoMatch` 5→6）；`Rank(name, query)` 一字未改；`SearchApps` scan loop 在既有 `Rank` 呼叫後依序（`rank==NoMatch`→`.empty()`→第二次 `Rank`）三條件判斷，命中即 `rank = MatchRank::Alias`（:151-153），tie-break comparator 未動。
+  - `tests/unit/search_engine_test.cpp`：先做 §8 cleanup（四個 fixture entry 改為只列各自需要的欄位，`display_name`／`usage_score`／`is_pinned` 值不變，`  CAL  ` 與 `3d` 斷言原樣通過）；新增 `alias_catalog` block（`計算機`＋`search_alias=L"calc"`，斷言查 `calc` 找到、name subsequence 的 Calculator 排在 alias exact 的計算機之前、空 alias 的 Paint 3D 只靠名稱命中）與「alias 原樣比對」block（`L"CALC"` 不被 `calc` 查到）；§7 新增第二個 timing block（5000 筆每筆給 `search_alias=L"target"+i`、查 `L"zzqx"`、斷言結果為空、同 50ms ceiling、同 wprintf 格式），既有 `L"e"` block 一字未改。檔頭加 scoped `#pragma clang diagnostic ignored "-Wmissing-designated-field-initializers"`（見偏差 2）。
+  - `tests/unit/start_menu_catalog_test.cpp`：新增 `小算盤.lnk` → `C:\Windows\System32\calc.exe` fixture（在既有 `計算機.lnk` 旁）；斷言其 `display_name==L"小算盤"`、`search_alias==L"calc"`、Notepad.lnk 的 `search_alias==L"notepad"`、bare `.exe`（Portable）alias 為空、`Notepad.lnk`／`Notepad Copy.lnk` 仍共用 stable id、entry 數 6→7。
+  - `tests/unit/catalog_refresh_test.cpp`：新增 `TestSetSnapshotNormalizesSearchAlias`（`  CALC  `→`calc`、空 alias 保持空）、`TestCacheRoundTripSearchAlias`（含空 alias 與 `foo\tbar\\baz` escaping 往返）、`TestOlderSchemaCacheRebuilds`（手寫 `schema=1` 載入回 false、原檔保留、無 `.corrupt`）；皆已註冊進 `wmain()`。
+  - `docs/design-spec.md`：§4.4 新增次要比對鍵 bullet（:178）、§4.5 新增 tier 6 與「次要鍵命中一律歸為最低一層…」句（:188-190）。§10.1 只列出檔名、未載明 cache schema／欄位清單，依 item §9「若無則不加」不加任何內容。
+- **建置與 CTest**：`cmake -S . -B build -G Ninja -D"CMAKE_TOOLCHAIN_FILE=cmake/llvm-mingw.cmake" -DCMAKE_BUILD_TYPE=Release` configure 成功；`cmake --build build` 成功、**無新增警告**（LLVM-MinGW `-Wall -Wextra -Wpedantic` 全清，見偏差 2 的 pragma）；`ctest --test-dir build --output-on-failure` **23/23 全綠**；`ctest --test-dir build -R "start_menu_catalog|catalog_refresh" --output-on-failure` 2/2 通過（`search_engine` 不是測試名，見報告註記）。`ctest --test-dir build -R nimblerun_search_test` 1/1 通過。
+- **SearchApps 兩條 timing（test 直接執行輸出）**：
+  - `NR-038: SearchApps over 5000 pre-normalized entries took 603 us (0 ms), matched 5000`
+  - `NR-047: SearchApps over 5000 alias-fallback entries took 204 us (0 ms), matched 0`
+  - 最壞路徑（名稱全不命中＋每筆有 alias）204 us，遠低於 50ms ceiling，且比既有 5000 筆 `L"e"` 的 603 us 更短（alias 短於 display name，第二次 `Rank` 較便宜）。
+- **Sanity greps**：
+  - `git diff CMakeLists.txt tests/CMakeLists.txt src/app_host/ src/ui/` → **空**（無 CMake 變更、無 UI 層變更）。
+  - `Select-String -Path src/catalog/dedup.cpp,src/catalog/stable_id.h -Pattern 'search_alias'` → **無 match**（alias 不進 identity、不進 dedup）。
+  - `NormalizeName`：只有 `src/search/search_engine.cpp:88`（定義）、`search_engine.cpp:129`（每 keystroke 的 query 正規化，NR-038 既有）與 `catalog_refresh.cpp:121,125,128`（SetSnapshot block，含新的 alias 一行）→ **符合**「search_engine 定義＋catalog_refresh SetSnapshot 唯一正規化點」。
+  - `src/catalog/catalog_cache.cpp` 的 `kSchemaVersion = 2`（:22）與 `kFieldCount = 7`（:24）→ **兩者皆在**。
+  - `MatchRank`（`src/`＋`tests/`）→ 只出現在 `src/search/search_engine.cpp` → **符合**（`NoMatch` 5→6 不外洩）。
+  - `src/catalog/catalog_cache.cpp` 的 `PreserveCorrupt` → 6 處全部是 decode/BOM、empty-lines、missing-prefix、unparsable-schema、bad-field-count、bad-field 六個 arm；`schema != kSchemaVersion` arm 為裸 `return false;` → **符合**。其他 `src/pins/`、`src/settings/`、`src/usage/` 的 `PreserveCorrupt` 屬各 store 既有行為，不在 item 檢查範圍。
+- **與 item 文件的偏差（2 處必要調整，設計決策零偏差）**：
+  1. §8 的 motivating entry（`計算機`＋`search_alias=L"calc"`）未放入共享四筆 fixture，而是放在獨立的 `alias_catalog` block。原因：`  CAL  ` 查詢正規化為 `cal`，是 alias `calc` 的 NamePrefix，會被新的 fallback 撈成第三筆，直接打破 §8 自己要求的「`  CAL  ` 斷言不變」。放在獨立 catalog（比照既有 `zebra` block 模式）後，§8 五個 bullet 全部照字面成立：查 alias 找得到、name subsequence 勝 alias exact、空 alias 不受影響、`  CAL  `／`3d` 原樣、alias 原樣比對。
+  2. §8 cleanup 要求的省略式 designated-initializer 清單在此工具鏈（LLVM-MinGW 的 clang）會觸發 `-Wmissing-designated-field-initializers`（`-Wextra` 內建），與「no new warnings」衝突，且 item 禁止動 `tests/CMakeLists.txt`。解法：在 `search_engine_test.cpp` 加 scoped `#pragma clang diagnostic ignored`（檔頭 push、檔尾 pop）＋解釋註解。cleanup 形狀與 item 範例完全一致。
+- **手動驗收（5 條）**：全部為人工操作／視覺驗證（launch、目視排序、刪 cache、留舊 schema cache、輸入延遲），依 `docs/work-items.md`「Agent 交付規則」由人類在 Release 版逐條執行：1) 在地化 Windows 打 `calc` 出地化 Calculator 且排在任一名稱命中之下、2) 打 `notepad` 排序與 item 前一致、3) 刪 `%LOCALAPPDATA%\NimbleRun\catalog.cache` 後重建且 target 比對可用、4) 保留 `schema=1` cache 啟動後靜默重建、無 `.corrupt` 無錯誤框、5) 打單一字母 `e` 無可見輸入延遲。
+- **未完成**：無。5 條手動驗收留待人類於 Release 版逐條打勾。自動化面已由三份測試檔全數覆蓋。

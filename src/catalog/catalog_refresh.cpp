@@ -120,6 +120,12 @@ void CatalogRefreshCoordinator::SetSnapshot(std::vector<AppEntry> merged) {
         if (entry.normalized_name.empty()) {
             entry.normalized_name = NormalizeName(entry.display_name);
         }
+        // NR-047: unconditional, unlike normalized_name -- an empty alias is a
+        // legitimate value (UserFolder, unresolvable target), so there is no
+        // "only when empty" test to make. NormalizeName is idempotent, so
+        // re-normalizing the already-normalized value the disk cache carries is
+        // a no-op.
+        entry.search_alias = NormalizeName(entry.search_alias);
     }
     merged_ = std::move(merged);
 }

@@ -19,10 +19,11 @@ namespace {
 
 constexpr std::wstring_view kFileName = L"catalog.cache";
 constexpr std::wstring_view kSchemaPrefix = L"schema=";
-constexpr int kSchemaVersion = 1;
+constexpr int kSchemaVersion = 2;
 
-constexpr int kFieldCount = 6;  // stable_id, display_name, normalized_name,
-                                // launch_identity, source_path, source
+constexpr int kFieldCount = 7;  // stable_id, display_name, normalized_name,
+                                // launch_identity, source_path, source,
+                                // search_alias
 
 std::vector<std::wstring_view> SplitFields(std::wstring_view line) {
     std::vector<std::wstring_view> fields;
@@ -77,10 +78,12 @@ std::wstring SerializeEntry(const AppEntry& entry) {
     line += EscapeText(entry.source_path);
     line += L'\t';
     line += SourceNumber(entry.source);
+    line += L'\t';
+    line += EscapeText(entry.search_alias);
     return line;
 }
 
-// cache version 1 is just merged entries; older/none handled by rebuild.
+// the cache is just merged entries; older/none handled by rebuild.
 void WriteCache(const std::wstring& directory, const std::vector<AppEntry>& entries) {
     std::wstring text;
     text += kSchemaPrefix;
@@ -146,7 +149,10 @@ bool LoadCatalogCache(const std::wstring& directory, std::vector<AppEntry>& out)
         return false;  // newer schema: leave the file, rebuild
     }
     if (schema != kSchemaVersion) {
-        PreserveCorrupt(directory, kFileName);
+        // NR-047: an older schema is a valid file this build cannot read, not a
+        // corrupt one. Leave it in place and rebuild over it, matching the
+        // newer-schema arm above; quarantining every user's cache on a routine
+        // schema bump produces confusing .corrupt files for a non-event.
         return false;
     }
 
@@ -173,6 +179,7 @@ bool LoadCatalogCache(const std::wstring& directory, std::vector<AppEntry>& out)
             out.clear();
             return false;
         }
+        entry.search_alias = UnescapeText(fields[6]);
         out.push_back(std::move(entry));
     }
     // The cache is a snapshot; run it through dedup so load never reintroduces

@@ -40,7 +40,8 @@ enum class MatchRank : int {
     WordPrefix = 2,
     Substring = 3,
     Subsequence = 4,
-    NoMatch = 5,
+    Alias = 5,    // NR-047: matched the target/AUMID, not the name
+    NoMatch = 6,
 };
 
 MatchRank Rank(std::wstring_view name, std::wstring_view query) {
@@ -139,7 +140,18 @@ std::vector<AppEntry> SearchApps(const std::vector<AppEntry>& catalog,
     ranked.reserve(catalog.size());
     for (std::uint32_t i = 0; i < catalog.size(); ++i) {
         const std::wstring_view name = NormalizedName(catalog[i]);
-        const MatchRank rank = Rank(name, normalized_query);
+        MatchRank rank = Rank(name, normalized_query);
+        // NR-047: the target name is a fallback, never a competitor. It is only
+        // consulted when the display name does not match at all, and every hit
+        // collapses to one tier below subsequence, so no target match can ever
+        // outrank a name match and the §4.5 order among name matches is
+        // untouched. How the alias matched is deliberately not preserved:
+        // ranking target matches against each other by tier would promote a
+        // vague name match to above a precise one.
+        if (rank == MatchRank::NoMatch && !catalog[i].search_alias.empty() &&
+            Rank(catalog[i].search_alias, normalized_query) != MatchRank::NoMatch) {
+            rank = MatchRank::Alias;
+        }
         if (rank != MatchRank::NoMatch) {
             ranked.push_back({rank, i});
         }

@@ -142,6 +142,10 @@ void TestFixtureEnumeration() {
     // Unicode display name and target path (target file need not exist).
     const std::wstring unicode_target = root + L"\\Unicode 資料夾\\計算機 app.exe";
     Expect(CreateShortcut(root + L"\\計算機.lnk", unicode_target, L""), "create unicode shortcut");
+    // NR-047: a localized shortcut name over an English target; "calc" must be
+    // reachable through the target stem.
+    Expect(CreateShortcut(root + L"\\小算盤.lnk", L"C:\\Windows\\System32\\calc.exe", L""),
+           "create localized calculator shortcut");
     // Deeply nested shortcut with spaces and arguments in the target.
     Expect(CreateShortcut(root + L"\\Tools\\Git\\Git Bash.lnk",
                           L"C:\\Program Files\\Git\\bin\\bash.exe", L"-i"),
@@ -178,6 +182,7 @@ void TestFixtureEnumeration() {
     Expect(notepad->launch_identity == root + L"\\Notepad.lnk", "notepad launch identity");
     Expect(notepad->stable_id.size() == 16, "notepad stable id");
     Expect(notepad->source == AppSource::UserStartMenu, "fixture source");
+    Expect(notepad->search_alias == L"notepad", "notepad target stem is the alias");
 
     const AppEntry* copy = FindByName(entries, L"Notepad Copy");
     Expect(copy != nullptr, "notepad copy present");
@@ -188,6 +193,11 @@ void TestFixtureEnumeration() {
     Expect(calc->display_name == L"計算機", "unicode display name kept");
     Expect(calc->source_path == root + L"\\計算機.lnk", "unicode source path");
     Expect(calc->launch_identity == root + L"\\計算機.lnk", "unicode launch identity");
+
+    const AppEntry* calc_localized = FindByName(entries, L"小算盤");
+    Expect(calc_localized != nullptr, "localized calc shortcut present");
+    Expect(calc_localized->display_name == L"小算盤", "localized calc display name kept");
+    Expect(calc_localized->search_alias == L"calc", "target stem is the search alias");
 
     const AppEntry* bash = FindByName(entries, L"Git Bash");
     Expect(bash != nullptr, "deep nested entry present");
@@ -200,13 +210,14 @@ void TestFixtureEnumeration() {
 
     const AppEntry* portable = FindByName(entries, L"Portable");
     Expect(portable != nullptr, "bare exe entry present");
+    Expect(portable->search_alias.empty(), "bare exe has no search alias");
 
     Expect(FindByName(entries, L"Broken") == nullptr, "corrupt shortcut skipped");
     Expect(FindByName(entries, L"Homepage") == nullptr, "website shortcut excluded");
     Expect(FindByName(entries, L"Uninstall Helper") == nullptr, "uninstaller shortcut excluded");
     Expect(FindByName(entries, L"readme") == nullptr, "non-app extension ignored");
 
-    Expect(entries.size() == 6, "expected entry count");
+    Expect(entries.size() == 7, "expected entry count");
 
     // Determinism: a second run produces the same stable ids.
     {
