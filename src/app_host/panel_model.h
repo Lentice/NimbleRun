@@ -75,6 +75,12 @@ public:
     // Visible rows for the current state, in display order.
     const std::vector<AppEntry>& Rows() const { return rows_; }
 
+    // NR-040: index of the first recent-region row in Rows(), or -1 when there
+    // is no recent region (a non-empty query produces search results, which
+    // belong to neither region). Rows before this index are the pinned region.
+    // Equals Rows().size() when the empty-query view happens to be all pins.
+    int RecentStartIndex() const { return recent_start_; }
+
     bool HasSelection() const { return !rows_.empty() && selected_ >= 0; }
     std::size_t SelectionIndex() const { return static_cast<std::size_t>(selected_); }
     const AppEntry& SelectedEntry() const { return rows_[selected_]; }
@@ -134,6 +140,9 @@ private:
     // NR-029: empty-query grid columns; 1 means the model behaves like the
     // original single-column list until the host opts into the grid.
     int grid_columns_ = 1;
+    // NR-040: first recent-region row index (see RecentStartIndex()); -1 when
+    // there is no recent region.
+    int recent_start_ = -1;
 };
 
 } // namespace nimblerun

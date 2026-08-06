@@ -1,6 +1,6 @@
 # NR-040 — Context menu: Properties and Remove from recent
 
-- Status: `ready`
+- Status: `done`
 - Phase: 3
 - Depends on: —
 - Source: `docs/design-spec.md` §4.8（滑鼠操作）／§FR-010（啟動層）／§FR-011（釘選與排序）／§NFR-006
@@ -241,4 +241,42 @@ ctest --test-dir build --output-on-failure
 
 ## 交接區
 
-（實作者填寫：修改的行號、建置與 CTest 結果、新測試案例、七條手動驗收逐條實測結果、未完成事項。）
+實作完成於 2026-08-05。
+
+**修改的檔案與行號**
+
+- `src/usage/usage_store.h`：`#include <string_view>`（第 5 行）、`bool Forget(std::wstring_view stable_id);` 宣告（第 58 行）。
+- `src/usage/usage_store.cpp`：`UsageStore::Forget` 實作（第 216–228 行）。
+- `src/app_host/panel_model.h`：`RecentStartIndex()` accessor（第 82 行）、私有 `int recent_start_ = -1;`（第 145 行）。
+- `src/app_host/panel_model.cpp`：`RefreshRows()` 三處 `recent_start_` 賦值（第 59、66、69 行）。
+- `src/app_host/main.cpp`：`kCmdProperties = 14`／`kCmdForgetRecent = 15`（第 84–85 行）；`kProperties`／`kRemoveFromRecent` 字串（第 97–98 行）；`kPropertiesFailed`（第 131 行）；`ShowItemProperties()`（第 685–708 行）；選單建構（第 1961–1974 行）；命令分派（第 2007–2015 行）。
+- `tests/unit/recent_usage_test.cpp`：新增 5 個 Forget 測試（第 260–334 行），呼叫點（第 354–358 行）。
+- `tests/unit/panel_model_test.cpp`：新增 4 個 RecentStartIndex 測試（第 621–661 行），呼叫點（第 706–709 行）。
+
+修改僅限硬約束列的六個檔案；無新增原始檔、無 `tests/CMakeLists.txt` 改動。grep 確認 `src/usage/usage_store.cpp` 與 `src/app_host/panel_model.cpp` 無 `HWND`／`ShellExecute`／`InvalidateRect`；`usage_store.cpp` 既有的 `#include <windows.h>`（第 5 行）是 baseline 就有（`storage/atomic_text_file.h` 需要），非本次新增。
+
+**建置與 CTest 結果**
+
+- `cmake -S . -B build -G Ninja -D"CMAKE_TOOLCHAIN_FILE=cmake/llvm-mingw.cmake" -DCMAKE_BUILD_TYPE=Release`：成功。
+- `cmake --build build`：成功，17/17 目標，無新增 warning。
+- `ctest --test-dir build -R "recent_usage|list_vertical" --output-on-failure`：2/2 通過（`nimblerun_recent_usage_test`、`nimblerun_list_vertical_slice_test`）。
+- `ctest --test-dir build --output-on-failure`：23/23 全綠。
+
+**新測試案例**
+
+- `recent_usage_test.cpp`：`TestForgetExisting`（既有 id → true、Recent() 不再含、其餘不變）、`TestForgetMissing`（不存在 → false 完全不變）、`TestForgetEmpty`（空字串 → false）、`TestForgetPersists`（Forget+Save 重載 → id 消失、其他 total_launches／last_launch_utc 完好）、`TestForgetThenRelaunch`（Forget 後 RecordLaunch → total_launches==1 重新出現）。
+- `panel_model_test.cpp`：`TestRecentStartIndexPinsThenRecent`（3 pin＋5 recent → 3，且 Rows()[3] 起為 recent）、`TestRecentStartIndexAllPinned`（全 pin → Rows().size()）、`TestRecentStartIndexFiltered`（非空查詢 → -1）、`TestRecentStartIndexNoPins`（無 pin → 0）。
+
+**七條手動驗收逐條結果**（Release build，以 PowerShell + user32 P/Invoke 自動化實測）
+
+1. **filtered 結果的 Properties：通過。** 搜尋 `powershell`，結果列右鍵選單＝Pin／分隔線／Open file location／Properties，不含 Remove from recent；點 Properties → 開啟 `#32770` 類別、標題「PowerShell 7 (x64) - 內容」的真實 Shell 內容對話框（484×607）。
+2. **grid 的 Properties：通過。** 清空查詢後，把 PowerShell 釘選使其位於 grid 前段，格子上右鍵選單含 Unpin／分隔線／Open file location／Properties；點 Properties → 同上的 Shell 內容對話框。
+3. **Remove from recent 生效：通過。** 對 recent 區一格選 Remove from recent → 該記錄從 `usage.tsv` 消失（`0f0c40f9c90cdf78` 移除）、cell 內容由後項遞補（cell1 選單從「Pin＋Remove」變成含 Open/Properties 的 5 項，證明格已換內容）、面板全程保持顯示不隱藏；再顯示面板後該 id 仍在 `usage.tsv` 之外。
+4. **pinned 格無此項：通過。** 釘選格右鍵選單＝Unpin＋分隔線＋Open file location＋Properties，無 Remove from recent。
+5. **UWP 項目：通過。** 搜尋 `store`（Microsoft Store UWP），結果列右鍵選單僅 Pin；grid 中 recent 區的 UWP 項目選單＝Pin＋Remove from recent，不含 Open file location 與 Properties。
+6. **Pin/Unpin 未回歸：通過。** 對 PowerShell 執行 Pin → `favorites.txt` 出現該 stable_id、grid 移到前段並顯示 Unpin；再 Unpin → `favorites.txt` 清回、選單回到 Pin，面板全程未隱藏。
+7. **面板隱藏行為：通過。** 開啟 Properties 對話框後把前景給對話框 → 面板因 `WM_KILLFOCUS` 隱藏（`IsWindowVisible` 回 false），符合預期。
+
+**未完成事項／阻塞：無。** 驗證期間曾寫入的 `usage.tsv`／`favorites.txt` 測試痕跡已還原成實作前的原始內容；驗證用暫存腳本在 `%TEMP%\opencode` 下，不影響 repo。
+
+

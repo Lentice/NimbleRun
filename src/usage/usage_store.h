@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace nimblerun {
@@ -49,6 +50,12 @@ public:
     // injected by the caller). Only success paths should call this: a failed
     // launch never updates recent. Returns false for an empty stable_id.
     bool RecordLaunch(std::wstring stable_id, std::int64_t last_launch_utc);
+
+    // Drops a single app's usage record (NR-040 "Remove from recent"). Returns
+    // false when there is no record for stable_id, in which case nothing
+    // changed and the caller should not Save(). Persistence is the caller's
+    // job, exactly as it is for RecordLaunch().
+    bool Forget(std::wstring_view stable_id);
 
     // Recent list: newest last-launch first, ties broken by ascending
     // stable_id so the order is deterministic, capped at `cap`. Empty when

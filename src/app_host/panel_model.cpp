@@ -56,14 +56,17 @@ void PanelModel::RefreshRows() {
         }
         // Recent apps next, skipping any app already pinned so no app appears
         // in both regions (design-spec §4.2, AC-002).
+        recent_start_ = static_cast<int>(rows_.size());
         for (const AppEntry& entry : recent_) {
             if (std::find(pins_.begin(), pins_.end(), entry.stable_id) == pins_.end()) {
                 rows_.push_back(entry);
             }
         }
     } else if (catalog_ != nullptr) {
+        recent_start_ = -1;
         rows_ = SearchApps(*catalog_, query_);
     } else {
+        recent_start_ = -1;
         rows_.clear();
     }
     selected_ = rows_.empty() ? -1 : 0;

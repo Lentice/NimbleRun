@@ -254,6 +254,89 @@ void TestAtomicWriteFailure() {
     fs::remove_all(dir);
 }
 
+// NR-040: Forget() drops a single app's usage record; persistence is the
+// caller's job, exactly as it is for RecordLaunch().
+
+void TestForgetExisting() {
+    const std::wstring dir = MakeTempDir("forget_existing");
+    UsageStore store(dir);
+    store.Load();
+    store.RecordLaunch(L"aaa", 100);
+    store.RecordLaunch(L"bbb", 300);
+    store.RecordLaunch(L"ccc", 200);
+    Expect(store.Forget(L"bbb"), "forget an existing id returns true");
+    const std::vector<UsageRecord> recent = store.Recent();
+    Expect(recent.size() == 2, "forget removes exactly one record");
+    for (const UsageRecord& r : recent) {
+        Expect(r.stable_id != L"bbb", "forgotten id no longer in recent");
+    }
+    Expect(SameRecord(recent[0], {L"ccc", 1, 200}), "remaining newest still first");
+    Expect(SameRecord(recent[1], {L"aaa", 1, 100}), "remaining oldest still last");
+    fs::remove_all(dir);
+}
+
+void TestForgetMissing() {
+    const std::wstring dir = MakeTempDir("forget_missing");
+    UsageStore store(dir);
+    store.Load();
+    store.RecordLaunch(L"aaa", 100);
+    store.RecordLaunch(L"bbb", 300);
+    const std::vector<UsageRecord> before = store.Recent();
+    Expect(!store.Forget(L"zzz"), "forget a missing id returns false");
+    Expect(SameList(store.Recent(), before), "forget a missing id leaves recent unchanged");
+    fs::remove_all(dir);
+}
+
+void TestForgetEmpty() {
+    const std::wstring dir = MakeTempDir("forget_empty");
+    UsageStore store(dir);
+    store.Load();
+    store.RecordLaunch(L"aaa", 100);
+    const std::vector<UsageRecord> before = store.Recent();
+    Expect(!store.Forget(L""), "forget an empty id returns false");
+    Expect(SameList(store.Recent(), before), "forget an empty id leaves recent unchanged");
+    fs::remove_all(dir);
+}
+
+void TestForgetPersists() {
+    const std::wstring dir = MakeTempDir("forget_persist");
+    UsageStore store(dir);
+    store.Load();
+    store.RecordLaunch(L"alpha", 100);
+    store.RecordLaunch(L"beta", 300);
+    store.RecordLaunch(L"gamma", 200);
+    store.RecordLaunch(L"alpha", 400);  // alpha now has 2 launches
+    Expect(store.Forget(L"beta"), "forget beta");
+    Expect(store.Save(), "save after forget");
+    UsageStore reloaded(dir);
+    Expect(reloaded.Load() == UsageLoadResult::Loaded, "reload after forget");
+    const std::vector<UsageRecord> recent = reloaded.Recent();
+    Expect(recent.size() == 2, "forgotten id absent after reload");
+    for (const UsageRecord& r : recent) {
+        Expect(r.stable_id != L"beta", "forgotten id is not reloaded");
+    }
+    Expect(SameRecord(recent[0], {L"alpha", 2, 400}), "alpha launches preserved");
+    Expect(SameRecord(recent[1], {L"gamma", 1, 200}), "gamma preserved");
+    fs::remove_all(dir);
+}
+
+void TestForgetThenRelaunch() {
+    const std::wstring dir = MakeTempDir("forget_relaunch");
+    UsageStore store(dir);
+    store.Load();
+    store.RecordLaunch(L"alpha", 100);
+    store.RecordLaunch(L"alpha", 200);  // 2 launches
+    Expect(store.Recent()[0].total_launches == 2, "alpha has 2 launches");
+    Expect(store.Forget(L"alpha"), "forget alpha");
+    Expect(store.Recent().empty(), "alpha gone after forget");
+    store.RecordLaunch(L"alpha", 300);
+    const std::vector<UsageRecord> recent = store.Recent();
+    Expect(recent.size() == 1, "alpha reappears after relaunch");
+    Expect(SameRecord(recent[0], {L"alpha", 1, 300}),
+           "relaunch starts a fresh record with total_launches == 1");
+    fs::remove_all(dir);
+}
+
 } // namespace
 
 int wmain() {
@@ -268,6 +351,11 @@ int wmain() {
     TestMalformedRow();
     TestNewerSchema();
     TestAtomicWriteFailure();
+    TestForgetExisting();
+    TestForgetMissing();
+    TestForgetEmpty();
+    TestForgetPersists();
+    TestForgetThenRelaunch();
     std::printf("NR-009 recent usage check PASSED\n");
     return 0;
 }

@@ -80,6 +80,9 @@ constexpr UINT kCmdExit = 5;
 constexpr UINT kCmdPin = 11;
 constexpr UINT kCmdUnpin = 12;
 constexpr UINT kCmdOpenLocation = 13;
+// NR-040: "Properties" and "Remove from recent" context menu commands.
+constexpr UINT kCmdProperties = 14;
+constexpr UINT kCmdForgetRecent = 15;
 
 constexpr int kSearchId = 100;
 
@@ -89,6 +92,10 @@ namespace context_menu_strings {
 constexpr wchar_t kPin[] = L"Pin";
 constexpr wchar_t kUnpin[] = L"Unpin";
 constexpr wchar_t kOpenFileLocation[] = L"Open file location";
+// NR-040: "Remove from recent" (recent region rows only) and "Properties"
+// (valid filesystem paths only, same gate as Open file location).
+constexpr wchar_t kProperties[] = L"Properties";
+constexpr wchar_t kRemoveFromRecent[] = L"Remove from recent";
 } // namespace context_menu_strings
 
 // NR-020: centralized English row/hint strings (design-spec §4.2/§4.3).
@@ -120,6 +127,8 @@ constexpr wchar_t kLaunchFailedSuffix[] = L"\". ";
 constexpr wchar_t kReasonNotInstalled[] = L"The app may have been removed or moved.";
 constexpr wchar_t kReasonInvalid[] = L"The app entry is invalid.";
 constexpr wchar_t kReasonAccessDenied[] = L"Access was denied.";
+// NR-040: shown when the Shell's properties dialog cannot be opened.
+constexpr wchar_t kPropertiesFailed[] = L"Failed to open properties.";
 } // namespace dialog_strings
 
 UINT g_show_panel_message = 0;
@@ -666,6 +675,33 @@ void OpenFileLocation(HWND window, const nimblerun::AppEntry& entry) {
                           L"error " + std::to_wstring(static_cast<unsigned long>(hr)));
         }
         ShowErrorDialog(window, dialog_strings::kOpenLocationFailed);
+    }
+}
+
+// NR-040: the Shell's own properties dialog, the same one Explorer shows for
+// the shortcut/exe. Only filesystem paths qualify -- AppsFolder parsing names
+// have no properties sheet -- so the caller gates on IsPathIdentity() exactly
+// as it does for OpenFileLocation().
+void ShowItemProperties(HWND window, const nimblerun::AppEntry& entry) {
+    if (!nimblerun::IsPathIdentity(entry.launch_identity)) {
+        return;
+    }
+    SHELLEXECUTEINFOW info{};
+    info.cbSize = sizeof(info);
+    // SEE_MASK_INVOKEIDLIST is required for the "properties" verb: the Shell
+    // has to build the item's context menu to find it. SEE_MASK_NOASYNC keeps
+    // the call valid without needing the process to outlive an async handoff.
+    info.fMask = SEE_MASK_INVOKEIDLIST | SEE_MASK_NOASYNC;
+    info.hwnd = window;
+    info.lpVerb = L"properties";
+    info.lpFile = entry.launch_identity.c_str();
+    info.nShow = SW_SHOWNORMAL;
+    if (!ShellExecuteExW(&info)) {
+        const DWORD error = GetLastError();
+        if (g_diag) {
+            g_diag->Write(L"properties", L"error " + std::to_wstring(error));
+        }
+        ShowErrorDialog(window, dialog_strings::kPropertiesFailed);
     }
 }
 
@@ -1922,10 +1958,20 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
         }
         AppendMenuW(menu, MF_STRING, pinned ? kCmdUnpin : kCmdPin,
                     pinned ? context_menu_strings::kUnpin : context_menu_strings::kPin);
+        // NR-040: only offered for rows actually showing in the recent region;
+        // on a pinned row the command would silently change nothing.
+        const int recent_start = g_model->RecentStartIndex();
+        const bool in_recent = recent_start >= 0 && cell >= recent_start;
+        if (in_recent) {
+            AppendMenuW(menu, MF_STRING, kCmdForgetRecent,
+                        context_menu_strings::kRemoveFromRecent);
+        }
         if (nimblerun::IsPathIdentity(entry.launch_identity)) {
             AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
             AppendMenuW(menu, MF_STRING, kCmdOpenLocation,
                         context_menu_strings::kOpenFileLocation);
+            AppendMenuW(menu, MF_STRING, kCmdProperties,
+                        context_menu_strings::kProperties);
         }
 
         POINT cursor{};
@@ -1958,6 +2004,16 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
             }
         } else if (command == kCmdOpenLocation) {
             OpenFileLocation(window, entry);
+        } else if (command == kCmdProperties) {
+            ShowItemProperties(window, entry);
+        } else if (command == kCmdForgetRecent) {
+            // NR-040: drop one usage record, persist, then rebuild the recent
+            // rows through the single existing path. Save() failing leaves the
+            // previous file untouched, so the view is not refreshed either.
+            if (g_usage && g_usage->Forget(entry.stable_id) && g_usage->Save()) {
+                RefreshPanelSnapshot();
+                InvalidateRect(window, nullptr, FALSE);
+            }
         }
         return 0;
     }

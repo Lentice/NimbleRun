@@ -213,6 +213,19 @@ bool UsageStore::Clear() {
     return false;
 }
 
+bool UsageStore::Forget(std::wstring_view stable_id) {
+    if (stable_id.empty()) {
+        return false;
+    }
+    auto it = std::find_if(records_.begin(), records_.end(),
+        [&](const UsageRecord& r) { return r.stable_id == stable_id; });
+    if (it == records_.end()) {
+        return false;
+    }
+    records_.erase(it);
+    return true;
+}
+
 bool UsageStore::RecordLaunch(std::wstring stable_id, std::int64_t last_launch_utc) {
     if (stable_id.empty()) {
         return false;

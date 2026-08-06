@@ -615,6 +615,49 @@ void TestEmptyStatePrewarmIdsAbsentPinSkipped() {
     }
 }
 
+// NR-040: RecentStartIndex() marks where the recent region begins in the
+// empty-query rows (pinned first, then recent); -1 when there is no region.
+
+void TestRecentStartIndexPinsThenRecent() {
+    const std::vector<AppEntry> catalog = CatalogOf(8);
+    std::vector<AppEntry> recent;
+    for (int i = 3; i < 8; ++i) {
+        recent.push_back(catalog[static_cast<std::size_t>(i)]);
+    }
+    PanelModel model(&catalog, std::move(recent));
+    model.SetPins({L"id0", L"id1", L"id2"});
+    Expect(model.RecentStartIndex() == 3, "recent region starts after 3 pins");
+    Expect(model.Rows().size() == 8, "3 pins + 5 recent rows");
+    for (std::size_t i = 3; i < model.Rows().size(); ++i) {
+        Expect(model.Rows()[i].stable_id == L"id" + std::to_wstring(i),
+               "rows from the recent region are the recent items");
+    }
+}
+
+void TestRecentStartIndexAllPinned() {
+    const std::vector<AppEntry> catalog = CatalogOf(5);
+    PanelModel model(&catalog, catalog);
+    model.SetPins({L"id0", L"id1", L"id2", L"id3", L"id4"});
+    Expect(model.Rows().size() == 5, "all 5 pinned rows shown");
+    Expect(model.RecentStartIndex() == static_cast<int>(model.Rows().size()),
+           "all-pinned empty view has no recent rows");
+}
+
+void TestRecentStartIndexFiltered() {
+    const std::vector<AppEntry> catalog = CatalogOf(8);
+    PanelModel model(&catalog, catalog);
+    model.SetQuery(L"App");
+    Expect(model.Rows().size() == catalog.size(), "broad query matches the whole catalog");
+    Expect(model.RecentStartIndex() == -1, "search results have no recent region");
+}
+
+void TestRecentStartIndexNoPins() {
+    const std::vector<AppEntry> catalog = CatalogOf(6);
+    PanelModel model(&catalog, catalog);
+    Expect(model.Rows().size() == 6, "all recent rows shown");
+    Expect(model.RecentStartIndex() == 0, "no pins -> recent region starts at row 0");
+}
+
 } // namespace
 
 int wmain() {
@@ -660,6 +703,10 @@ int wmain() {
     TestEmptyStatePrewarmIdsEmptyCatalog();
     TestEmptyStatePrewarmIdsIsConst();
     TestEmptyStatePrewarmIdsAbsentPinSkipped();
-    std::printf("NR-010/NR-020/NR-021/NR-024/NR-029/NR-037 panel model check PASSED\n");
+    TestRecentStartIndexPinsThenRecent();
+    TestRecentStartIndexAllPinned();
+    TestRecentStartIndexFiltered();
+    TestRecentStartIndexNoPins();
+    std::printf("NR-010/NR-020/NR-021/NR-024/NR-029/NR-037/NR-040 panel model check PASSED\n");
     return 0;
 }
