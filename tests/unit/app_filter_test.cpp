@@ -90,9 +90,28 @@ void TestEmpty() {
     ExpectNotProgramLike(L"", "empty target is not program-like");
 }
 
+// The three AppsFolder parsing-name shapes (design-spec §2.6): only a real
+// absolute path may be shown to the user as a path (§4.2/§4.9).
+void TestDisplayablePath() {
+    Expect(nimblerun::IsDisplayablePath(L"D:\\Tools\\Notepad3.exe"),
+           "absolute path is displayable");
+    Expect(nimblerun::IsDisplayablePath(L"c:/Tools/a.lnk"),
+           "forward slashes and a lowercase drive are displayable");
+    Expect(!nimblerun::IsDisplayablePath(L"Microsoft.WindowsCalculator_8wekyb3d8bbwe!App"),
+           "AUMID is not displayable");
+    Expect(!nimblerun::IsDisplayablePath(L"{7C5A40EF-A0FB-4BFC-874A-C0F2E0B9FA8E}\\AutoIt3\\Au3Info.exe"),
+           "Known Folder GUID relative path is not displayable");
+    Expect(!nimblerun::IsDisplayablePath(L"\\\\server\\share\\a.exe"),
+           "UNC path is not displayable");
+    Expect(!nimblerun::IsDisplayablePath(L""), "empty is not displayable");
+    Expect(!nimblerun::IsDisplayablePath(L"C:"), "bare drive is not displayable");
+    Expect(!nimblerun::IsDisplayablePath(L"C:a.exe"), "drive-relative path is not displayable");
+}
+
 } // namespace
 
 int wmain() {
+    TestDisplayablePath();
     TestAumid();
     TestAumidDotsAreNotExtensions();
     TestPathWhitelistHits();

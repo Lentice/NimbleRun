@@ -1,5 +1,7 @@
 #include "catalog/dedup.h"
 
+#include "catalog/app_filter.h"
+
 #include <cwctype>
 #include <string>
 #include <string_view>
@@ -8,15 +10,6 @@
 
 namespace nimblerun {
 namespace {
-
-std::wstring ToLower(std::wstring_view value) {
-    std::wstring out;
-    out.reserve(value.size());
-    for (const wchar_t c : value) {
-        out.push_back(static_cast<wchar_t>(towlower(static_cast<wint_t>(c))));
-    }
-    return out;
-}
 
 // Lower wins (better launch/icon quality, design-spec §FR-007). The AppsFolder
 // item is the Shell-canonical identity with high-quality icons; the user's own
@@ -54,6 +47,21 @@ bool UnjudgeableNameCollision(const AppEntry& a, const AppEntry& b) {
     return a_shell != b_shell;
 }
 
+// Between two entries for the same physical target, the target itself beats a
+// shortcut to it: the body is what the user thinks of as the app, and its path
+// is the useful one to show. Only then does source precedence decide.
+bool IsShortcut(const AppEntry& entry) {
+    const std::wstring ext = Extension(entry.source_path);
+    return ext == L".lnk" || ext == L".appref-ms";
+}
+
+bool Beats(const AppEntry& candidate, const AppEntry& kept) {
+    if (IsShortcut(candidate) != IsShortcut(kept)) {
+        return !IsShortcut(candidate);
+    }
+    return SourcePriority(candidate.source) < SourcePriority(kept.source);
+}
+
 } // namespace
 
 DedupResult DeduplicateCatalog(const std::vector<AppEntry>& entries) {
@@ -71,8 +79,8 @@ DedupResult DeduplicateCatalog(const std::vector<AppEntry>& entries) {
             continue;
         }
         AppEntry& kept = result.entries[found->second];
-        if (SourcePriority(entry.source) < SourcePriority(kept.source)) {
-            kept = entry;  // better precedence wins the slot
+        if (Beats(entry, kept)) {
+            kept = entry;  // the body, or better source precedence, wins the slot
         }
         ++result.removed_duplicates;
     }

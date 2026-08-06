@@ -1,4 +1,5 @@
 #include "catalog/appsfolder_catalog.h"
+#include "catalog/stable_id.h"
 
 #include <windows.h>
 #include <objbase.h>
@@ -25,6 +26,32 @@ void Expect(bool condition, const char* message) {
     }
 }
 
+// The GUID expansion itself, against the live Shell. FOLDERID_ProgramFilesX64
+// exists on every supported target (Windows 10 22H2 / 11 x64), so the success
+// path is checkable without a fixture; the rest are the reject branches.
+void TestKnownFolderExpansion() {
+    const std::wstring expanded = nimblerun::ExpandKnownFolderPrefix(
+        L"{6D809377-6AF0-444B-8957-A3773F02200E}\\Notepad++\\notepad++.exe");
+    Expect(expanded.size() > 3 && expanded[1] == L':',
+           "ProgramFilesX64 GUID expands to an absolute path");
+    Expect(expanded.rfind(L"\\Notepad++\\notepad++.exe") ==
+               expanded.size() - wcslen(L"\\Notepad++\\notepad++.exe"),
+           "expansion keeps the remainder of the parsing name");
+    Expect(nimblerun::ExpandKnownFolderPrefix(L"").empty(), "empty parsing name expands to empty");
+    Expect(nimblerun::ExpandKnownFolderPrefix(
+               L"Microsoft.WindowsCalculator_8wekyb3d8bbwe!App").empty(),
+           "AUMID expands to empty");
+    Expect(nimblerun::ExpandKnownFolderPrefix(L"D:\\Tools\\Notepad3.exe").empty(),
+           "an already-absolute parsing name expands to empty");
+    Expect(nimblerun::ExpandKnownFolderPrefix(L"{6D809377-6AF0-444B-8957-A3773F02200E}").empty(),
+           "a bare GUID with no remainder expands to empty");
+    Expect(nimblerun::ExpandKnownFolderPrefix(L"{not-a-guid}\\App\\app.exe").empty(),
+           "a malformed GUID expands to empty");
+    Expect(nimblerun::ExpandKnownFolderPrefix(
+               L"{00000000-0000-0000-0000-000000000001}\\App\\app.exe").empty(),
+           "an unknown folder id expands to empty");
+}
+
 // BuildAppsFolderEntry is the per-item boundary the enumerator routes every
 // child through: false means "skip this child, count it, keep going". Driving it
 // directly verifies the error-isolation branch without a fake IShellFolder.
@@ -42,6 +69,30 @@ void TestEntryBuilder() {
            "builder launch identity is the prefixed AppsFolder identity");
     Expect(entry.source_path == parsing, "builder source path is the parsing name");
     Expect(entry.stable_id.size() == 16, "builder stable id is a fixed-length hash");
+
+    // A Known Folder relative parsing name whose GUID the enumerator expanded:
+    // the launch identity still uses the bare parsing name (§FR-006), while the
+    // row shows the real path and the identity is that path, so this entry and a
+    // Start Menu shortcut to the same EXE dedup to one row (§FR-007).
+    const std::wstring guid_parsing =
+        L"{6D809377-6AF0-444B-8957-A3773F02200E}\\Notepad++\\notepad++.exe";
+    const std::wstring resolved = L"C:\\Program Files\\Notepad++\\notepad++.exe";
+    AppEntry legacy;
+    Expect(BuildAppsFolderEntry(L"Notepad++", guid_parsing, legacy, resolved),
+           "builder accepts a resolved legacy child");
+    Expect(legacy.launch_identity == L"shell:AppsFolder\\" + guid_parsing,
+           "resolved child still launches through the AppsFolder namespace");
+    Expect(legacy.source_path == resolved, "resolved child shows the real path");
+    Expect(legacy.stable_id == nimblerun::HashStableId(nimblerun::NormalizePathKey(resolved)),
+           "resolved child hashes from the resolved path");
+    // Expansion failed (unknown folder id): unchanged, pre-resolution behavior.
+    AppEntry unresolved;
+    Expect(BuildAppsFolderEntry(L"Notepad++", guid_parsing, unresolved, L""),
+           "builder accepts an unresolved legacy child");
+    Expect(unresolved.source_path == guid_parsing, "unresolved child keeps the parsing name");
+    Expect(unresolved.stable_id ==
+               nimblerun::HashStableId(nimblerun::NormalizePathKey(guid_parsing)),
+           "unresolved child hashes from the parsing name");
 
     // Unusable child data is a per-item failure, never an entry.
     AppEntry failed;
@@ -132,6 +183,7 @@ int wmain() {
         return 1;
     }
 
+    TestKnownFolderExpansion();
     TestEntryBuilder();
     TestLaunchIdentityAndFilter();
     TestAppsFolderInvariants();

@@ -23,16 +23,31 @@ struct AppsFolderEnumerateResult {
 // single bad child is skipped and counted.
 AppsFolderEnumerateResult EnumerateAppsFolderCatalog();
 
+// An AppsFolder parsing name for a legacy app is often Known Folder relative,
+// e.g. "{6D809377-...}\Notepad++\notepad++.exe" (design-spec §2.6). Expands the
+// prefix to a real absolute path. Empty for an AUMID, an already-absolute path,
+// a malformed prefix, or an unknown/unavailable folder id. SIGDN_FILESYSPATH is
+// not an option here: the Shell returns E_INVALIDARG for AppsFolder children.
+std::wstring ExpandKnownFolderPrefix(const std::wstring& parsing_name);
+
 // Builds one AppEntry from a child's already-extracted Shell names. Returns
 // false and does not modify out when the child data is unusable (empty display
 // name or parsing name) or when the parsing name is not a program-like target
 // (design-spec §FR-004a, shared app_filter module), so callers skip and count
-// the skip without aborting the walk. launch_identity is the Shell-launchable
-// "shell:AppsFolder\" + parsing name (§FR-006); source_path keeps the bare
-// parsing name for display, and the stable id is hashed from the bare parsing
-// name only (§10.3, zero migration).
+// the skip without aborting the walk. launch_identity is always the
+// Shell-launchable "shell:AppsFolder\" + bare parsing name (§FR-006), never the
+// resolved path.
+//
+// `resolved_path` is the child's parsing name with a leading Known Folder GUID
+// expanded to a real absolute path (the enumerator does that, it needs Shell).
+// Pass it empty for an AUMID or when expansion failed. When present it becomes
+// source_path (so the row shows a real path instead of the source label,
+// §4.2/§4.9) and the identity key, which is what lets one physical EXE reached
+// through AppsFolder, a Start Menu shortcut and a user folder collapse to a
+// single row (§FR-007). AUMIDs keep hashing from the bare parsing name.
 bool BuildAppsFolderEntry(const std::wstring& display_name,
                           const std::wstring& parsing_name,
-                          AppEntry& out);
+                          AppEntry& out,
+                          const std::wstring& resolved_path = {});
 
 } // namespace nimblerun

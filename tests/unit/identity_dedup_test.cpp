@@ -65,9 +65,9 @@ void TestStableIdNormalization() {
 }
 
 // Same physical app from a UserFolder path and a Start Menu shortcut whose
-// resolved target is that path: one entry survives, and precedence picks the
-// user Start Menu over the user folder, and a user folder over the Common
-// Start Menu (design-spec §FR-007).
+// resolved target is that path: one entry survives. The target itself beats a
+// shortcut to it regardless of source order; source precedence (design-spec
+// §FR-007) decides only between two shortcuts or two bodies.
 void TestCrossSourceMergeAndPrecedence() {
     const std::wstring target = L"C:\\Windows\\System32\\notepad.exe";
     const std::wstring user_lnk =
@@ -84,8 +84,8 @@ void TestCrossSourceMergeAndPrecedence() {
         };
         const DedupResult out = DeduplicateCatalog(input);
         Expect(out.entries.size() == 1, "cross-source merge: one entry");
-        Expect(out.entries[0].source == AppSource::UserStartMenu, "user start menu precedence");
-        Expect(out.entries[0].launch_identity == user_lnk, "kept entry keeps its launch identity");
+        Expect(out.entries[0].source == AppSource::UserFolder, "the EXE body beats the shortcut");
+        Expect(out.entries[0].launch_identity == target, "kept entry keeps its launch identity");
         Expect(out.removed_duplicates == 1, "cross-source merge: removed count");
         Expect(out.ambiguous_kept == 0, "cross-source merge: judgeable, not ambiguous");
     }
@@ -107,6 +107,30 @@ void TestCrossSourceMergeAndPrecedence() {
         Expect(out.entries.size() == 1, "user start menu beats common: one entry");
         Expect(out.entries[0].source == AppSource::UserStartMenu, "user precedence over common");
     }
+}
+
+// The reported case: an AppsFolder item whose Known Folder relative parsing
+// name resolved to an EXE, plus the all-users Start Menu shortcut pointing at
+// the same EXE. One row survives, and it is the one showing the EXE path.
+// A second shortcut to the same EXE but carrying launch arguments is a
+// different launch and keeps its own row.
+void TestAppsFolderAndShortcutCollapse() {
+    const std::wstring target = L"C:\\Program Files\\Notepad++\\notepad++.exe";
+    const std::wstring lnk =
+        L"C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\Notepad++.lnk";
+    const std::wstring id = HashStableId(NormalizePathKey(target));
+    std::vector<AppEntry> input = {
+        Entry(id, L"Notepad++", AppSource::CommonStartMenu, lnk),
+        Entry(id, L"Notepad++", AppSource::AppsFolder, target),
+        Entry(HashStableId(NormalizePathKey(target) + L"\n-multiInst"), L"Notepad++ (new)",
+              AppSource::CommonStartMenu, lnk),
+    };
+    const DedupResult out = DeduplicateCatalog(input);
+    Expect(out.entries.size() == 2, "AppsFolder + plain shortcut collapse, args entry survives");
+    Expect(out.entries[0].source == AppSource::AppsFolder, "the resolved EXE wins the slot");
+    Expect(out.entries[0].source_path == target, "kept row shows the EXE path");
+    Expect(out.removed_duplicates == 1, "one duplicate removed");
+    Expect(out.ambiguous_kept == 0, "a resolved AppsFolder path is judgeable");
 }
 
 // Two different apps that happen to share a display name are never merged.
@@ -205,8 +229,8 @@ void TestOrderingReproducible() {
     Expect(first.entries.size() == 2, "ordering: dedup count");
     Expect(first.entries[0].display_name == L"One", "ordering: first kept entry input order");
     Expect(first.entries[1].display_name == L"Two", "ordering: second kept entry input order");
-    Expect(first.entries[0].source == AppSource::UserStartMenu,
-           "ordering: precedence applied within first group");
+    Expect(first.entries[0].source == AppSource::UserFolder,
+           "ordering: winner picked within first group");
     ExpectEntriesEqual(first, second);
 }
 
@@ -224,6 +248,7 @@ int wmain() {
     TestCrossSourceMergeAndPrecedence();
     TestSameNameNeverMerged();
     TestUserFolderDuplicatesCollapse();
+    TestAppsFolderAndShortcutCollapse();
     TestAppsFolderDuplicateMerges();
     TestAppsFolderSameNameDistinct();
     TestPackagedAppAmbiguityKept();

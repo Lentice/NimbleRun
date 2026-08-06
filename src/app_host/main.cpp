@@ -9,6 +9,7 @@
 #include "app_host/hotkey.h"
 #include "app_host/panel_model.h"
 #include "app_host/settings_dialog.h"
+#include "catalog/app_filter.h"
 #include "catalog/appsfolder_catalog.h"
 #include "catalog/catalog_cache.h"
 #include "catalog/catalog_refresh.h"
@@ -1384,9 +1385,9 @@ void Render(HWND window) {
                     D2D1::RectF(text_left, row_top, text_right, row_mid),
                     g_text_brush);
                 const std::wstring& subtitle =
-                    rows[i].source == nimblerun::AppSource::AppsFolder
-                        ? windows_app_label
-                        : rows[i].source_path;
+                    nimblerun::IsDisplayablePath(rows[i].source_path)
+                        ? rows[i].source_path
+                        : windows_app_label;
                 g_render_target->DrawText(
                     subtitle.c_str(),
                     static_cast<UINT32>(subtitle.size()),
@@ -1544,9 +1545,9 @@ void Render(HWND window) {
         }
         if (path_entry) {
             const wchar_t* path =
-                path_entry->source == nimblerun::AppSource::AppsFolder
-                    ? list_strings::kWindowsApp
-                    : path_entry->source_path.c_str();
+                nimblerun::IsDisplayablePath(path_entry->source_path)
+                    ? path_entry->source_path.c_str()
+                    : list_strings::kWindowsApp;
             g_render_target->DrawText(
                 path, static_cast<UINT32>(wcslen(path)), g_small_format,
                 D2D1::RectF(nimblerun::layout::kListLeftDip,

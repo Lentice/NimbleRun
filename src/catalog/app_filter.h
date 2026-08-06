@@ -21,6 +21,13 @@ std::wstring Extension(std::wstring_view path);
 // "scheme://..." with a valid RFC scheme prefix.
 bool IsUrlTarget(std::wstring_view target);
 
+// True when the target is a real local absolute filesystem path, i.e. showable
+// to the user as a path (design-spec §4.2/§4.9: an item without one shows a
+// source label instead of its Shell parsing name). Of the three AppsFolder
+// parsing-name shapes in §2.6 only the third qualifies: an AUMID has no
+// separator and a Known Folder GUID-relative path starts with '{'.
+bool IsDisplayablePath(std::wstring_view target);
+
 // True when the target looks like a launchable program rather than a document,
 // website, or uninstaller (design-spec §FR-004a). `target` is a Start Menu
 // shortcut's resolved target or an AppsFolder item's Shell parsing name.

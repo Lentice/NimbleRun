@@ -54,6 +54,17 @@ bool IsUrlTarget(std::wstring_view target) {
     return target.compare(colon, 3, L"://") == 0;
 }
 
+bool IsDisplayablePath(std::wstring_view target) {
+    // "X:\..." or "X:/...". Rejects AUMIDs, "{GUID}\..." and UNC by shape; no
+    // filesystem access, so this stays pure and cheap enough to call per frame.
+    if (target.size() < 3 || target[1] != L':') {
+        return false;
+    }
+    const wchar_t drive = target[0];
+    const bool alpha = (drive >= L'a' && drive <= L'z') || (drive >= L'A' && drive <= L'Z');
+    return alpha && (target[2] == L'\\' || target[2] == L'/');
+}
+
 namespace {
 
 // A "file:" scheme (case-insensitive) points at a local file, which must fall

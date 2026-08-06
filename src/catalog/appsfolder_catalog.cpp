@@ -51,9 +51,35 @@ std::wstring TakeCoTaskString(wchar_t* raw) {
 
 } // namespace
 
+std::wstring ExpandKnownFolderPrefix(const std::wstring& parsing_name) {
+    if (parsing_name.empty() || parsing_name.front() != L'{') {
+        return {};
+    }
+    const std::size_t close = parsing_name.find(L'}');
+    if (close == std::wstring::npos || close + 1 >= parsing_name.size() ||
+        parsing_name[close + 1] != L'\\') {
+        return {};
+    }
+    GUID folder{};
+    if (FAILED(IIDFromString(parsing_name.substr(0, close + 1).c_str(), &folder))) {
+        return {};
+    }
+    wchar_t* root = nullptr;
+    // SHGetKnownFolderPath's contract: the caller frees the allocation whether
+    // the call succeeded or not, so take it unconditionally.
+    const HRESULT hr = SHGetKnownFolderPath(folder, KF_FLAG_DEFAULT, nullptr, &root);
+    std::wstring result = TakeCoTaskString(root);
+    if (FAILED(hr) || result.empty()) {
+        return {};
+    }
+    result += parsing_name.substr(close + 1);  // keeps the leading backslash
+    return result;
+}
+
 bool BuildAppsFolderEntry(const std::wstring& display_name,
                           const std::wstring& parsing_name,
-                          AppEntry& out) {
+                          AppEntry& out,
+                          const std::wstring& resolved_path) {
     if (display_name.empty() || parsing_name.empty()) {
         return false;  // unusable child: caller skips and counts the failure
     }
@@ -70,16 +96,25 @@ bool BuildAppsFolderEntry(const std::wstring& display_name,
     // Shell-launchable on its own: AUMIDs and Known Folder GUID-relative paths
     // resolve only inside the AppsFolder namespace.
     out.launch_identity = L"shell:AppsFolder\\" + parsing_name;
-    out.source_path = parsing_name;
+    // A resolved absolute path is both nicer to show and the only key that can
+    // be compared against the other sources' resolved targets; without one the
+    // bare parsing name stands in, exactly as before.
+    const bool resolved = IsDisplayablePath(resolved_path);
+    out.source_path = resolved ? resolved_path : parsing_name;
     // NR-047: the package-family part of the AUMID is a secondary search key
     // ("Microsoft.WindowsCalculator" reachable by "calc"). Cut at the first '_'
     // to drop the publisher hash, which is identical across every Store app and
     // would otherwise make queries like "8wekyb" return the whole Store.
     out.search_alias = parsing_name.substr(0, parsing_name.find(L'_'));
     out.source = AppSource::AppsFolder;
-    // Identity key stays the bare parsing name (design-spec §10.3): the prefix
-    // is launch-assembly, not identity, so pins and usage survive unchanged.
-    out.stable_id = HashStableId(NormalizePathKey(parsing_name));
+    // Never the "shell:AppsFolder\" prefix (design-spec §10.3): the prefix is
+    // launch-assembly, not identity, so pins and usage survive a change to the
+    // assembly rule. When the parsing name resolves to a real path, that path is
+    // the identity, which is how this entry and the Start Menu shortcut for the
+    // same EXE end up as one row. Deviates from §10.3's "parsing name" wording;
+    // GUID-relative AppsFolder items lose their pin/usage once, by design.
+    out.stable_id =
+        HashStableId(NormalizePathKey(resolved ? resolved_path : parsing_name));
     return true;
 }
 
@@ -124,7 +159,8 @@ AppsFolderEnumerateResult EnumerateAppsFolderCatalog() {
         child->Release();
 
         AppEntry entry;
-        if (!BuildAppsFolderEntry(display_name, parsing_name, entry)) {
+        if (!BuildAppsFolderEntry(display_name, parsing_name, entry,
+                                  ExpandKnownFolderPrefix(parsing_name))) {
             ++result.failed_items;  // skip one child, keep enumerating
             continue;
         }

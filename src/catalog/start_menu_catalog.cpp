@@ -74,11 +74,25 @@ private:
     bool usable_ = false;
 };
 
+// "C:\A\B\app.exe" -> "C:\A\B". Empty when there is no separator.
+std::wstring ParentDirectory(std::wstring_view path) {
+    const std::size_t cut = path.find_last_of(L"\\/");
+    if (cut == std::wstring_view::npos) {
+        return {};
+    }
+    return std::wstring(path.substr(0, cut));
+}
+
 struct ResolvedLink {
     bool loadable = false;
     bool web = false;
     std::wstring target;
     std::wstring arguments;
+    // Only a working directory that differs from the target's own directory,
+    // which is the default the Shell would use anyway. Part of the identity for
+    // the same reason arguments are: a shortcut that starts the same EXE
+    // elsewhere is a different launch and must not collapse into the bare EXE.
+    std::wstring working_directory;
 };
 
 // Parses a .lnk with the Shell link API only, never the raw binary format.
@@ -109,6 +123,15 @@ ResolvedLink ResolveShortcut(const std::wstring& path) {
         wchar_t arguments[1024];
         if (SUCCEEDED(shell_link->GetArguments(arguments, 1024))) {
             result.arguments.assign(arguments);
+        }
+        wchar_t working[1024];
+        if (SUCCEEDED(shell_link->GetWorkingDirectory(working, 1024)) && working[0] != L'\0') {
+            const std::wstring normalized = NormalizePathKey(working);
+            const std::wstring target_directory =
+                NormalizePathKey(ParentDirectory(result.target));
+            if (normalized != target_directory) {
+                result.working_directory = normalized;
+            }
         }
         result.loadable = true;
     }
@@ -160,6 +183,13 @@ void ProcessFile(const std::wstring& path, AppSource source, std::vector<AppEntr
         if (!link.arguments.empty()) {
             identity_key += L"\n";
             identity_key += link.arguments;
+        }
+        // A custom working directory is launch semantics the bare EXE does not
+        // carry, so it must keep this shortcut a distinct identity (§FR-007:
+        // only entries that launch the same thing may collapse).
+        if (!link.working_directory.empty()) {
+            identity_key += L"\n";
+            identity_key += link.working_directory;
         }
     }
     entry.stable_id = HashStableId(identity_key);
