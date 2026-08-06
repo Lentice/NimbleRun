@@ -2163,7 +2163,14 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
         kWindowClass,
         kWindowTitle,
-        WS_POPUP | WS_BORDER,
+        // NR-042: WS_CLIPCHILDREN keeps the D2D present out of the search EDIT's
+        // rect. Without it every keystroke's whole-window InvalidateRect
+        // (EN_UPDATE) repainted over the child, and because that invalidation
+        // does not reach children the EDIT never repainted -- erasing the caret,
+        // which the system draws outside WM_PAINT and cannot restore. The rounded
+        // search frame is unaffected: it is drawn outside the EDIT rect, which is
+        // inset by kSearchTextInsetDip / kSearchEditInsetYDip.
+        WS_POPUP | WS_BORDER | WS_CLIPCHILDREN,
         0,
         0,
         640,

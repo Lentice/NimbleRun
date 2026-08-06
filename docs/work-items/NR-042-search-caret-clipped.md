@@ -1,6 +1,6 @@
 # NR-042 — Search caret erased by the panel repaint
 
-- Status: `ready`
+- Status: `done`
 - Phase: 3
 - Depends on: —
 - Source: `docs/design-spec.md` §4.7（輸入與焦點）／§4.9（搜尋框外觀）／§NFR-006
@@ -102,4 +102,7 @@ ctest --test-dir build --output-on-failure
 
 ## 交接區
 
-（實作者填寫：修改的行號、建置與 CTest 結果、九條手動驗收逐條實測結果、未完成事項。）
+- **修改內容**：`src/app_host/main.cpp` 的 `CreateWindowExW` 樣式列（建置時位於 `:2166`，文件撰寫時為 `:2080`）由 `WS_POPUP | WS_BORDER` 改為 `WS_POPUP | WS_BORDER | WS_CLIPCHILDREN`，並加上 Scope 指定的七行說明註解。`git diff` 確認只有該處被改動，其餘既有行未動；未新增測試、未改 layout／palette／SearchEditProc／Render／design-spec。
+- **建置與 CTest 結果**：LLVM-MinGW + Ninja Release（`-DCMAKE_TOOLCHAIN_FILE=cmake/llvm-mingw.cmake -DCMAKE_BUILD_TYPE=Release`）configure 成功；`cmake --build build` 無新增 warning；`ctest --test-dir build --output-on-failure` 全套件 **23/23 通過**。
+- **九條手動驗收**：1～9 為人工目視驗收（依 AGENTS.md「Agent 不需操作視窗」原則，Agent 未操作視窗、未實跑這九條），需由人於 Release 版逐條打勾：1 caret 持續可見、2 caret 移動正確、3 退格與清空、4 貼上與 Ctrl+A、5 搜尋框外框未裁掉、6 面板其餘繪製無回歸、7 高 DPI、8 深／淺主題、9 隱藏再顯示與跨螢幕。若第 1 條仍重現，依文件指示停手另開診斷 item，勿再補 caret 參數。
+- **未完成：無。**
