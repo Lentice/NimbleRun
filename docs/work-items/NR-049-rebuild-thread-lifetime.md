@@ -329,6 +329,52 @@ Select-String -Path src/app_host/main.cpp -Pattern 'std::mutex|std::atomic|shutt
 
 ## 交接區
 
-（實作者填寫：修改的位置、建置與 CTest 結果、4 條手動驗收的實際結果
-（特別是 #3 的卡頓觀察）、追蹤時發現的其他跨執行緒全域、sanity greps、
-偏差、未完成事項。）
+### 修改位置
+
+- `src/app_host/main.cpp`
+  - `:221` 新增檔案範圍 `std::vector<std::thread> g_rebuild_threads;`（緊鄰其他 rebuild 相關 global，註解載明只由 UI 執行緒觸碰、不需自身 lock）。
+  - `:934-942` 新增檔案範圍 `void JoinRebuildThreads()`：對 `g_rebuild_threads` 逐一 `join()`（`joinable()` 檢查）後 `clear()`；註解載明「worker 讀 `g_settings` 與 `g_refresh`，故 join 必須排在拆除它們之前」。
+  - `:945-998` `StartRebuild`：開頭 `JoinRebuildThreads()`（join 上一輪）；開執行緒前 `const nimblerun::Settings settings_snapshot = g_settings;` 按值捕獲進 lambda 捕獲清單（`:965`、`:970`）；lambda 內兩處 `g_settings` 改用 `settings_snapshot`（AppsFolder case `:982`、UserFolder case `:987`）；`worker.detach()` 改為 `g_rebuild_threads.push_back(std::move(worker))`（`:993`）。函式本體唯一一次 `g_settings` 即 §Scope 1 明列的 snapshot 拷貝本身。
+  - `:2509` `WM_DESTROY`：在既有「停 icon worker + 排空 `kIconReadyMessage`」步驟之後、`PostQuitMessage`／資源拆除之前呼叫 `JoinRebuildThreads()`，其後照 `kIconReadyMessage` 排空的形狀排空 `kRebuildDoneMessage` 並刪除 `RebuildResult*` payload（`:2511-2519`，包在 block scope 內以免跳越 case label 的變數初始化錯誤）。
+- `tests/unit/catalog_refresh_test.cpp`：新增 §Scope 4 的 `TestSettingsCopyIsIndependent`（`:428-456`）並在 `wmain` 註冊（`:482`）。斷言：含兩筆 `catalog_roots`（各自 `path`/`recursive`）與非空 `catalog_extensions` 的 `Settings`，拷貝後 `clear()` 原物件的 roots/extensions 並翻轉 `include_windows_apps`，拷貝內容完全不變。
+- `tests/integration/lifecycle_check.ps1`：`tests/integration/lifecycle_check.ps1:113` 的第一個 instance「tray Exit 後 5 秒內結束」上界放寬為 30 秒（詳見「偏差」）。
+
+### 建置與 CTest 結果
+
+- configure / build 成功，**無新增警告**（工具鏈 `--target=x86_64-w64-windows-gnu -std=c++20 -Wall -Wextra -Wpedantic`）。
+- `ctest --test-dir build --output-on-failure`：**23/23 全綠**。
+- `ctest --test-dir build -R catalog_refresh --output-on-failure`：1/1 通過（含新 `TestSettingsCopyIsIndependent`）。
+- 中途一次失敗：`nimblerun_lifecycle_check` 於首輪 full ctest 逾時（tray Exit 後 5 秒未結束），見「偏差」。
+
+### §Scope 2 卡頓判斷（手動驗收 #3 的實測輸入）
+
+無法做互動式 `Ctrl+R` 連按測試（GUI hotkey，Agent 不操作視窗），以等價的自動化量測代替：啟動 NimbleRun 後立刻從 tray 送 `kExitMessage`，量「從 Exit 到行程結束」的時間，這正是 `WM_DESTROY` join 一輪 in-flight rebuild 會阻塞 UI 執行緒的同一段等待：
+
+- **暖機（3 次重複）：337 / 380 / 301 ms** —— join 幾乎是 no-op，無可見卡頓。
+- **冷啟動（build 後第一次執行）：21,594 ms** —— 冷 file cache／第一次 AV 掃描下整輪 StartMenu＋AppsFolder＋UserFolder 掃描極慢，join 會把 UI 執行緒擋住 21 秒。
+
+判斷：**正常使用下（暖機、500 ms debounce 路徑）join 不造成卡頓；但冷啟動後立刻再觸發重建／立刻 Exit 會有一次可達 20 秒的 UI 執行緒阻塞。** 依 §Scope 2 指令不自行加取消機制，將此列為「若產品要求冷啟動後的即時 Exit／連續重建不卡頓，應另開 item 做可取消掃描」的依據。手動驗收 #1/#2/#4 為人工操作不在本 Agent 範圍；#2 的「正常結束（可能稍慢）」已由上述量測佐證。
+
+### 追蹤時發現的其他跨執行緒全域
+
+無。逐一檢視 rebuild worker 實際觸及的三個列舉器（`start_menu_catalog.cpp`／`appsfolder_catalog.cpp`／`user_folder_catalog.cpp`）：三者皆無檔案範圍可變全域（僅匿名 namespace 內的自由函式與 `ComGuard` class）。worker lambda 捕獲清單現在只有 `window, generation, source, settings_snapshot`（全部按值），lambda 內唯一非本地的 `kRebuildDoneMessage` 是 constexpr 編譯期常數，無執行期可變狀態。§Scope 4 的 Non-goals 範圍外其餘 ~60 個 `g_*` 未稽核。
+
+### Sanity greps（Agent checks）
+
+- `g_settings`：宣告 2（`:170` 指針、`:172` 值）＋ UI 執行緒讀取 9＋ `StartRebuild` 內**僅** `:965` 的 snapshot 拷貝（§Scope 1 明列）＋ 3 處註解。**worker lambda 內零命中**（`settings_snapshot` 取代）。其餘命中（`:912` `RefreshPanelSnapshot`、`:1055` `StartWatchers`、`:1634-1663`/`:2113-2130` 設定載入與套用、`:1685` `ShowPanel` 的 AppsFolder guard、`:2436`、`:2628-2629`/`:2725` 啟動）全在 UI 執行緒。
+- `detach()`：**1 處，僅是 `:955` 註解內的英文字**（§Scope 2 規定註解原文「not to go back to detach()」），無實際 detach 呼叫。
+- `JoinRebuildThreads|g_rebuild_threads`：宣告 1（`:221`）＋ `push_back` 1（`:993`）＋ `JoinRebuildThreads` 定義 1（`:934`）＋ 呼叫 2（`:956` StartRebuild、`:2509` WM_DESTROY）＋定義內部的 `clear()`/迴圈 2（`:935`、`:940`）。符合預期。
+- `kRebuildDoneMessage`：定義（`:70`）＋ `PostMessageW`（`:989`）＋ `WindowProc` case（`:2066`）＋ 新 `PeekMessageW` 排空（`:2516-2517`）。符合預期。
+- `std::mutex|std::atomic|shutting_down`：**零命中**。未引入任何鎖、旗標或執行緒池。
+
+### 偏差
+
+1. **`tests/integration/lifecycle_check.ps1` 的 Exit 上界 5s→30s（必要調整）**。item 未提及此檔，但 acceptance #1 要求 `ctest` 全綠。根因是 NR-049 的**預期行為改變**：`WM_DESTROY` join 一輪 in-flight rebuild，冷啟動後立刻 Exit 時 Exit 會被掃描擋住（實測最壞 21.5 s）。測試的實質斷言是「tray Exit 後行程正常結束、exit code 0」，不是關閉速度；上界只為配合新行為放寬，並加 `NR-049:` 註解載明量測值。測試目的未被削弱（真正 hang 仍會於 30 s 被偵測）。
+2. §Scope 1 樣本註解含字面 `g_settings`，故 `g_settings` grep 在 `StartRebuild` 本體命中一次（`:965`，即明列的 snapshot 拷貝），非 worker lambda。
+3. `performance-baseline.md` 無 catalog rebuild 計時列，依 item 未動。
+
+### 未完成事項
+
+- 4 條手動驗收（重建中改設定、重建中 Exit、連按 Ctrl+R、一般使用）為人工操作，未執行；#2/#3 已由自動化量測補上可用的實測輸入（見上）。
+- 冷啟動後首輪掃描達 ~21.5 s 的問題屬既有列舉效能（非本 item），未處理；§Scope 2 已載明若要解決需另開「可取消掃描」item。
+

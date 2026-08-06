@@ -214,6 +214,12 @@ nimblerun::CatalogWatcher* g_watcher = nullptr;
 // root order (Start Menu folders first, then each user-folder root).
 std::vector<nimblerun::CatalogSource> g_watch_sources;
 
+// NR-049: rebuild threads are owned, not detached. Joined in WM_DESTROY so a
+// scan can never outlive the window it posts to, nor the globals it reads.
+// Only ever touched on the UI thread (StartRebuild and WM_DESTROY), so it needs
+// no lock of its own.
+std::vector<std::thread> g_rebuild_threads;
+
 // NR-017: bounded local diagnostic log under the per-user data dir. Only
 // sanitized stage names, error codes and short details are written; never
 // search text, usernames, personal paths or command lines (design-spec §FR-014).
@@ -919,15 +925,46 @@ void RefreshPanelSnapshot() {
     g_model->SetRecent(std::move(recent_entries));
 }
 
+// NR-049: waits for every in-flight rebuild thread. The rebuild threads read
+// g_settings and g_refresh, so this must run before anything that tears those
+// down; WM_DESTROY is that point in practice, and each new rebuild cycle joins
+// the previous one first. Rebuilds are debounced 500 ms apart (§FR-008), so a
+// cycle's threads have almost always finished by the time this is called, and
+// a finished thread returns from join() at once.
+void JoinRebuildThreads() {
+    for (std::thread& worker : g_rebuild_threads) {
+        if (worker.joinable()) {
+            worker.join();
+        }
+    }
+    g_rebuild_threads.clear();
+}
+
 // NR-011: starts one background thread per source in `sources` for a rebuild
 // cycle; results return through kRebuildDoneMessage on the UI thread.
 void StartRebuild(HWND window, std::vector<nimblerun::CatalogSource> sources) {
     if (!g_refresh) {
         return;
     }
+    // NR-049: join the previous cycle before starting a new one. Rebuilds are
+    // debounced 500 ms apart (§FR-008) and a cycle's threads have almost
+    // always finished by the time the next one starts, so this is normally a
+    // no-op; when it is not, blocking the UI thread briefly is the correct
+    // trade against an unbounded thread vector. If a rebuild ever becomes
+    // slow enough that this is visible, the fix is to make the scan
+    // cancellable, not to go back to detach().
+    JoinRebuildThreads();
     const std::uint64_t generation = g_refresh->BeginGeneration(sources);
+    // NR-049: the rebuild threads must never touch g_settings. It is UI-thread
+    // state, and the settings dialog can reassign it (freeing catalog_roots and
+    // every root string) while a scan is halfway through a directory tree.
+    // A Settings is an ordinary copyable value (AGENTS.md), so each thread gets
+    // the snapshot that was current when the rebuild started -- which is also
+    // the semantically correct input: a rebuild reflects the settings that
+    // triggered it, not settings applied after it began.
+    const nimblerun::Settings settings_snapshot = g_settings;
     for (const nimblerun::CatalogSource source : sources) {
-        std::thread worker([window, generation, source]() {
+        std::thread worker([window, generation, source, settings_snapshot]() {
             auto* result = new RebuildResult;
             result->generation = generation;
             result->source = source;
@@ -940,19 +977,20 @@ void StartRebuild(HWND window, std::vector<nimblerun::CatalogSource> sources) {
                 // entirely (no COM walk) and the source reports empty, so the
                 // merged snapshot clears old packaged-app entries via the same
                 // ApplySourceResult path.
-                result->entries = g_settings.include_windows_apps
+                result->entries = settings_snapshot.include_windows_apps
                     ? nimblerun::EnumerateAppsFolderCatalog().entries
                     : std::vector<nimblerun::AppEntry>{};
                 break;
             case nimblerun::CatalogSource::UserFolder:
-                result->entries = nimblerun::EnumerateUserFolderCatalog(g_settings);
+                result->entries =
+                    nimblerun::EnumerateUserFolderCatalog(settings_snapshot);
                 break;
             }
             PostMessageW(window, kRebuildDoneMessage,
                          static_cast<WPARAM>(generation),
                          reinterpret_cast<LPARAM>(result));
         });
-        worker.detach();
+        g_rebuild_threads.push_back(std::move(worker));
     }
 }
 
@@ -2461,6 +2499,23 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
             while (PeekMessageW(&leftover, window, kIconReadyMessage,
                                 kIconReadyMessage, PM_REMOVE)) {
                 delete reinterpret_cast<nimblerun::IconResult*>(leftover.lParam);
+            }
+        }
+        // NR-049: join the rebuild threads now, after the icon worker is
+        // stopped but before anything that could tear down g_refresh or
+        // g_settings (they live past the message loop, and the worker reads
+        // both). Ordering matters: a scan that outlived the window would post
+        // into a dead HWND and read globals mid-destruction.
+        JoinRebuildThreads();
+        // NR-049: a thread can post its result microseconds before we join it,
+        // so drain the queue and delete the payloads. Mirrors the existing
+        // kIconReadyMessage drain directly above; without it every shutdown
+        // during a rebuild leaks one RebuildResult per source.
+        {
+            MSG leftover{};
+            while (PeekMessageW(&leftover, window, kRebuildDoneMessage,
+                                kRebuildDoneMessage, PM_REMOVE)) {
+                delete reinterpret_cast<RebuildResult*>(leftover.lParam);
             }
         }
         if (g_search_font) {

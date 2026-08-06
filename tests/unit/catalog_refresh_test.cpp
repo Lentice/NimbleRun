@@ -1,6 +1,7 @@
 #include "catalog/catalog_cache.h"
 #include "catalog/catalog_refresh.h"
 #include "search/search_engine.h"
+#include "settings/settings_store.h"
 
 #include <windows.h>
 
@@ -424,6 +425,36 @@ void TestOlderSchemaCacheRebuilds() {
     RemoveTreeBestEffort(dir);
 }
 
+// NR-049: StartRebuild hands each rebuild thread a by-value Settings snapshot,
+// so a later mutation of the original cannot reach into the running scan. This
+// pins that Settings really is an ordinary copyable value with no shared
+// buffers (AGENTS.md), which is the whole basis of the fix in main.cpp.
+void TestSettingsCopyIsIndependent() {
+    nimblerun::Settings original;
+    original.catalog_roots.push_back({L"C:\\Tools", /*recursive=*/true});
+    original.catalog_roots.push_back({L"D:\\Games", /*recursive=*/false});
+    original.catalog_extensions = {L".exe", L".lnk"};
+    original.include_windows_apps = true;
+
+    const nimblerun::Settings copy = original;
+    original.catalog_roots.clear();
+    original.catalog_extensions.clear();
+    original.include_windows_apps = false;
+
+    Expect(copy.include_windows_apps, "copied Settings keeps include_windows_apps");
+    Expect(copy.catalog_roots.size() == 2, "copied Settings keeps catalog_roots");
+    Expect(copy.catalog_roots[0].path == L"C:\\Tools" &&
+               copy.catalog_roots[0].recursive,
+           "copied root path content survives a mutation of the original");
+    Expect(copy.catalog_roots[1].path == L"D:\\Games" &&
+               !copy.catalog_roots[1].recursive,
+           "second copied root survives too");
+    Expect(copy.catalog_extensions.size() == 2 &&
+               copy.catalog_extensions[0] == L".exe" &&
+               copy.catalog_extensions[1] == L".lnk",
+           "copied catalog_extensions are untouched");
+}
+
 } // namespace
 
 int wmain() {
@@ -448,6 +479,7 @@ int wmain() {
     TestFailureWithRebuildMerges();
     TestConsecutiveFailuresTriggerOnce();
     TestSuccessNeverTriggers();
+    TestSettingsCopyIsIndependent();
     std::printf("NR-011/NR-022 catalog refresh check PASSED\n");
     return 0;
 }

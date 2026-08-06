@@ -109,7 +109,12 @@ try {
 
     # 3. Tray Exit command must terminate the first instance cleanly.
     [void][NimLifecycle]::PostMessageW($hwnd, $ExitMessage, [IntPtr]::Zero, [IntPtr]::Zero)
-    if (-not $first.WaitForExit(5000)) { throw 'First instance did not exit after tray Exit command' }
+    # NR-049: WM_DESTROY now joins any in-flight catalog rebuild before tearing
+    # down, so an immediate Exit during the startup full rebuild can take as
+    # long as the scan. Warm that is ~0.3 s on the dev machine, but the first
+    # run after a build (cold file cache / AV scan) measured ~21.5 s. The bound
+    # is for the process to terminate with code 0, not for shutdown speed.
+    if (-not $first.WaitForExit(30000)) { throw 'First instance did not exit after tray Exit command' }
     if ($first.ExitCode -ne 0) { throw "First instance exited with code $($first.ExitCode), expected 0" }
 
     Write-Output 'NR-002 lifecycle check PASSED'
