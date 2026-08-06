@@ -1,6 +1,6 @@
 # NR-041 — Visual marker for pinned items
 
-- Status: `ready`
+- Status: `done`
 - Phase: 3
 - Depends on: —
 - Source: `docs/design-spec.md` §4.2／§4.3（面板版面）／§4.8／§FR-011（釘選）／§NFR-006（不以顏色單獨傳達狀態）
@@ -143,4 +143,7 @@ ctest --test-dir build --output-on-failure
 
 ## 交接區
 
-（實作者填寫：修改的行號、建置與 CTest 結果、八條手動驗收逐條實測結果、未完成事項。）
+- 修改：`src/app_host/main.cpp` grid 迴圈內（快選數字框之後）新增左上角實心圓點；list 迴圈內（選取邊框之後）新增最左緣 3 DIP 直條。兩個區塊皆以 `if (g_pins && g_pins->IsPinned(rows[i].stable_id))` 包住，共用 `g_selected_border_brush`，版面常數與 palette 逐位元組未動。
+- 建置與 CTest：Release configure＋build 無新增 warning；全套件 CTest 23/23 全綠。
+- 手動驗收：屬視覺人工驗證（AGENTS.md 明列不屬於追蹤表），未由 Agent 操作；八條步驟留待人工以 Release build 目視確認。
+- 未完成：無。

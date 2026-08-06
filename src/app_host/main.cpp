@@ -1067,6 +1067,23 @@ void Render(HWND window) {
                                     box_right,
                                     cell_top + 4.0f + nimblerun::layout::kFooterKeyBoxHeightDip));
                 }
+
+                // NR-041: pinned marker -- a filled dot in the cell's top-left
+                // corner. Drawn last so it sits above the selection border, and
+                // placed on the left because the top-right corner is the NR-024
+                // quick-select digit box. Shape, not color, carries the state
+                // (design-spec §NFR-006); the border color is reused because the
+                // palette already guarantees it contrasts with every fill and
+                // follows the system colors under high contrast.
+                if (g_pins && g_pins->IsPinned(rows[i].stable_id)) {
+                    constexpr float kPinDotRadiusDip = 4.0f;
+                    constexpr float kPinDotInsetDip = 8.0f;
+                    g_render_target->FillEllipse(
+                        D2D1::Ellipse(D2D1::Point2F(cell.left + kPinDotInsetDip,
+                                                    cell.top + kPinDotInsetDip),
+                                      kPinDotRadiusDip, kPinDotRadiusDip),
+                        g_selected_border_brush);
+                }
             }
 
             // NR-029 empty state (design-spec §4.3): the grid is never blank.
@@ -1118,6 +1135,19 @@ void Render(HWND window) {
                                     row_rect.right - inset, row_rect.bottom - inset),
                         g_selected_border_brush,
                         border_width);
+                }
+
+                // NR-041: pinned marker -- a stripe on the row's leading edge,
+                // in the gap kTileInsetDip already leaves before the icon. Same
+                // rule as the grid dot: shape, not color, and drawn after the
+                // selection border so it stays visible on the selected row.
+                if (g_pins && g_pins->IsPinned(rows[i].stable_id)) {
+                    constexpr float kPinStripeWidthDip = 3.0f;
+                    g_render_target->FillRectangle(
+                        D2D1::RectF(row_rect.left, row_rect.top,
+                                    row_rect.left + kPinStripeWidthDip,
+                                    row_rect.bottom),
+                        g_selected_border_brush);
                 }
     
                 // NR-012: fixed tile inside the row, vertically centered. The decoded
