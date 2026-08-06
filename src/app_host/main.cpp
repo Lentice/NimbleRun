@@ -27,6 +27,7 @@
 #include "resources/resource.h"
 #include "settings/settings_editor.h"
 #include "settings/settings_store.h"
+#include "storage/atomic_text_file.h"
 #include "ui/panel_layout.h"
 #include "ui/panel_palette.h"
 #include "ui/quick_select.h"
@@ -168,6 +169,10 @@ nimblerun::LaunchFailureRefreshGate g_launch_failure_refresh;
 // Live settings store, owned by wWinMain; the tray Settings dialog persists
 // through it (NR-013).
 nimblerun::SettingsStore* g_settings_store = nullptr;
+// NR-054: the per-user log directory (design-spec §10.1 logs\nimblerun.log).
+// Set once in wWinMain and shared by the DiagnosticLog construction and the
+// Settings dialog's "Open log folder" button.
+std::wstring g_log_directory;
 // Current settings mirror, refreshed after the dialog applies (NR-013/NR-011).
 nimblerun::Settings g_settings;
 bool g_hide_after_launch = true;
@@ -2122,7 +2127,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
         // NR-011 restarts the watchers and rebuilds (roots/extensions changed).
         if (g_settings_store && g_usage) {
             const bool applied = nimblerun::ShowSettingsDialog(window, *g_settings_store,
-                                                               *g_usage, g_hotkey);
+                                                       *g_usage, g_hotkey, g_log_directory);
             // Reload so the live panel picks up hide-after-launch without
             // waiting for a restart (recent_count/theme apply on next launch).
             nimblerun::Settings reloaded;
@@ -2651,8 +2656,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     usage.Load();
     g_usage = &usage;
 
-    // NR-017: bounded diagnostic log in the per-user data dir.
-    nimblerun::DiagnosticLog diag(nimblerun::DefaultSettingsDir(), L"nimblerun.log");
+    // NR-054: design-spec §10.1 puts the log at logs\nimblerun.log, not beside
+    // settings.ini in the root. Keeps the diagnostics artifact out of the
+    // user-data listing, so "delete my data" and "send me your log" are
+    // different directories.
+    g_log_directory = nimblerun::JoinPath(nimblerun::DefaultSettingsDir(), L"logs");
+    nimblerun::DiagnosticLog diag(g_log_directory, L"nimblerun.log");
     g_diag = &diag;
 
     // NR-018: the pin store is reloaded and reconciled in RefreshPins(); only

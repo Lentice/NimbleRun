@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -139,12 +140,132 @@ void TestFailedAppendDoesNotThrow() {
     RemoveTreeBestEffort(dir);
 }
 
+// NR-054: design-spec §10.1 puts the log in logs\, one level under the
+// per-user root. The subdirectory does not exist yet; Write must create it.
+void TestWritesIntoLogsSubdirectory() {
+    const std::wstring root = TempDir();
+    const std::wstring logs = root + L"\\logs";
+
+    DiagnosticLog log(logs, L"nimblerun.log");
+    log.Write(L"hotkey", L"error 5");
+
+    const std::wstring content = ReadFile(logs + L"\\nimblerun.log");
+    Expect(content.find(L"hotkey\terror 5") != std::wstring::npos,
+           "record appended in the logs subdirectory");
+    Expect(!fs::exists(fs::path(root) / L"nimblerun.log"),
+           "no log file appears in the root directory");
+
+    RemoveTreeBestEffort(root);
+}
+
+// NR-054: rotation must stay inside logs\; the root directory holds no .log.
+void TestRotationStaysInsideLogsSubdirectory() {
+    const std::wstring root = TempDir();
+    const std::wstring logs = root + L"\\logs";
+    DiagnosticLog log(logs, L"nimblerun.log");
+
+    const std::wstring big_detail(64 * 1024, L'x');
+    std::uint64_t active_size = 0;
+    do {
+        log.Write(L"soak", big_detail);
+        active_size = fs::exists(fs::path(logs) / L"nimblerun.log")
+                          ? fs::file_size(fs::path(logs) / L"nimblerun.log")
+                          : 0;
+    } while (active_size < DiagnosticLog::kMaxFileBytes);
+    log.Write(L"soak", big_detail);  // one more write triggers rotation
+
+    Expect(fs::exists(fs::path(logs) / L"nimblerun.log"),
+           "fresh active log exists in logs");
+    Expect(fs::exists(fs::path(logs) / L"nimblerun.log.1"),
+           "rotated file stays in logs");
+
+    int root_log_files = 0;
+    for (const auto& entry : fs::directory_iterator(fs::path(root))) {
+        if (entry.path().filename().wstring().find(L".log") != std::wstring::npos) {
+            ++root_log_files;
+        }
+    }
+    Expect(root_log_files == 0, "no .log files in the root directory");
+
+    RemoveTreeBestEffort(root);
+}
+
+// NR-054: Write is called from the UI thread and the icon worker at the same
+// time. The whole check-size / rotate / open-append / write sequence is under a
+// mutex, so a rotation can never land between another thread's open and its
+// write. Two threads each write lines sized so the combined volume crosses one
+// rotation boundary but not a second (which would drop the older .1), then the
+// test verifies every line survived intact and exactly 2N lines exist.
+void TestConcurrentWritesNeverInterleave() {
+    const std::wstring root = TempDir();
+    const std::wstring logs = root + L"\\logs";
+    DiagnosticLog log(logs, L"nimblerun.log");
+
+    constexpr int kWritesPerThread = 2000;
+    // Line = "thread\t<writer>-<index><padding>\n". ~136 bytes each; 4000 lines
+    // land between 512 KiB (first rotation) and 1 MiB (second rotation would
+    // overwrite .1), so rotation is exercised without dropping any line.
+    constexpr int kLineWidth = 128;
+    std::vector<std::thread> writers;
+    for (int writer = 0; writer < 2; ++writer) {
+        writers.emplace_back([&log, writer] {
+            for (int i = 0; i < kWritesPerThread; ++i) {
+                const std::wstring base =
+                    std::to_wstring(writer) + L"-" + std::to_wstring(i);
+                const std::wstring detail =
+                    base + std::wstring(kLineWidth - base.size(), L'x');
+                log.Write(L"thread", detail);
+            }
+        });
+    }
+    for (auto& writer : writers) {
+        writer.join();
+    }
+    Expect(fs::exists(fs::path(logs) / L"nimblerun.log"), "active log exists");
+    Expect(fs::exists(fs::path(logs) / L"nimblerun.log.1"),
+           "rotation was exercised across the threads");
+
+    // Every line in both files must be complete: a single tab splits stage from
+    // detail, the line ends with '\n', and the detail matches the writer's own
+    // "<writer>-<index>x..." shape -- no interleaved or truncated record.
+    int total_lines = 0;
+    for (const wchar_t* file : {L"nimblerun.log", L"nimblerun.log.1"}) {
+        const std::wstring content = ReadFile(logs + L"\\" + file);
+        std::size_t pos = 0;
+        while (pos < content.size()) {
+            const std::size_t line_end = content.find(L'\n', pos);
+            Expect(line_end != std::wstring::npos,
+                   "every record ends with a newline");
+            const std::wstring line = content.substr(pos, line_end - pos);
+            const std::size_t tab = line.find(L'\t');
+            Expect(tab != std::wstring::npos,
+                   "every line is tab-separated (stage\\tdetail)");
+            Expect(line.substr(0, tab) == L"thread", "stage field intact");
+            const std::wstring detail = line.substr(tab + 1);
+            Expect(detail.size() >= 4 && (detail[0] == L'0' || detail[0] == L'1') &&
+                       detail[1] == L'-',
+                   "detail starts with the writer id");
+            Expect(detail.find_first_not_of(L"0123456789-x") == std::wstring::npos,
+                   "detail holds only writer/counter/padding");
+            ++total_lines;
+            pos = line_end + 1;
+        }
+    }
+    Expect(total_lines == 2 * kWritesPerThread,
+           "every written line survived rotation exactly once");
+
+    RemoveTreeBestEffort(root);
+}
+
 } // namespace
 
 int wmain() {
     TestAppendsAndSanitizes();
     TestRotationKeepsTwoFiles();
     TestFailedAppendDoesNotThrow();
+    TestWritesIntoLogsSubdirectory();
+    TestRotationStaysInsideLogsSubdirectory();
+    TestConcurrentWritesNeverInterleave();
     std::printf("NR-017 diagnostic log check PASSED\n");
     return 0;
 }

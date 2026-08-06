@@ -4,6 +4,7 @@
 
 #include <windows.h>
 
+#include <mutex>
 #include <string>
 #include <utility>
 
@@ -30,6 +31,25 @@ DiagnosticLog::DiagnosticLog(std::wstring directory, std::wstring name)
 }
 
 void DiagnosticLog::Write(std::wstring_view stage, std::wstring_view detail) {
+    // NR-054: the whole body is serialized. Write is called from the UI side
+    // and from the icon worker (IconStore::WriteLog), and the check-size /
+    // rotate / open-append / write sequence must not interleave -- a rotation
+    // between another writer's open and its write drops that line into the
+    // file that just got moved aside.
+    std::lock_guard<std::mutex> lock(write_mutex_);
+
+    // NR-054: EnsureDirectory creates only one level. `logs` sits one level
+    // under the per-user root, which nothing is guaranteed to have created
+    // before the icon worker's first write on a fresh install (the worker's
+    // IconStore::Open runs before any settings save); ensure the parent first.
+    std::wstring parent = directory_;
+    const std::size_t separator = parent.find_last_of(L"\\/");
+    if (separator != std::wstring::npos) {
+        parent.resize(separator);
+    }
+    if (!EnsureDirectory(parent)) {
+        return;
+    }
     if (!EnsureDirectory(directory_)) {
         return;
     }

@@ -37,6 +37,7 @@ enum class SettingsString {
     ExtensionsLabel,
     ClearUsageButton,
     ResetSettingsButton,
+    OpenLogFolderButton,
     OkButton,
     CancelButton,
     HotkeyRejectedNotice,
@@ -47,6 +48,7 @@ enum class SettingsString {
     ClearUsageDoneNotice,
     ResetDoneNotice,
     StartupFailedNotice,
+    OpenLogFolderFailedNotice,
 };
 
 std::wstring_view SettingsStringText(SettingsString key);

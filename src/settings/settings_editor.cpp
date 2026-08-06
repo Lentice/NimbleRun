@@ -159,6 +159,8 @@ std::wstring_view SettingsStringText(SettingsString key) {
         return L"Clear usage history";
     case SettingsString::ResetSettingsButton:
         return L"Reset settings";
+    case SettingsString::OpenLogFolderButton:
+        return L"Open log folder";
     case SettingsString::OkButton:
         return L"OK";
     case SettingsString::CancelButton:
@@ -179,6 +181,8 @@ std::wstring_view SettingsStringText(SettingsString key) {
         return L"Settings reset to defaults. Click OK to save.";
     case SettingsString::StartupFailedNotice:
         return L"Could not update the startup entry. The previous values were kept.";
+    case SettingsString::OpenLogFolderFailedNotice:
+        return L"Could not open the log folder.";
     }
     return L"";
 }

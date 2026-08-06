@@ -359,3 +359,119 @@ UI 與 worker 是否共用同一個 `DiagnosticLog` 實例（如何確認的）�
 併發測試的實際行數與是否觀察到輪替、建置與 CTest 結果、6 條手動驗收結果、
 舊記錄檔的處置說明、`settings_dialog.cpp` 其他未測缺口的紀錄、
 sanity greps、偏差、未完成事項。）
+
+### 修改的位置
+
+- `src/app_host/main.cpp`：`DiagnosticLog` 建構處改為
+  `g_log_directory = nimblerun::JoinPath(nimblerun::DefaultSettingsDir(), L"logs")`
+  （重用既有 `DefaultSettingsDir()`，不自己拼路徑）；新增全域
+  `std::wstring g_log_directory` 並傳入 `ShowSettingsDialog` 作「Open log folder」
+  用；新增 `#include "storage/atomic_text_file.h"`。
+- `src/diagnostics/diagnostic_log.h`：`#include <mutex>`、private 成員
+  `mutable std::mutex write_mutex_`（附 NR-054 註解）、複製建構／賦值 `= delete`。
+- `src/diagnostics/diagnostic_log.cpp`：`Write` 整個本體（含 `EnsureDirectory`）包進
+  `std::lock_guard`；`EnsureDirectory` 前多呼叫一次 `EnsureDirectory` 傳父目錄。
+- `src/settings/settings_editor.h/.cpp`：`SettingsString` 加
+  `OpenLogFolderButton → L"Open log folder"` 與 `OpenLogFolderFailedNotice`。
+- `src/resources/resource.h`：`IDC_OPEN_LOG_FOLDER 2027`。
+- `src/resources/NimbleRun.rc`：新增第三顆動作按鈕；底排按鈕改兩列（見「偏差」）。
+- `src/app_host/settings_dialog.h/.cpp`：`ShowSettingsDialog` 加 `log_directory` 參數；
+  `InitLabels` 補該鍵；`WM_COMMAND` 加 `IDC_OPEN_LOG_FOLDER` 分支（先
+  `EnsureDirectory(log_directory)`，再 `ShellExecuteExW(lpVerb=open, lpFile=目錄)`，
+  失敗走既有 notice 機制）。
+- `tests/unit/diagnostic_log_test.cpp`：子目錄、輪替在子目錄內、併發三組新測試。
+- `tests/unit/settings_editor_test.cpp`：pin 住 `OpenLogFolderButton` 文字。
+- `docs/design-spec.md`：§FR-014 補「記錄寫入須可由多執行緒安全呼叫；輪替與寫入
+  不得交錯，以免失敗當下的記錄遺失。」§10.1 已寫 `logs\nimblerun.log`（審計正確），
+  不需改，且無「舊版本檔案位置」段落故未補舊檔說明。
+
+### `logs\` 的父目錄是否需要額外 `EnsureDirectory`
+
+**需要。** `EnsureDirectory` 只建一層；`logs\` 在根目錄下一層，所以父目錄（根目錄）
+必須已存在。追蹤結果：`SettingsStore`／`UsageStore`／`PinStore` 建構與 `Load` 都只讀
+不建目錄，而新安裝下第一次 `Write` 來自 icon worker 的 `IconStore::Open`
+（`WriteLog(L"icon-store", L"created")`，`main.cpp` 的 worker `Start()` 立即觸發），
+早於任何 `Save`。因此根目錄**不保證**已存在——在 `Write` 內
+`EnsureDirectory(directory_)` 之前多呼叫一次 `EnsureDirectory` 傳父目錄
+（`directory_` 去掉最後一個 `\\`／`/` 後段），兩層依序確保。
+
+### UI 與 worker 是否共用同一個 `DiagnosticLog` 實例
+
+**是，共用同一個實例。** `Select-String -Pattern 'DiagnosticLog'` 全 repo 只有
+`main.cpp:226` 一個指標 `g_diag` 與 `main.cpp` 一處建構
+`nimblerun::DiagnosticLog diag(g_log_directory, L"nimblerun.log")`；該區域物件
+`diag` 在 `IconStore icon_store(..., &diag)` 注入同一個指標
+（`icon_store.cpp:37` 的 `IconStore::WriteLog` 即經此呼叫 `log_->Write`），而 UI
+執行緒的 `g_diag->Write` 也是同一物件的位址。只有一個實例、寫同一個檔，故 §2 的
+程序內 `std::mutex` 即完整答案，無需停手。
+
+### 併發測試實際行數與是否觀察到輪替
+
+`TestConcurrentWritesNeverInterleave`：兩條 `std::thread` 各寫 2000 行，每行約 136
+位元組（detail 固定 128 字元），總量約 544 KB——大於 512 KiB（必觸發一次輪替）、
+小於 1 MiB（不會二次輪替覆蓋 `.1`）。**實際觀察到輪替**（斷言 `.log.1` 存在），
+最終 `.log`（後段約 144 行）＋`.log.1`（前段約 3856 行）總行數**恰為 4000**，
+每行 `\t` 分欄、`\n` 結尾、stage 完整、detail 符合 `writer-index-xxx…` 形狀，
+無交錯或截斷。測試耗時約 5–6 秒（包含輪替寫入）。
+
+### 建置與 CTest 結果
+
+- Configure：`cmake -S . -B build -G Ninja -DCMAKE_TOOLCHAIN_FILE=cmake/llvm-mingw.cmake
+  -DCMAKE_BUILD_TYPE=Release` — 成功。
+- Build：`cmake --build build` — 成功，無新增警告。
+- `ctest --test-dir build --output-on-failure` — **23/23 全綠**（66 s）。
+- `ctest --test-dir build -R "diagnostic_log|settings_editor"` — 註：設定 editor 的
+  註冊名是 `nimblerun_settings_ui_test`，`-R settings_editor` 不會命中；實際跑
+  `ctest -R "nimblerun_diagnostic_log_test|nimblerun_settings_ui_test"` 兩組都過。
+
+### 6 條手動驗收
+
+屬人工操作（執行應用程式、開設定頁、操作檔案總管），Agent 不執行，未逐條打勾。
+對應的程式碼路徑已由自動化測試覆蓋的部分：§1（`logs\` 位置）由
+`TestWritesIntoLogsSubdirectory`／`TestRotationStaysInsideLogsSubdirectory` 覆蓋，
+§2（併發安全）由 `TestConcurrentWritesNeverInterleave` 覆蓋，§3 的字串由
+`settings_editor_test` 的 pin 覆蓋；「乾淨狀態按鈕可開」的
+`EnsureDirectory` 前置與「按鈕不標 dirty」的 editor 無 setter 由程式碼審視確認。
+
+### 舊記錄檔的處置說明
+
+舊 `%LOCALAPPDATA%\NimbleRun\nimblerun.log`／`nimblerun.log.1` **留在原地**，
+不搬、不刪、不讀（Decisions §1）。新位置從下次寫入開始生效；兩者並存，
+舊檔時間戳不再更新。
+
+### `settings_dialog.cpp` 其他未測缺口
+
+按 item Non-goals 明列：`ParseCountText`（:127）與 startup rollback 未測，
+記入交接區另案處理，本 item 未補。
+
+### sanity greps
+
+全部符合預期：
+
+- `logs` in `main.cpp`：建構處註解＋`JoinPath(..., L"logs")` 共用變數（`g_log_directory`）兩處。
+- `lock_guard|write_mutex_` in `diagnostic_log.cpp`：`Write` 本體開頭一處，未在函式中段上鎖。
+- `delete` in `diagnostic_log.h`：複製建構與複製賦值 `= delete` 明寫。
+- `ShellExecute|CreateProcess|system\(` in `settings_dialog.cpp`：僅 `ShellExecuteExW`，無 `CreateProcess`／`system`。
+- `->Write\(L"|WriteLog\(L"` in `src/**/*.cpp`：全部短字串常數，無變數插值的路徑或名稱。
+- `SetTimer|Sleep|thread` in `diagnostic_log.cpp`：零命中（註解已避免這些字）。
+
+### 偏差
+
+1. **按鈕列版面**：320 寬的對話框底排原本 4 顆按鈕（Clear 100＋Reset 80＋Cancel 50＋OK
+   50）已恰好填滿，加第三顆動作鍵放不下。改為動作鍵一列（Clear／Reset／Open log
+   folder，各 100／80／112，佔 8–312）＋Cancel／OK 第二列（y=348），狀態列移到
+   y=366，對話框高度 366→384。這是「一列塞不下」的版面必然結果，未更動其他控制項。
+2. **`ShowSettingsDialog` 加參數**：`kSettingsMessage` 在 `WindowProc`，而
+   `log_directory` 原是 `wWinMain` 區域變數，故提為全域 `g_log_directory`
+   （沿用既有 `g_*` 全域模式）並以參數傳入 dialog。
+3. **新增 notice 鍵**：既有 notice 皆不合用（`SaveFailedNotice` 說的是「Could not
+   save settings」），依 item 授權新增 `OpenLogFolderFailedNotice`。
+4. **併發測試的 detail 長度**：item 的「各 2000 行短訊息」字面不滿足「足以跨越至少
+   一次輪替」（短行總量 <512 KiB）；改為 detail 128 字元（單行仍短、一欄），
+   使總量 544 KB 精準觸發一次輪替、不丟行，總行數可斷言恰為 2N。
+5. 註冊名是 `nimblerun_settings_ui_test`，故 `-R "diagnostic_log|settings_editor"`
+   只命中 diagnostic_log；不屬本 item 範圍（NR-055 清理測試 CMake 樣板）。
+
+### 未完成事項
+
+6 條手動驗收屬人工操作；`ParseCountText`／startup rollback 測試缺口另案處理。

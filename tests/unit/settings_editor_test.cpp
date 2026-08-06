@@ -392,6 +392,12 @@ void TestStringKeysCentralized() {
     Expect(SettingsStringText(SettingsString::ThemeDark) == L"Dark", "theme key");
     Expect(SettingsStringText(SettingsString::ResetSettingsButton) == L"Reset settings",
            "reset button key");
+    // NR-054: "Open log folder" is a dialog-layer action (design-spec §FR-014);
+    // it lives in the centralized string table like its sibling buttons.
+    Expect(SettingsStringText(SettingsString::OpenLogFolderButton) == L"Open log folder",
+           "open log folder button key");
+    Expect(!SettingsStringText(SettingsString::OpenLogFolderButton).empty(),
+           "open log folder key is non-empty English text");
     Expect(!SettingsStringText(SettingsString::HotkeyRejectedNotice).empty(),
            "hotkey notice key is non-empty");
     Expect(SettingsStringText(SettingsString::HotkeyRejectedNotice) !=

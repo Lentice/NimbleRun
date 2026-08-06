@@ -5,9 +5,11 @@
 #include "settings/settings_editor.h"
 #include "settings/settings_store.h"
 #include "settings/startup_option.h"
+#include "storage/atomic_text_file.h"
 #include "usage/usage_store.h"
 
 #include <windows.h>
+#include <shellapi.h>
 #include <shlobj.h>
 
 #include <algorithm>
@@ -31,6 +33,9 @@ struct DialogContext {
     // HKCU Run entry against this, so Reset (working copy flips to defaults)
     // still removes a previously enabled entry.
     bool initial_auto_start = false;
+    // NR-054: the per-user log directory (design-spec §10.1), opened by the
+    // "Open log folder" button.
+    std::wstring log_directory;
 };
 
 DialogContext g_dialog;
@@ -67,6 +72,7 @@ void InitLabels(HWND dialog) {
     SetControlText(dialog, IDC_EXTENSIONS_LABEL, SettingsString::ExtensionsLabel);
     SetControlText(dialog, IDC_CLEAR_USAGE, SettingsString::ClearUsageButton);
     SetControlText(dialog, IDC_RESET_SETTINGS, SettingsString::ResetSettingsButton);
+    SetControlText(dialog, IDC_OPEN_LOG_FOLDER, SettingsString::OpenLogFolderButton);
     SetControlText(dialog, IDOK, SettingsString::OkButton);
     SetControlText(dialog, IDCANCEL, SettingsString::CancelButton);
 }
@@ -321,6 +327,27 @@ INT_PTR CALLBACK SettingsDialogProc(HWND dialog, UINT message, WPARAM w_param, L
             SetStatus(dialog, SettingsString::ResetDoneNotice);
             return TRUE;
 
+        case IDC_OPEN_LOG_FOLDER: {
+            // NR-054: design-spec §FR-014. Hand the directory to the Shell; never
+            // build a command line (AGENTS.md). Create the directory first so the
+            // user does not get an error dialog on a clean install that has not
+            // logged anything yet. The button changes no settings: it never marks
+            // the editor dirty and takes no part in Apply/rollback.
+            if (!nimblerun::EnsureDirectory(g_dialog.log_directory)) {
+                SetStatus(dialog, SettingsString::OpenLogFolderFailedNotice);
+                return TRUE;
+            }
+            SHELLEXECUTEINFOW sei{};
+            sei.cbSize = sizeof(sei);
+            sei.lpVerb = L"open";
+            sei.lpFile = g_dialog.log_directory.c_str();
+            sei.nShow = SW_SHOWNORMAL;
+            if (!ShellExecuteExW(&sei)) {
+                SetStatus(dialog, SettingsString::OpenLogFolderFailedNotice);
+            }
+            return TRUE;
+        }
+
         default:
             break;
         }
@@ -335,7 +362,7 @@ INT_PTR CALLBACK SettingsDialogProc(HWND dialog, UINT message, WPARAM w_param, L
 } // namespace
 
 bool ShowSettingsDialog(HWND owner, SettingsStore& store, UsageStore& usage,
-                        GlobalHotkey& hotkey) {
+                        GlobalHotkey& hotkey, const std::wstring& log_directory) {
     Settings current = DefaultSettings();
     store.Load(current);
     SettingsEditor editor(current);
@@ -346,6 +373,7 @@ bool ShowSettingsDialog(HWND owner, SettingsStore& store, UsageStore& usage,
     context.usage = &usage;
     context.hotkey = &hotkey;
     context.initial_auto_start = current.auto_start;
+    context.log_directory = log_directory;
     g_dialog = context;
 
     const INT_PTR result = DialogBoxParamW(
