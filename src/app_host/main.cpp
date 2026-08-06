@@ -1553,10 +1553,24 @@ void ShowPanel(HWND window) {
         g_settings_store->Load(current);
         g_theme = current.theme;
         g_hide_after_launch = current.hide_after_launch;
+        // recent_count only drives the recent rows and the derived icon-cache
+        // cap below, so it can follow the same "apply on next show" rule. The
+        // catalog-source fields are deliberately not copied here: they are read
+        // by rebuild workers and only change through a rebuild.
+        g_settings.recent_count = current.recent_count;
+    }
+    // Clear the retained query first: the empty-query row build is a short pin
+    // and recent walk, so the model refreshes below cost nothing, whereas with a
+    // stale query each of them would re-run a full SearchApps on this warm-show
+    // path (design-spec §11 p95 budget).
+    if (g_model) {
+        g_model->Reset();
     }
     // NR-018: reload pins on every open so restarts and external edits to
-    // favorites.txt are reflected.
-    RefreshPins();
+    // favorites.txt are reflected. Going through RefreshPanelSnapshot also
+    // rebuilds the recent list, so a launch from this session's last open shows
+    // up in Recent immediately instead of waiting for the next catalog rebuild.
+    RefreshPanelSnapshot();
     // NR-031: derive the LRU cap from the live pin count + recent_count setting
     // + one grid page (design-spec §FR-009), so a search result never evicts
     // the prewarmed pins and forces a refetch on the next panel show.
@@ -1564,9 +1578,6 @@ void ShowPanel(HWND window) {
         g_icon_cache->SetMaxItems(nimblerun::IconCacheCapacityFor(
             g_pins ? g_pins->OrderedPins().size() : 0,
             g_settings.recent_count));
-    }
-    if (g_model) {
-        g_model->Reset();
     }
     // NR-029: the grid hover index is a window-layer visual state; reset it for
     // this show and never leave a stale fill pointing at a previous session.
