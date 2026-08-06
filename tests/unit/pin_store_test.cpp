@@ -287,6 +287,53 @@ void TestPanelModelHidesAbsentPin() {
     Expect(model.Rows().empty(), "absent app's pin not shown in the model");
 }
 
+// NR-046: ReorderPresent reorders only the pins named in the new visual order;
+// a pin not named there (an app absent from the current catalog) keeps the
+// absolute slot it already occupies, so it never moves in favorites.txt
+// (acceptance step 9). The new order survives a Save/Load round-trip.
+//
+// On a starting store [a, b, c, d], ReorderPresent({d, a, c}) places d onto a's
+// old slot 0, a onto c's old slot 2 and c onto d's old slot 3; b was not named
+// and keeps its original index 1 -> [d, b, a, c]. The grid, which skips the
+// absent b, then shows [d, a, c] -- the dragged visual order.
+void TestReorderKeepsAbsentPinsInPlace() {
+    const std::wstring dir = MakeTempDir("reorder");
+    PinStore store(dir);
+    store.Load();
+    store.Pin(L"a", 100);
+    store.Pin(L"b", 200);
+    store.Pin(L"c", 300);
+    store.Pin(L"d", 400);
+    Expect(store.ReorderPresent({L"d", L"a", L"c"}), "reorder reports a change");
+    Expect(SameIds(store.OrderedPins(), {L"d", L"b", L"a", L"c"}),
+           "unlisted pin keeps its absolute slot");
+    Expect(store.Save(), "save reordered pins");
+
+    PinStore reloaded(dir);
+    Expect(reloaded.Load() == PinLoadResult::Loaded, "reload reordered pins");
+    Expect(SameIds(reloaded.OrderedPins(), {L"d", L"b", L"a", L"c"}),
+           "reordered order survives the round-trip");
+    fs::remove_all(dir);
+
+    // A fresh store already in order a, b, c, d: the identity reorder is a
+    // no-op and an unknown id changes nothing.
+    const std::wstring dir2 = MakeTempDir("reorder_idle");
+    PinStore fresh(dir2);
+    fresh.Load();
+    fresh.Pin(L"a", 100);
+    fresh.Pin(L"b", 200);
+    fresh.Pin(L"c", 300);
+    fresh.Pin(L"d", 400);
+    Expect(!fresh.ReorderPresent({L"a", L"b", L"c", L"d"}),
+           "identity reorder on an already-ordered store returns false");
+    Expect(SameIds(fresh.OrderedPins(), {L"a", L"b", L"c", L"d"}),
+           "identity reorder is a no-op");
+    Expect(!fresh.ReorderPresent({L"z"}), "unknown id changes nothing");
+    Expect(SameIds(fresh.OrderedPins(), {L"a", L"b", L"c", L"d"}),
+           "unknown id leaves the order intact");
+    fs::remove_all(dir2);
+}
+
 } // namespace
 
 int wmain() {
@@ -303,6 +350,7 @@ int wmain() {
     TestAtomicWriteFailure();
     TestPanelModelPinnedFirst();
     TestPanelModelHidesAbsentPin();
+    TestReorderKeepsAbsentPinsInPlace();
     std::printf("NR-018 pin store check PASSED\n");
     return 0;
 }

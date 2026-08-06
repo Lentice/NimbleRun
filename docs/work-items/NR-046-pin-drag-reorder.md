@@ -1,6 +1,6 @@
 # NR-046 — Drag pinned cells to reorder them in the grid
 
-Phase 3 · Status `ready` · Depends on: —
+Phase 3 · Status `done` · Depends on: —
 
 - Source: `docs/design-spec.md` §4.2（空白查詢狀態）／§4.8（滑鼠操作）／§4.9（視窗外觀）／§FR-011（釘選與排序）／§10.2（持久化）
 
@@ -488,3 +488,24 @@ Select-String -Path src/app_host/main.cpp -Pattern 'RecentStartIndex'
 Select-String -Path src/app_host/main.cpp -Pattern 'SetTimer'
 # expect: no new match
 ```
+
+## 交接區
+
+（實作者填寫：修改的位置、建置與 CTest 結果、九條手動驗收是否為人工驗證、未完成事項。）
+
+- **修改**：
+  - `src/pins/pin_store.{h,cpp}`：新增 `PinStore::ReorderPresent(order)`——唯一的重排入口，接受新視覺順序的 stable ID 清單。演算法照 §1：`slots` 收集「在 order 內」的 pin 的絕對索引（升冪），`wanted` 收集 order 中實際已 pin 的 ID（去重，等價於交集，避免重複 ID 造成 resize），再將 `wanted[k]` 的 record 搬到 `pins_[slots[k]]`；未列出的 pin 永不搬動，故在 `favorites.txt` 保持原行號（acceptance 9）。回傳值以 `OrderedPins() != 搬移前` 決定（比較 id 順序，`PinRecord` 無 `operator==`）；`last_seen_utc` 隨 record 一起搬移。
+  - `tests/unit/pin_store_test.cpp`：新增 `TestReorderKeepsAbsentPinsInPlace`，沿用既有 `Expect`/`exit(1)`/每 case 一個 temp dir 風格，涵蓋：`{d,a,c}` 重排後未列出的 `b` 留在絕對索引 1（結果 `[d,b,a,c]`，grid 對應顯示 `[d,a,c]`）、`Save()`→fresh `Load()` round-trip、已排好序的 store 上 identity reorder 回 `false`、未知 ID 回 `false` 且不動。已在 `wmain()` 註冊。
+  - `src/app_host/main.cpp`（只動此一檔）：
+    - 拖曳狀態五個 global（`g_drag_row`／`g_drag_gap`／`g_dragging`／`g_drag_origin`／`g_drag_cursor`）放 `g_grid_hover_index` 旁，同一「window-layer 視覺狀態、非 model 狀態」規則。
+    - `g_dash_style`（`ID2D1StrokeStyle*`）宣告於 `g_render_target` 旁，在 `CreateDeviceResources` 中由 `g_d2d_factory` 建立（`StrokeStyleProperties(...D2D1_DASH_STYLE_DASH...)`，device-independent、隨 `DiscardDeviceResources` 存活），在 wWinMain 的 `Release(g_d2d_factory)` 前釋放；不在 render-target create/release pair。
+    - `CellAtPoint` 旁新增檔案範圍 `PinnedRowCount()`（以 `RecentStartIndex()` 為唯一邊界）與 `DragPreviewOrder()`（填 `0..pinned-1`、`erase(g_drag_row)`、`insert(-1, g_drag_gap)`，回 `{}` 除非 `g_dragging && row>=0 && gap>=0`；另加一行越界防護以防拖曳途中 catalog swap 縮小 pin 區）。
+    - `DrawDecodedIcon` 新增預設 `float opacity = 1.0f`，代入既有 `DrawBitmap`；既有呼叫點逐位元組不變。
+    - `Render` 格狀迴圈：迴圈前取 `DragPreviewOrder()`＋`PinnedRowCount()`，每個 slot 以 `row = (preview 非空且 i<pinned) ? preview[i] : i` 決定要畫哪一列，cell rect 仍由 `slot` 算出（幾何不變）；`row==-1` 即落點——只畫 `g_selected_border_brush`＋`kSearchCornerRadiusDip` 圓角的虛線框後 `continue`；所有 `rows[i]` 讀取、selected/hovered 比較改 `rows[row]`／比較 `row`（NR-041 pin 標記、NR-045 數位框一併以 `row`/`slot` 維持）；`hovered` 加 `!g_dragging &&`（拖曳中凍結 hover）；迴圈後（仍在格狀分支內）畫 ghost——以 `dpi_x/kDpi96` 把 `g_drag_cursor` client px 轉 DIP、`kIconSizeDip` 方形置中於游標，cache 命中 `DrawDecodedIcon(..., 0.6f)`、miss `FillRectangle(g_dim_brush)`，不呼叫 `RequestVisibleIcon`，並以 `g_drag_row < rows.size()` 防越界。
+    - `WndProc`：`WM_MOUSEMOVE` 當 `g_drag_row >= 0` 以拖曳臂完全取代 hover 臂（未達 `SM_CXDRAG`/`SM_CYDRAG` 門檻則 promote，promote 時清 `g_grid_hover_index`；拖曳中更新 `g_drag_cursor`、以 `CellAtPoint` 算 `g_drag_gap = (cell>=0 && cell<PinnedRowCount()) ? cell : -1`、`InvalidateRect` 全窗並附 `ponytail:` 註解）；`WM_LBUTTONDOWN` 三臂：`cell<0` 維持 NR-039 原樣 → 格狀且 `cell<PinnedRowCount()` 時 `SetCapture`＋記狀態且**不啟動** → 其餘（recent 格／清單）維持按壓即啟動；新增 `WM_LBUTTONUP`（先拷貝 `row`/`gap`/`dragging`/`preview` **再** `ReleaseCapture()`——`ReleaseCapture` 會同步觸發 `WM_CAPTURECHANGED` 清掉 globals，故拷貝必須在前，這是對 §6 文字順序的必要修正；未拖曳=click→`SelectRow`+`ActivateRow` 延遲啟動；`dragging && gap>=0 && gap!=row`→以 `preview` 換掉 `-1` 為 `g_drag_row` 組 `order`（`g_model->Rows()[entry==-1?row:entry].stable_id`）→`ReorderPresent`+`Save` 成功才 `SetPins`，失敗不動 view，不重算 icon cache cap（pin 數量不變）；其餘=取消不寫）與 `WM_CAPTURECHANGED`（清全部拖曳狀態＋invalidate，唯一逃生門）。`ShowPanel` 的 hover 重設旁一併重設拖曳狀態。
+  - `docs/design-spec.md`：§4.8「單擊清單列或格子立即啟動。」後新增兩條（拖曳重排＋虛線落點/半透明 ghost/即時讓位/寫入 `favorites.txt`/區外放開取消；釘選格於放開左鍵啟動、常用格與清單列按壓即啟動）；§FR-011 把「釘選項目可用拖曳調整順序；MVP 若拖曳延誤開發，可先提供「向前／向後移動」。」換成「可在格狀狀態以拖曳調整順序（§4.8）；不提供「向前／向後移動」的鍵盤替代。」＋「拖曳只在釘選區內重排，不能藉拖曳釘選或取消釘選。」；未動其他條款。
+- **建置與 CTest**：`cmake -S . -B build -G Ninja -D"CMAKE_TOOLCHAIN_FILE=cmake/llvm-mingw.cmake" -DCMAKE_BUILD_TYPE=Release` configure 成功；`cmake --build build` 成功（`nimblerun_pins`、`nimblerun_pinning_test`、`NimbleRun.exe` 重編），**無新增警告**（LLVM-MinGW `-Wall -Wextra -Wpedantic` 全清）；`ctest --test-dir build --output-on-failure` **23/23 全綠**；`ctest --test-dir build -R pinning --output-on-failure` **1/1 通過**（新增 reorder case 入既有 pinning test）。
+- **Sanity greps**：`git diff src/ui/panel_layout.h tests/CMakeLists.txt CMakeLists.txt` 為空（無新常數、無新 target）；`CellAtPoint` 5 處＝定義＋`WM_MOUSEMOVE` 兩處（新拖曳臂＋既有 hover 臂）＋`WM_LBUTTONDOWN`＋`WM_RBUTTONDOWN`，**未寫第二個 hit-test**（item 的 expect 敘述把 WM_MOUSEMOVE 算一次，實際上它現在有兩次呼叫，定義＋5 呼叫＝預期且正確）；`RecentStartIndex` 3 處＝`PinnedRowCount()` 的註解與呼叫＋NR-040 context-menu 檢查，無第二條 pin/recent 邊界；`SetTimer` 仍只有 NR-011 既有 500ms debounce 一處，**無新增 timer**。
+- **與 item 文件的偏差（1 處，文件內部矛盾之必要修正）**：§2 測試 bullet 寫「`ReorderPresent({d, a, c})` → `OrderedPins()` 是 `d, a, b, c`：b 沒被點名所以留在 index 2」。但 b 在起始 `[a, b, c, d]` 的絕對索引是 1，該結果實際把 b 從 1 移到 2，與 §1 演算法（「未列出的 pin 保留其絕對索引」）、header 註解、acceptance 9（「absent pin 仍在 `favorites.txt` 原行號」）以及本 item 的綁定約束「unlisted pins keep absolute slots」全部矛盾。實作照 §1 演算法執行（結果 `[d, b, a, c]`，b 停在絕對索引 1，grid 跳過 b 後顯示 `[d, a, c]`），測試亦改為斷言此結果並在註解說明；§1 演算法本身一字未改。其餘零偏差。
+- **手動驗收（11 條）**：全部為人工視覺／操作驗證（Win32 mouse-message 無 HWND-free seam），依 `AGENTS.md` 交付規則與 `docs/work-items.md`「Agent 交付規則」由人類在 Release 版上逐條執行：1) 拖第一格到第三格位置見虛線落點＋半透明 ghost＋讓位且 recent 區不動、2) 放開後順序持久並跨重啟、3) `favorites.txt` 行序與可見順序一致且 `schema=1` 首行完整、無 `.tmp` 殘留、4) 在 recent 格上或格下空白處放開＝取消且不觸發 window drag、5) 不移動地按一下釘選格即啟動、按一下 recent 格按壓即啟動、6) 拖曳中 `Alt+Tab` 回來無殘留、7) 清單狀態拖曳列無作用且按壓即啟動、8) 空白 chrome 拖曳仍可移動視窗（NR-039）、9) 缺席 pin（30 天內）重排後仍在原行號、10) 200% DPI 虛線與 ghost 縮放正確、11) 連續拖曳數秒無閃爍/延遲。
+- **未完成**：無。11 條手動驗收留待人類於 Release 版逐條打勾。

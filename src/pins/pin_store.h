@@ -71,6 +71,13 @@ public:
     // Stable IDs in pin order (creation/stable order).
     std::vector<std::wstring> OrderedPins() const;
 
+    // NR-046: reorders the pins named in `order` so their relative order matches
+    // `order` exactly, while every pin NOT named there (a pin whose app is absent
+    // from the current catalog, design-spec §FR-011) keeps the absolute index it
+    // already has. IDs in `order` that are not pinned are ignored. Returns true when
+    // the stored order actually changed; call Save() to persist.
+    bool ReorderPresent(const std::vector<std::wstring>& order);
+
     // Refreshes last_seen for pins present in `catalog` and drops pins absent
     // for more than kPinRetentionSeconds. A pin for an absent app is kept while
     // its age is within the retention window, and an empty catalog is never a
