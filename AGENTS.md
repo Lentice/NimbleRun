@@ -28,6 +28,16 @@ The design specification in `docs/design-spec.md` is the product source of truth
 - UI strings are English and should be centralized when more than one screen needs them.
 - New non-trivial logic needs one focused runnable test or self-check.
 
+## Work item authoring rules
+
+Work items live in `docs/work-items/` and are tracked in `docs/work-items.md`.
+
+- Split work agile-style: one item delivers one outcome, sized half a day to two days. If it grows past that, split it before writing it.
+- Write each item to be self-contained, so a low-capability agent can pick it up and finish it without prior context or further questions.
+- Quote the binding constraints into the item itself: the relevant `docs/design-spec.md` clauses, the `docs/development.md` rules, and the applicable rules from this file. Do not rely on the agent finding them.
+- List the exact files to read and trace, the concrete scope (signatures, constants, call sites), the non-goals, the acceptance criteria, and the runnable Agent checks.
+- When an item overrides an earlier decision, state the override inside the new item. Never edit a completed item's document.
+
 ## Current baseline
 
 The repository currently contains the Phase 0 foundation:
