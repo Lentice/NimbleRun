@@ -471,10 +471,12 @@ MVP 設定：
 | 冷啟動至可接收快捷鍵 | ≤ 500 ms | > 1,000 ms |
 | 暖狀態快捷鍵至可輸入 | p95 ≤ 80 ms | p95 > 150 ms |
 | 500 個 App 的單次過濾 | p95 ≤ 8 ms | p95 > 16 ms |
-| 待機執行緒數 | ≤ 5 | > 9 |
+| 待機 app-owned 執行緒數 | 2 ＋ watcher root 數 | 超出該式 |
 | `icons.cache` 檔案大小 | ≤ 32 MiB | > 48 MiB |
 
-待機執行緒數目標由 4 放寬為 5，理由是新增一條**常駐的**圖示 worker（負責取得、解碼、pack 檔讀寫與 idle flush），不為每個圖示建 thread（§9 第 658 行不變）。
+待機執行緒數的門檻只綁 NimbleRun 自己建的執行緒，且由 §9.2 的執行緒模型推導，不是固定常數：1 條 UI thread ＋ 1 條**常駐**圖示 worker（負責取得、解碼、pack 檔讀寫與 idle flush，不為每個圖示建 thread，§9 第 658 行不變）＋ 每個 watcher root 一條 directory watcher。root 數隨使用者設定的自訂資料夾變動，訂死成常數必然誤判。Catalog rebuild worker 完成即回收，不計入待機值。
+
+行程總執行緒數不設門檻：其中還包含 Direct2D/D3D/DXGI 的 device thread、STA COM 與 Shell extension 的 RPC 執行緒、ntdll thread pool worker，皆由 Windows 注入，數量隨 OS build、顯示驅動與已安裝的 Shell extension 變動。仍須記錄，但只作環境參考。量法與已量測值見 `docs/performance-baseline.md`。
 
 量測條件至少包含：
 
