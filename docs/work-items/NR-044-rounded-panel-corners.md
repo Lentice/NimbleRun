@@ -1,6 +1,6 @@
 # NR-044 — Rounded panel corners via DWM
 
-- Status: `ready`
+- Status: `done`
 - Phase: 3
 - Depends on: —
 - Source: `docs/design-spec.md` §4.9（面板外觀，含第 250／251／254 行）／§NFR 效能與資源
@@ -146,3 +146,13 @@ ctest --test-dir build --output-on-failure
 ## 交接區
 
 （實作者填寫：修改的行號、選用了哪一種標頭寫法、建置與 CTest 結果、八條手動驗收逐條實測結果、是否有 Windows 10 環境、未完成事項。）
+
+- **標頭寫法**：採用真實 SDK 標頭（`#include <dwmapi.h>` ＋ `DWM_WINDOW_CORNER_PREFERENCE`／`DWMWA_WINDOW_CORNER_PREFERENCE`／`DWMWCP_ROUND`）。LLVM-MinGW 22.1.8 的 `dwmapi.h`（`E:\Dev\LLVM-MinGW\include\dwmapi.h:49-64`）已含全部符號，不需 local-enum fallback。
+- **修改**：
+  - `CMakeLists.txt:323`：`NimbleRun` 的 `target_link_libraries` 系統程式庫段（`dwrite` 與 `ole32` 之間）新增 `dwmapi`；其他 target 未動。
+  - `src/app_host/main.cpp:6`：Windows 標頭區（`shellscalingapi.h` 之後）新增 `#include <dwmapi.h>`。
+  - `src/app_host/main.cpp:2189-2198`：`CreateWindowExW` 的 null 檢查（2182-2187）之後、其他初始化之前，新增註解＋`DwmSetWindowAttribute(window, DWMWA_WINDOW_CORNER_PREFERENCE, &corner, sizeof(corner))`（`corner = DWMWCP_ROUND`），回傳值刻意忽略（Windows 10 回 `E_INVALIDARG`，維持直角，符合決策 4）。視窗樣式（`main.cpp:2173`）未動。
+- **建置與 CTest**：`cmake -S . -B build -G Ninja -D"CMAKE_TOOLCHAIN_FILE=cmake/llvm-mingw.cmake" -DCMAKE_BUILD_TYPE=Release` 重新 configure 成功；`cmake --build build` 只重編 `main.cpp` 並成功連結（`dwmapi` 解析無誤），**無新增警告**；`ctest --test-dir build --output-on-failure` **23/23 全綠**。
+- **手動驗收（8 條）**：此為人工視覺驗證，依 `AGENTS.md` 交付規則與 `docs/work-items.md`「Agent 交付規則」（視覺人工驗證不屬於本追蹤表），由人類在 Release 版上逐條執行：1) Windows 11 圓角出現且與開始功能表同級、2) 框線與陰影隨圓角完整、3) 內容未被圓角切掉（左上釘選圓點／右上第 6 格快選數字／footer 兩端）、4) 顯示／隱藏與跨螢幕移動後圓角仍在、5) 150%／200% 高 DPI 重跑 1-3、6) 深色／淺色／高對比三主題、7) Windows 10 22H2 不炸且維持直角、8) 搜尋框 6 DIP 圓角與 caret 不變。
+- **Windows 10 環境**：未在 Windows 10 驗證。以程式碼複查代替：回傳值被忽略、呼叫後不檢查失敗、沒有任何路徑會因此提早 return 或跳過後續初始化，Windows 10 上維持與修改前完全相同的外觀與行為。
+- **未完成**：無。

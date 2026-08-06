@@ -77,7 +77,7 @@
 | NR-041 | Visual marker for pinned items | 3 | `done` | — | [NR-041](work-items/NR-041-pinned-marker.md) |
 | NR-042 | Search caret erased by the panel repaint | 3 | `done` | — | [NR-042](work-items/NR-042-search-caret-clipped.md) |
 | NR-043 | Key-hint box labels: centered, border-colored, keycap font | 3 | `ready` | — | [NR-043](work-items/NR-043-key-box-label-polish.md) |
-| NR-044 | Rounded panel corners via DWM | 3 | `ready` | — | [NR-044](work-items/NR-044-rounded-panel-corners.md) |
+| NR-044 | Rounded panel corners via DWM | 3 | `done` | — | [NR-044](work-items/NR-044-rounded-panel-corners.md) |
 | NR-045 | Grid quick-select hints appear only while Alt is held | 3 | `ready` | — | [NR-045](work-items/NR-045-alt-gated-grid-hints.md) |
 | NR-046 | Drag pinned cells to reorder them in the grid | 3 | `ready` | NR-018, NR-029, NR-040 | [NR-046](work-items/NR-046-pin-drag-reorder.md) |
 
@@ -121,7 +121,7 @@ NR-030 ──┬── NR-031 ── NR-032 ──┐
 
 ## 計畫決策紀錄
 
-- 2026-08-04：`design-spec.md` 是唯一原始完整 Spec；本次新增 UserFolder 來源後，同步調整受影響的 item 與依賴。
+- 2026-08-06（NR-044 done）：面板改由 DWM 圓角。`CMakeLists.txt` 的 `NimbleRun` 連結清單加 `dwmapi`；`main.cpp` 在視窗建立後一次 `DwmSetWindowAttribute(DWMWA_WINDOW_CORNER_PREFERENCE = 33, DWMWCP_ROUND)`，由 DWM 合成階段連同 `WS_BORDER` 框線與系統陰影一起圓角，零每幀成本、非工作區框線不缺口；不使用 `SetWindowRgn`／layered window／mica（決策 2/3/§254）。工具鏈 LLVM-MinGW 22.1.8 的 `dwmapi.h` 已含實符號，採真實 SDK 標頭（不需 local-enum fallback）。Windows 10 不認 attribute 33：呼叫回 `E_INVALIDARG` 即忽略、面板維持直角，不做版本分支與替代方案（決策 4）。視窗樣式、`panel_layout`／`panel_palette`、`Render` 與 design-spec 皆未動；`git diff` 僅 `CMakeLists.txt` 一行＋`main.cpp` 一行 include＋一個 DWM 呼叫區塊。configure＋build 成功、連結無誤、無新增警告；`ctest` 全套件 23/23 通過。八條手動驗收（含 Windows 11 圓角目視與 Windows 10 不炸）為人工視覺驗證，不在 Agent 範圍；本機無 Windows 10 環境，交接區已註明「未在 Windows 10 驗證」並以程式碼複查代替。未完成：無。
 - 2026-08-04：MVP／第一個垂直切片先採列表，顯示 Icon、名稱與有效路徑；matrix 延後為 NR-016。
 - 2026-08-04：空白搜尋最多顯示 20 個最近執行 App，依最後執行時間排序，不以字母排序補位。
 - 2026-08-04：不做拖曳排序。

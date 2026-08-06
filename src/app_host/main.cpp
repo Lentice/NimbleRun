@@ -3,6 +3,7 @@
 #include <shellapi.h>
 #include <shlobj.h>
 #include <shellscalingapi.h>
+#include <dwmapi.h>
 
 #include "app_host/catalog_watcher.h"
 #include "app_host/hotkey.h"
@@ -2184,6 +2185,17 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         CloseHandle(mutex);
         return 1;
     }
+
+    // NR-044: let DWM round the panel's corners so it matches the Windows 11
+    // flyouts and the panel's own 6 DIP search box (design-spec §4.9). The
+    // attribute is composited by DWM -- no region, no layered window, no
+    // per-frame cost, and it rounds the WS_BORDER frame and the system shadow
+    // with it. Windows 10 does not know attribute 33: the call fails with
+    // E_INVALIDARG and the panel stays square there, which NR-044 accepts. No
+    // version probe and no fallback path, so the result is deliberately ignored.
+    const DWM_WINDOW_CORNER_PREFERENCE corner = DWMWCP_ROUND;
+    DwmSetWindowAttribute(window, DWMWA_WINDOW_CORNER_PREFERENCE, &corner,
+                          sizeof(corner));
 
     // NR-010/NR-011: load settings + usage, then serve the catalog from a valid
     // cache immediately while the full build runs in the background. The panel

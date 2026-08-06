@@ -320,6 +320,7 @@ target_link_libraries(NimbleRun
         nimblerun_hotkey
         d2d1
         dwrite
+        dwmapi
         ole32
         shell32
         shcore
