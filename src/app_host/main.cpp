@@ -535,6 +535,55 @@ void ShowErrorDialog(HWND window, const std::wstring& message) {
 // below, forward-declared for the NR-022 launch-failure refresh path.
 void StartRebuild(HWND window, std::vector<nimblerun::CatalogSource> sources);
 
+// NR-037: prewarms exactly one empty-state page (design-spec §4.3, 24 cells)
+// on the worker, so the next panel show's first frame already has real icons
+// instead of fallbacks (design-spec §FR-009). The one-page cap is the only
+// thing keeping this compatible with §FR-009 "Catalog 不預解碼所有圖示";
+// raising it predecodes more than the next shown page.
+void PrewarmEmptyStatePage(HWND window) {
+    if (!g_model || !g_icon_worker || !g_icon_cache || !g_refresh) {
+        return;
+    }
+    const std::vector<std::wstring> ids =
+        g_model->EmptyStatePrewarmIds(nimblerun::kIconCacheWorkingSetItems);
+    if (ids.empty()) {
+        return;
+    }
+    // Grid variant for the current monitor DPI: the next panel show always
+    // opens in the empty-query grid state (40 DIP cell -> physical px via
+    // IconVariantForPixels). The list-state variant is the same tier for
+    // most DPIs, so no second prewarm is needed.
+    const nimblerun::layout::LayoutPx layout =
+        nimblerun::layout::LayoutForDpi(GetDpiForWindow(window));
+    const int needed_px = static_cast<int>(std::lround(
+        nimblerun::layout::kIconSizeDip * layout.scale));
+    for (const std::wstring& id : ids) {
+        // Resolve through the current catalog snapshot; a pin for an app
+        // absent from the catalog is skipped (design-spec §FR-011).
+        const nimblerun::AppEntry* entry = nullptr;
+        for (const nimblerun::AppEntry& candidate : g_refresh->Snapshot()) {
+            if (candidate.stable_id == id) {
+                entry = &candidate;
+                break;
+            }
+        }
+        if (!entry) {
+            continue;
+        }
+        const nimblerun::IconKey key{entry->stable_id,
+                                     nimblerun::IconVariantForPixels(needed_px)};
+        const std::wstring encoded = key.Encode();
+        // Skip keys already cached, in flight, or failed this panel session so
+        // repeated hide/show cycles never re-post the same 24 keys.
+        if (g_icon_cache->Peek(encoded) != nullptr ||
+            g_pending_icon_keys.count(encoded) != 0 ||
+            g_requested_icon_keys.count(encoded) != 0) {
+            continue;
+        }
+        g_icon_worker->Post({*entry, key, /*visible=*/false});
+    }
+}
+
 // NR-036: the single hide path. Every way the panel disappears (Esc second
 // stage, WM_KILLFOCUS auto-hide, hide-after-launch, hotkey/tray toggle) funnels
 // through here so the freshly fetched icons are flushed exactly once per hide
@@ -547,6 +596,9 @@ void HidePanel(HWND window) {
         const std::vector<std::wstring> pins =
             g_pins ? g_pins->OrderedPins() : std::vector<std::wstring>{};
         g_icon_worker->PostFlush(pins, static_cast<std::uint64_t>(std::time(nullptr)));
+        // NR-037: flush first (NR-036 timing 1), then prewarm the page that is
+        // guaranteed to be shown next; the worker drains them in queue order.
+        PrewarmEmptyStatePage(window);
     }
 }
 

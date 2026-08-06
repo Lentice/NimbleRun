@@ -100,6 +100,12 @@ public:
     // (design-spec §4.7). Never changes model state.
     int RowForVisibleSlot(int slot) const;
 
+    // Stable IDs of the first page of the empty-query view, capped at
+    // max_items. Empty when the model currently has a non-empty query:
+    // prewarming is only meaningful for the state the next panel show will
+    // actually start in. Never changes model state.
+    std::vector<std::wstring> EmptyStatePrewarmIds(std::size_t max_items) const;
+
     // Selects a specific row (mouse click); no-op when out of range.
     void SelectRow(std::size_t index);
 

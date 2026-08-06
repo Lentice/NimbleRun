@@ -519,6 +519,99 @@ void TestGridRowForVisibleSlot() {
     }
 }
 
+// NR-037: the empty-query page prewarm is a pure const query over rows_.
+// It returns the stable IDs of the first page (pinned first, then recent)
+// capped at the caller's page-size bound, and never mutates model state.
+
+void TestEmptyStatePrewarmIdsPinsThenRecent() {
+    const std::vector<AppEntry> catalog = CatalogOf(8);
+    std::vector<AppEntry> recent;
+    for (int i = 3; i < 8; ++i) {
+        recent.push_back(catalog[static_cast<std::size_t>(i)]);
+    }
+    PanelModel model(&catalog, std::move(recent));
+    model.SetPins({L"id0", L"id1", L"id2"});
+    const std::vector<std::wstring> ids = model.EmptyStatePrewarmIds(24);
+    Expect(ids.size() == 8, "3 pins + 5 recent prewarm 8 ids");
+    Expect(ids.size() == model.Rows().size(), "prewarm count matches the row count");
+    for (std::size_t i = 0; i < ids.size(); ++i) {
+        Expect(ids[i] == model.Rows()[i].stable_id,
+               "prewarm ids match rows_ order (pins first)");
+    }
+    Expect(ids[0] == L"id0" && ids[2] == L"id2", "pins lead in pin order");
+}
+
+void TestEmptyStatePrewarmIdsCapsAtOnePage() {
+    const std::vector<AppEntry> catalog = CatalogOf(40);
+    std::vector<std::wstring> pins;
+    for (int i = 0; i < 40; ++i) {
+        pins.push_back(L"id" + std::to_wstring(i));
+    }
+    PanelModel model(&catalog, {});
+    model.SetPins(pins);
+    const std::vector<std::wstring> ids = model.EmptyStatePrewarmIds(24);
+    Expect(ids.size() == 24, "40 pinned items cap at exactly one page of 24");
+    Expect(ids.front() == L"id0" && ids.back() == L"id23",
+           "the first page is the first 24 pins in pin order");
+}
+
+void TestEmptyStatePrewarmIdsZeroMax() {
+    const std::vector<AppEntry> catalog = CatalogOf(5);
+    PanelModel model(&catalog, catalog);
+    Expect(model.EmptyStatePrewarmIds(0).empty(), "max_items 0 returns empty");
+}
+
+void TestEmptyStatePrewarmIdsNonEmptyQuery() {
+    const std::vector<AppEntry> catalog = CatalogOf(10);
+    PanelModel model(&catalog, catalog);
+    model.SetQuery(L"App");
+    Expect(!model.Rows().empty(), "query has rows");
+    Expect(model.EmptyStatePrewarmIds(24).empty(), "non-empty query returns empty");
+}
+
+void TestEmptyStatePrewarmIdsEmptyCatalog() {
+    const std::vector<AppEntry> catalog;
+    PanelModel model(&catalog, {});
+    Expect(model.EmptyStatePrewarmIds(24).empty(), "empty catalog returns empty");
+}
+
+void TestEmptyStatePrewarmIdsIsConst() {
+    const std::vector<AppEntry> catalog = CatalogOf(10);
+    PanelModel model(&catalog, catalog);
+    model.SetPins({L"id0", L"id1"});
+    model.SetGridColumns(6);
+    const std::size_t selection_before = model.SelectionIndex();
+    const int first_before = model.FirstVisibleRow();
+    const std::size_t rows_before = model.Rows().size();
+    const PanelModel& const_model = model;
+    (void)const_model.EmptyStatePrewarmIds(24);
+    (void)const_model.EmptyStatePrewarmIds(5);
+    Expect(model.SelectionIndex() == selection_before,
+           "prewarm query leaves the selection untouched");
+    Expect(model.FirstVisibleRow() == first_before,
+           "prewarm query leaves the viewport untouched");
+    Expect(model.Rows().size() == rows_before, "prewarm query leaves rows_ untouched");
+}
+
+void TestEmptyStatePrewarmIdsAbsentPinSkipped() {
+    const std::vector<AppEntry> catalog = CatalogOf(12);
+    PanelModel model(&catalog, catalog);
+    model.SetPins({L"id0", L"ghost", L"id1"});
+    const std::vector<std::wstring> ids = model.EmptyStatePrewarmIds(24);
+    Expect(ids.size() == 12, "an absent pin is filtered out of the empty-query rows");
+    for (const std::wstring& id : ids) {
+        Expect(id != L"ghost", "an absent pin's id is never prewarmed");
+        bool found = false;
+        for (const AppEntry& entry : catalog) {
+            if (entry.stable_id == id) {
+                found = true;
+                break;
+            }
+        }
+        Expect(found, "every prewarm id exists in the catalog snapshot");
+    }
+}
+
 } // namespace
 
 int wmain() {
@@ -557,6 +650,13 @@ int wmain() {
     TestGridFewerThanPageNoScroll();
     TestGridQueryTransitionResetsViewport();
     TestGridRowForVisibleSlot();
-    std::printf("NR-010/NR-020/NR-021/NR-024/NR-029 panel model check PASSED\n");
+    TestEmptyStatePrewarmIdsPinsThenRecent();
+    TestEmptyStatePrewarmIdsCapsAtOnePage();
+    TestEmptyStatePrewarmIdsZeroMax();
+    TestEmptyStatePrewarmIdsNonEmptyQuery();
+    TestEmptyStatePrewarmIdsEmptyCatalog();
+    TestEmptyStatePrewarmIdsIsConst();
+    TestEmptyStatePrewarmIdsAbsentPinSkipped();
+    std::printf("NR-010/NR-020/NR-021/NR-024/NR-029/NR-037 panel model check PASSED\n");
     return 0;
 }

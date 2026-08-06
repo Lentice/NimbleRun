@@ -235,6 +235,44 @@ void TestVisibleJumpsTheQueue() {
     DestroyWindow(window);
 }
 
+void TestVisibleJumpsAheadOfQueuedPrewarm() {
+    const HWND window = CreateMessageWindow();
+    FakeProvider provider;
+    provider.gate = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    IconWorker worker(window, kReadyMessage, provider);
+    worker.Start();
+
+    // NR-037: three prewarm requests (visible=false), then one visible=true
+    // request. The first prewarm is grabbed by the worker and blocks on the
+    // gate; the other two sit queued behind it. The visible request must jump
+    // ahead of the queued prewarm requests, so its result arrives before the
+    // first unprocessed prewarm one.
+    worker.Post({Entry(L"a"), Key(L"a"), false});
+    const DWORD deadline = GetTickCount() + 1000;
+    while (!provider.entered.load() && GetTickCount() < deadline) {
+        Sleep(1);
+    }
+    Expect(provider.entered.load(), "worker is blocked on the gated prewarm request");
+    worker.Post({Entry(L"b"), Key(L"b"), false});
+    worker.Post({Entry(L"c"), Key(L"c"), false});
+    worker.Post({Entry(L"d"), Key(L"d"), true});
+    SetEvent(provider.gate);  // release a; d jumped ahead of the queued b, c
+
+    std::vector<std::unique_ptr<IconResult>> results;
+    Expect(PumpResults(window, results, 4), "all four results arrive");
+    Expect(results[0]->encoded_key == L"a|48", "gated prewarm request finishes first");
+    Expect(results[1]->encoded_key == L"d|48",
+           "visible=true jumps ahead of the queued prewarm requests");
+    Expect(results[2]->encoded_key == L"b|48",
+           "first queued prewarm request is processed after the visible one");
+    Expect(results[3]->encoded_key == L"c|48",
+           "second queued prewarm request is processed last");
+
+    CloseHandle(provider.gate);
+    worker.Stop();
+    DestroyWindow(window);
+}
+
 void TestStopDropsQueueAndSilencesNewPosts() {
     const HWND window = CreateMessageWindow();
     FakeProvider provider;
@@ -615,6 +653,7 @@ int wmain() {
     TestThreeRequestsDeliverThreeResults();
     TestFailureStillReports();
     TestVisibleJumpsTheQueue();
+    TestVisibleJumpsAheadOfQueuedPrewarm();
     TestStopDropsQueueAndSilencesNewPosts();
 
     TestDiskRoundTripServesSecondSessionFromDisk();
@@ -623,6 +662,6 @@ int wmain() {
     TestEmptyResultIsNotPersisted();
     TestStopWithPendingDataFlushesAndDoesNotHang();
 
-    std::printf("NR-032/NR-036 icon worker check PASSED\n");
+    std::printf("NR-032/NR-036/NR-037 icon worker check PASSED\n");
     return 0;
 }

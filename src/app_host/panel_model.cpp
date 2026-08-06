@@ -147,6 +147,27 @@ int PanelModel::RowForVisibleSlot(int slot) const {
     return row < static_cast<int>(rows_.size()) ? row : -1;
 }
 
+std::vector<std::wstring> PanelModel::EmptyStatePrewarmIds(std::size_t max_items) const {
+    // Prewarming only applies to the state the next panel show starts in
+    // (empty query, NR-037); a non-empty query is a defensive no-op, and
+    // max_items == 0 means "prewarm nothing".
+    if (!query_.empty() || max_items == 0) {
+        return {};
+    }
+    // Reuse the rows_ RefreshRows already built (pinned then recent,
+    // design-spec §4.2) instead of duplicating the merge. The first page
+    // holds Columns()*ViewportRows() items, but the prewarm cap is the spec'd
+    // page size (design-spec §4.3, 24 cells): §FR-009 forbids predecoding the
+    // whole catalog, so the caller passes that one-page bound.
+    const std::size_t count = std::min(max_items, rows_.size());
+    std::vector<std::wstring> ids;
+    ids.reserve(count);
+    for (std::size_t i = 0; i < count; ++i) {
+        ids.push_back(rows_[i].stable_id);
+    }
+    return ids;
+}
+
 void PanelModel::SelectRow(std::size_t index) {
     if (index >= rows_.size()) {
         return;
