@@ -276,6 +276,11 @@ bool IconStore::GrowView(std::uint64_t needed) {
     if (view_ != nullptr) {
         UnmapViewOfFile(view_);
         view_ = nullptr;
+        // NR-050: view_ and view_size_ must move together. Leaving a stale
+        // non-zero size behind a null pointer defeats every downstream bounds
+        // check -- DecodeEntry's `size < kPayloadStart` guard passes on the old
+        // size and then dereferences nullptr + kIndexOffset.
+        view_size_ = 0;
     }
     if (mapping_ != nullptr) {
         CloseHandle(mapping_);
@@ -350,7 +355,9 @@ void IconStore::Put(const std::wstring& stable_id, int variant,
 }
 
 bool IconStore::Flush(const std::vector<std::wstring>& pinned_ids, std::uint64_t now_utc) {
-    if (state_ != StoreState::Ready) {
+    // NR-050: Ready without a live view is only reachable via a failed Compact
+    // remap; reject instead of memcpy-ing into a null pointer.
+    if (state_ != StoreState::Ready || view_ == nullptr) {
         return false;
     }
     if (pending_.empty()) {
@@ -461,9 +468,13 @@ bool IconStore::Flush(const std::vector<std::wstring>& pinned_ids, std::uint64_t
     }
     const std::uint64_t new_payload_end = header_.payload_end + new_bytes;
     if (new_payload_end > view_size_ && !GrowView(new_payload_end)) {
-        ScanIndex();  // restore in-memory index to the committed file state
-        WriteLog(L"icon-store", L"flush-failed");
-        state_ = StoreState::ReadOnly;
+        // NR-050: the file has already been resized and the mapping is gone, so
+        // there is nothing coherent left to write into. Disable the store for
+        // this run rather than continuing with a null view; icons.cache is a
+        // rebuildable accelerator (icon_store.h), so "no cache" is a complete
+        // and safe degradation (§11) and the next launch starts clean.
+        state_ = StoreState::Disabled;
+        WriteLog(L"icon-store", L"grow-failed");
         return false;
     }
 

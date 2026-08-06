@@ -331,6 +331,75 @@ Select-String -Path src/icons/icon_store.cpp -Pattern 'WriteLog'
 
 ## 交接區
 
-（實作者填寫：修改的位置、§1 檢查最終放在逐 slot 還是選定後（及理由）、
-建置與 CTest 結果、惡意 pack 測試中檔案大小的實際數字、4 條手動驗收結果、
-未被自動化覆蓋的部分、sanity greps、偏差、未完成事項。）
+**修改的位置**
+
+- `src/icons/icon_pack_format.cpp` — `DecodeHeader` 的 slot 挑選迴圈：在 CRC 通過之後、
+  選 slot 之前，對該 slot 的 `payload_end` 做 `kPayloadStart ≤ x ≤ size` 檢查，不符即
+  `continue`（視同該 slot 不可用）。既有 `Absent` 早退、magic/CRC/capacity/schema 判定
+  與 `NewerSchema` 先例一字未動。
+- `src/icons/icon_store.cpp` — `GrowView` 的 unmap 區塊（unmap 後 `view_size_ = 0`，
+  line 283）；`Flush` 的 GrowView 失敗路徑（line 470-479）：改為 `state_ = StoreState::Disabled`
+  ＋ `WriteLog(L"icon-store", L"grow-failed")` ＋ `return false`，**不再呼叫 `ScanIndex()`**；
+  `Flush` 入口 guard（line 360）在 `state_ != Ready` 之外加 `view_ == nullptr`。
+- `tests/unit/icon_pack_format_test.cpp` — 新增 `TestMaliciousPayloadEnd()`（6 個區塊）並
+  在 `wmain` 註冊；修正 `TestHeaderRoundTrip()` 第二個 case（見偏差）。
+- `tests/unit/icon_store_test.cpp` — 新增 `TestMaliciousPayloadEnd()`（端到端）並在
+  `RunAll` 註冊。
+
+**§1 檢查最終放在逐 slot 還是選定後（及理由）**
+
+採**逐 slot（併入既有 slot 有效性判斷）**，不是選定後。理由：§3 明文要求「slot A 的
+`payload_end` 不合理、slot B 合理且 generation 較舊 → 選用 slot B 並回傳 `Ok`」。若檢查
+放在選定之後，選出的會是新（但荒謬）的 slot A，回傳 `BothHeadersBad`，直接把雙 slot
+設計的存在意義弄壞。既有的挑選迴圈結構讓「把檢查併進 slot 有效性判斷」只需三行，正是
+item 允許的形狀。副作用：`BothHeadersBad` 的案例（huge / `kPayloadStart-1` / `0`）測試
+中兩個 slot 都設成惡意值——若只有 slot A 惡意而 slot B 合法，新行為是選 B 回 `Ok`
+（這正是設計意圖）。
+
+**建置與 CTest 結果**
+
+Release x64（LLVM-MinGW 22.1.8、Ninja）：configure 成功、build 成功、無新增警告；
+`ctest --test-dir build` **23/23 全綠**；`ctest -R "icon_pack_format|icon_store"` **2/2 全綠**。
+
+**惡意 pack 測試中檔案大小的實際數字**
+
+以獨立 harness 實測（與測試同一路徑）：寫入惡意 pack（兩 slot `payload_end = 0x0000100000000000`、
+CRC 重算正確）＝ **28736 bytes** → `Open()` 後＝ **28736 bytes**（`state=Ready`、
+`recreated=true`，store 依既有 `BothHeadersBad` 反應刪除重建）→ `Put(32B)` + `Flush()` 後＝
+**28768 bytes**。`GrowView` 曾把檔案擴到 65536（64 KiB 顆粒），但該輪 flush 的 dead bytes
+（65536−28736−32）超過 live payload 的一半，觸發既有 compact 把檔案重建回
+28736+32＝28768。測試斷言上界 `kPayloadStart + 1024 = 29760`，實測最大值 28768。TB 級的
+`SetEndOfFile` 從未發生。
+
+**未被自動化覆蓋的部分**
+
+- `GrowView` 的 `CreateFileMappingW`／`MapViewOfFile` 失敗：需耗盡位址空間，依 item 決策
+  **不加注入 seam**，§2 的正確性靠「`view_` 為 null ⟺ `view_size_` 為 0」不變式本身。
+- `Compact` 的 remap 失敗（`Unmap()` 後 `MapFile()` 重開失敗）會留下 `state=Ready` 但
+  `view_==nullptr` 的邊緣狀態，無法在測試誘發；已由 `Flush` 入口的 `view_==nullptr`
+  guard 擋下（成本為零，不 crash）。
+- 4 條手動驗收為人工操作／視覺驗證，不在 Agent 範圍。
+
+**Sanity greps**
+
+- `payload_end < kPayloadStart|payload_end > size`：`icon_pack_format.cpp:129` 命中。
+- `enum class PackStatus` 仍為 Ok／Absent／BadMagic／NewerSchema／BothHeadersBad 五值，未增。
+- `git diff src/icons/icon_pack_format.h`：空（常數、static_assert、struct、schema 未動）。
+- `view_size_`：`GrowView` 中 `view_ = nullptr` 後緊接 `view_size_ = 0`（line 283）、成功時
+  `view_size_ = target`（line 299）；`MapFile`／`Unmap` 原有配對未動，成對不變式成立。
+- `WriteLog`：全部短事件名，無路徑／App 名／搜尋字串；新增 `grow-failed` 沿用慣例。
+
+**偏差**
+
+- §1 檢查採逐 slot 而非 §1 首選的「選定後」（item 已明示授權擇一，理由見上）。
+- `TestHeaderRoundTrip` 第二個 case 原為 `payload_end = 99999`、檔案 28736 bytes——在新
+  檢查下這正是「值不合理」的非法狀態，round-trip 必然改判 `BothHeadersBad`。依 Acceptance
+  「既有往返測試仍通過（未破壞正常路徑）」之精神，將該 case 改為 `kPayloadStart + 4`
+  且檔案加長到 `kPayloadStart + 4`（仍測非零 payload_end 的往返），非正常路徑語意不變。
+- 額外行為變化（可接受）：一個 schema 較新但 `payload_end` 荒謬的 slot，會先被 bounds
+  檢查剔除、改用另一個 schema 較舊但合理的 slot（此前會回 `NewerSchema`）——該 slot
+  既然不可用，取可讀者更符合雙 slot 設計。
+
+**未完成事項**
+
+無。

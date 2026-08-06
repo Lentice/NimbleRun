@@ -94,11 +94,11 @@ void TestEmptyPack() {
 void TestHeaderRoundTrip() {
     const PackHeader cases[] = {
         {},
-        {nimblerun::kPackSchemaVersion, 12345, 512, 99999},
+        {nimblerun::kPackSchemaVersion, 12345, 512, kPayloadStart + 4},
         {nimblerun::kPackSchemaVersion, 0, 512, kPayloadStart},
     };
     for (const PackHeader& in : cases) {
-        std::vector<std::uint8_t> file(kPayloadStart, 0);
+        std::vector<std::uint8_t> file(kPayloadStart + 4, 0);
         EncodeHeader(in, file.data());
         PackHeader out;
         Expect(DecodeHeader(file.data(), file.size(), out) == PackStatus::Ok,
@@ -392,6 +392,81 @@ void TestMakeSourceStamp() {
     Expect(MakeSourceStamp(0, 0) == 0, "zero inputs give a zero stamp");
 }
 
+// NR-050: payload_end is the trust root of every downstream bounds check, so a
+// CRC-valid header can still lie. Every case fixes the CRC on purpose so the
+// rejection is provably the new bounds check, not the CRC gate.
+void TestMaliciousPayloadEnd() {
+    const std::uint64_t huge = 0x0000100000000000ull;
+    const auto write_both = [](std::vector<std::uint8_t>& file, std::uint64_t payload_end) {
+        PackHeader a;
+        a.payload_end = payload_end;
+        a.generation = 1;
+        EncodeHeader(a, file.data());
+        PackHeader b;
+        b.payload_end = payload_end;
+        b.generation = 0;
+        EncodeHeader(b, file.data() + kHeaderSize);
+    };
+
+    // payload_end far beyond the file size.
+    {
+        std::vector<std::uint8_t> file = MakeEmptyPack();
+        write_both(file, huge);
+        PackHeader header;
+        Expect(DecodeHeader(file.data(), file.size(), header) == PackStatus::BothHeadersBad,
+               "huge payload_end with valid CRC -> BothHeadersBad");
+    }
+    // payload_end == kPayloadStart - 1.
+    {
+        std::vector<std::uint8_t> file = MakeEmptyPack();
+        write_both(file, kPayloadStart - 1);
+        PackHeader header;
+        Expect(DecodeHeader(file.data(), file.size(), header) == PackStatus::BothHeadersBad,
+               "payload_end below kPayloadStart with valid CRC -> BothHeadersBad");
+    }
+    // payload_end == 0.
+    {
+        std::vector<std::uint8_t> file = MakeEmptyPack();
+        write_both(file, 0);
+        PackHeader header;
+        Expect(DecodeHeader(file.data(), file.size(), header) == PackStatus::BothHeadersBad,
+               "zero payload_end with valid CRC -> BothHeadersBad");
+    }
+    // The empty-pack boundary value stays legal.
+    {
+        const std::vector<std::uint8_t> file = MakeEmptyPack();
+        PackHeader header;
+        Expect(DecodeHeader(file.data(), file.size(), header) == PackStatus::Ok,
+               "payload_end == kPayloadStart is Ok");
+        Expect(header.payload_end == kPayloadStart, "empty pack payload_end round-trips");
+    }
+    // payload_end == size (payload fills the file exactly).
+    {
+        const std::vector<std::uint8_t> file = PackWithPayload();  // size == kPayloadStart + 4
+        PackHeader header;
+        Expect(DecodeHeader(file.data(), file.size(), header) == PackStatus::Ok,
+               "payload_end == size is Ok");
+        Expect(header.payload_end == kPayloadStart + 4, "full payload_end round-trips");
+    }
+    // Slot A has an absurd payload_end, slot B is sane but carries an older
+    // generation: DecodeHeader must pick the sane slot B, not reject the file.
+    {
+        std::vector<std::uint8_t> file = MakeEmptyPack();
+        PackHeader a;
+        a.payload_end = huge;
+        a.generation = 1;
+        EncodeHeader(a, file.data());
+        PackHeader b;
+        b.generation = 0;  // default payload_end == kPayloadStart, sane
+        EncodeHeader(b, file.data() + kHeaderSize);
+        PackHeader header;
+        Expect(DecodeHeader(file.data(), file.size(), header) == PackStatus::Ok,
+               "absurd slot A, sane older slot B -> Ok");
+        Expect(header.generation == 0, "picks the sane slot B over the newer absurd A");
+        Expect(header.payload_end == kPayloadStart, "sane slot's payload_end wins");
+    }
+}
+
 void TestFuzz() {
     std::mt19937 rng(20260805u);
     std::uniform_int_distribution<std::size_t> len_dist(0, kPayloadStart + 1024);
@@ -433,6 +508,7 @@ int wmain() {
     TestPayloadVerification();
     TestParseStableIdHash();
     TestMakeSourceStamp();
+    TestMaliciousPayloadEnd();
     TestFuzz();
     std::printf("NR-033 icon pack format check PASSED\n");
     return 0;

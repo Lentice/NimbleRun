@@ -115,6 +115,20 @@ PackStatus DecodeHeader(const std::uint8_t* data, std::size_t size, PackHeader& 
         if (!HeaderCrcValid(slot)) {
             continue;
         }
+        // NR-050: a valid CRC proves the field was not corrupted in transit; it
+        // does not prove the value is sane. payload_end is the trust root of the
+        // whole format -- DecodeEntry bounds every payload against it, and Flush
+        // grows the file to it -- so an absurd value turns every downstream check
+        // into a rubber stamp. Rejecting the slot here (rather than after
+        // selection) lets a sane sibling slot win, which is exactly what the dual
+        // header slot exists for. Two failure modes this closes: payload_end far
+        // beyond the file makes SetEndOfFile expand icons.cache until the disk is
+        // full, and payload_end below kPayloadStart makes an append memcpy over
+        // the header slots and the index.
+        const std::uint64_t payload_end = ReadLe64(slot + 16);
+        if (payload_end < kPayloadStart || payload_end > size) {
+            continue;
+        }
         if (!any_valid || ReadLe32(slot + 8) > ReadLe32(data + best_slot * kHeaderSize + 8)) {
             best_slot = s;
             any_valid = true;

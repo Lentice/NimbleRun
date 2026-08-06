@@ -32,6 +32,7 @@ using nimblerun::kIndexOffset;
 using nimblerun::kPayloadStart;
 using nimblerun::MakeEmptyPack;
 using nimblerun::PackEntry;
+using nimblerun::PackHeader;
 using StoreState = nimblerun::IconStore::StoreState;
 
 namespace {
@@ -456,6 +457,34 @@ void TestLockedFile(const fs::path& dir) {
     CloseHandle(lock);
 }
 
+// NR-050: an icons.cache whose header claims a huge payload_end -- with the CRC
+// recomputed so it passes the old CRC gate -- must not let the store grow the
+// file to disk-filling size. Open degrades to a rebuilt pack.
+void TestMaliciousPayloadEnd(const fs::path& dir) {
+    std::vector<std::uint8_t> bytes = MakeEmptyPack();
+    const std::uint64_t huge = 0x0000100000000000ull;
+    for (std::size_t slot = 0; slot < 2; ++slot) {
+        PackHeader header;
+        header.generation = static_cast<std::uint32_t>(1 - slot);
+        header.payload_end = huge;
+        EncodeHeader(header, bytes.data() + slot * kHeaderSize);
+    }
+    WriteFileBytes(PackPath(dir), bytes);
+
+    IconStore store(IconStore::IconStorePaths{PackPath(dir)});
+    const StoreState state = store.Open();
+    const std::uint64_t size_after_open = fs::file_size(PackPath(dir));
+    Expect(state == StoreState::Disabled || store.Stats().recreated,
+           "malicious header degrades to no cache (rebuilt)");
+    Expect(size_after_open <= kPayloadStart + 1024,
+           "Open does not grow the file past the empty-pack size");
+    store.Put(Id(1), 48, Payload(1, 32), 0x1000, 1);
+    (void)store.Flush({}, 1);
+    const std::uint64_t size_after_flush = fs::file_size(PackPath(dir));
+    Expect(size_after_flush <= kPayloadStart + 1024,
+           "Put + Flush after a malicious header keeps the file bounded");
+}
+
 void TestRandomFuzz(const fs::path& dir) {
     std::mt19937 rng(20260805);
     for (int i = 0; i < 50; ++i) {
@@ -488,6 +517,7 @@ void RunAll(const fs::path& dir) {
     TestCompaction(dir);
     TestCompactionFailure(dir);
     TestLockedFile(dir);
+    TestMaliciousPayloadEnd(dir);
     TestRandomFuzz(dir);
 }
 
