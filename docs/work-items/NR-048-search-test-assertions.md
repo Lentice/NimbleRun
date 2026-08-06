@@ -205,5 +205,79 @@ Select-String -Path tests/unit/search_engine_test.cpp -Pattern 'NR-038:|NR-047:'
 
 ## 交接區
 
-（實作者填寫：修改的位置、建置與 CTest 結果、§Scope 3 的故意失敗實證、
-開啟斷言後是否有任何既有斷言真的失敗、sanity greps、偏差、未完成事項。）
+### 修改位置
+
+- `tests/unit/search_engine_test.cpp`（唯一改動檔案，`git diff --name-only` 驗證）。
+  - 移除 `#include <cassert>`；`<cstdio>` 原已存在。
+  - `wmain()` 前加入 repo 標準 `Expect(bool, const char*)` helper：失敗寫
+    `FAIL: <message>` 到 stderr、累計 `g_failures`、不中止；signature 與
+    `start_menu_catalog_test.cpp:27` 一致（行為採 §Scope 1 樣本的 counter
+    版本，因為 `wmain` 結尾要 `return g_failures == 0 ? 0 : 1;`）。
+  - 20 條 `assert(...)` 逐一改為 `Expect(x, "<英文描述>")`，一行一檢查。
+  - 兩條 5000 筆 timing 的 `std::wprintf` 輸出行（`NR-038:`、`NR-047:`）
+    一字未改；50 ms 上限改為 `Expect(elapsed_us / 1000 < 50, ...)`。
+  - NR-047 留下的 `#pragma clang diagnostic` 區塊依 Non-goals 保留未動。
+
+### 開啟斷言後揭露的既有 fixture bug（本 item 的產物）
+
+主 catalog 與 alias_catalog 的 `AppEntry` 未填 `normalized_name`，而
+`SearchApps` 依契約（design-spec §4.4、`src/catalog/catalog_refresh.cpp:121`、
+`src/search/search_engine.h:8-13`）只比對 snapshot 已正規化的名稱——原始
+`"Calculator"/"Calendar"` 對小寫 `"cal"` 永不命中。開啟斷言後首條斷言
+（`prefix_results.size() == 2`）立即失敗，且 `Expect` 不中止導致對空結果取
+`[0]` 而 SegFault。
+
+判定為**測試 fixture 缺陷、非 `src/search/` 行為錯誤**：production 唯一呼叫端
+`panel_model.cpp:67` 收到的 snapshot 一律由 `SetSnapshot` 預填
+`normalized_name`，repo 其他 search 測試（`panel_model_test.cpp:29`、
+`ui_palette_layout_test.cpp:56`）也都預填。故依 Acceptance#2「全綠」與 §Scope 3
+「改回即全綠」修正 fixture（主 catalog 4 筆＋alias_catalog 3 筆補
+`normalized_name`）。**未改任何 `src/` 檔案、未修 production 行為**，因此無需
+另開 item。
+
+### 建置與 CTest 結果
+
+- 前提確認：`build/CMakeCache.txt` 的 `CMAKE_CXX_FLAGS_RELEASE=-O3 -DNDEBUG`。
+- Release 建置（故意弄壞前後共三次）：無新增警告。
+- 修正 fixture 後全量：`ctest --test-dir build --output-on-failure` → **23/23 全綠**；
+  `ctest -R nimblerun_search_test` → Passed（0.16–0.32 s）。
+- 兩條 timing 實測：NR-038 583 µs、NR-047 189 µs，遠低於 50 ms 上限，與
+  NR-047 交接區的 603／204 µs 同量級。
+
+### §Scope 3 故意失敗實證
+
+第一次（把 `Expect(prefix_results.size() == 2, ...)` 暫時改為 `== 99`）——ctest
+**紅燈**、退出碼 8、輸出含 `FAIL:`：
+
+```
+1/1 Test #1: nimblerun_search_test ............***Failed    0.29 sec
+FAIL: trimmed prefix search returns Calendar and Calculator
+NR-038: SearchApps over 5000 pre-normalized entries took 583 us (0 ms), matched 5000
+NR-047: SearchApps over 5000 alias-fallback entries took 189 us (0 ms), matched 0
+0% tests passed, 1 tests failed out of 1
+The following tests FAILED:
+      1 - nimblerun_search_test (Failed)
+```
+
+第二次（改回 `== 2`）——`nimblerun_search_test` Passed、`100% tests passed out of
+1`、退出碼 0。
+
+### sanity greps（全部符合預期）
+
+- `Select-String -Path tests/unit/search_engine_test.cpp -Pattern 'assert\(|<cassert>'`
+  → no match
+- `Get-ChildItem -Recurse -Include *.cpp -Path tests | Select-String -Pattern '^\s*assert\('`
+  → no match（全 repo 無第二個受害者）
+- `git diff --name-only` → `tests/unit/search_engine_test.cpp`（只此一個）
+- `Select-String -Pattern 'NR-038:|NR-047:'` → 兩條 timing 輸出行皆在
+
+### 偏差
+
+- §Scope 1 樣本註解的說明文字含字面 `assert()`，會命中 Acceptance#3 的
+  `assert\(` grep；改寫為「assert macro」避免自打嘴巴，signature 與輸出格式未變。
+- §Scope 1 樣本註解的說明文字因上述同一理由略作調整，其餘照樣本。
+
+### 未完成事項
+
+- 無。本 item 讓既有斷言真的執行、並修正了因此浮現的 fixture 缺陷；任何未來
+  `src/search/` 行為變更自此獲得真正的回歸保護。
