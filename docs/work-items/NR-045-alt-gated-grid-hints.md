@@ -1,6 +1,6 @@
 # NR-045 — Grid quick-select hints appear only while Alt is held
 
-Phase 3 · Status `ready` · Depends on: —
+Phase 3 · Status `done` · Depends on: —
 
 ## Why
 
@@ -240,3 +240,20 @@ git diff src/ui/panel_layout.h        # must be empty
 Select-String -Path src/app_host/main.cpp -Pattern 'VK_MENU'
 # expect: the AltHeld() definition plus the WM_SYSKEYDOWN / WM_SYSKEYUP / WM_KEYUP guards
 ```
+
+## 交接區
+
+（實作者填寫：修改的位置、建置與 CTest 結果、九條手動驗收是否為人工驗證、未完成事項。）
+
+- **修改**（只動 `src/app_host/main.cpp` 與 `docs/design-spec.md`；`src/ui/panel_layout.h`、`src/ui/panel_palette.*`、`DrawKeyBox`、清單列數位框、`quick_select.h` 逐位元組不變）：
+  - `main.cpp:118-120`：`footer_strings` 新增 `kHoldAltHint[] = L"Hold Alt to show shortcuts"`（含 NR-045 註解，無句尾句點），加在 `kLaunch`／`kAltOnePrefix` 之後。
+  - `main.cpp:916-923`：`DrawKeyBox` 前方新增檔案範圍 `bool AltHeld() { return GetKeyState(VK_MENU) < 0; }`（含 NR-045 註解；無 flag、無 timer、無 hook）。
+  - `main.cpp:1088-1103`：grid cell 數位框（top-right 的 `QuickSelectLabelForSlot` 方塊）外層包 `if (AltHeld()) { ... }`，框的幾何與繪製內容一字未改；清單列數位框（`main.cpp:1246` 一帶）未動。
+  - `main.cpp:1359-1384`：footer 的 `Alt+1~N`＋`Launch` 群組改為分支。`right -= kFooterHintGapDip` 保留在前；grid 狀態（`g_model && g_model->Columns() > 1`）且 `!AltHeld()` 時只以既有 `draw_right_label` 畫 `kHoldAltHint`、右對齊於 `right`，回傳寬度照 `right -= draw_right_label(...); hints_left = std::min(hints_left, right);` 折入 `hints_left`；否則（清單狀態或按住 Alt）沿用原 `alt_label`＋`draw_key_box(kFooterWideKeyBoxWidthDip)`＋`Launch` 組。兩臂都持續餵 `hints_left`。句子沿用 `g_small_format`＋`g_dim_brush`，未新增 format／brush／版面常數。
+  - `main.cpp:1672-1681`（`WM_SYSKEYDOWN`）：NR-024 數字處理之前，若 `w_param == VK_MENU` 且自動重複位元未設（`(l_param & (1 << 30)) == 0`）則 `InvalidateRect(GetParent(edit), nullptr, FALSE)` 後 `break`（走預設處理）。
+  - `main.cpp:1700-1708`：新增 `case WM_SYSKEYUP:`／`case WM_KEYUP:`（同一 case），`w_param == VK_MENU` 時 `InvalidateRect(GetParent(edit), nullptr, FALSE)` 後 `break`。NR-024 的 Alt+digit 路徑與 Alt+Space 未受影響。
+  - `docs/design-spec.md §4.9`：重寫「數字快選指引顯示於對應項目上」該條，改為清單常駐、格狀僅按 `Alt` 顯示、未按時以灰色說明句取代 `Alt+1~N` 群組、`Alt` 仍只在 footer 說明一次。未動其他條款。
+- **建置與 CTest**：`cmake -S . -B build -G Ninja -D"CMAKE_TOOLCHAIN_FILE=cmake/llvm-mingw.cmake" -DCMAKE_BUILD_TYPE=Release` configure 成功；`cmake --build build` 只重編 `main.cpp` 並成功連結，**無新增警告**；`ctest --test-dir build --output-on-failure` **23/23 全綠**（本 item 不新增測試，既有測試為回歸護欄）。
+- **Sanity greps**：`git diff src/ui/panel_layout.h` 為空；`Select-String -Path src/app_host/main.cpp -Pattern 'VK_MENU'` 恰好三處（`AltHeld()` 定義、`WM_SYSKEYDOWN` guard、`WM_SYSKEYUP`／`WM_KEYUP` 共用 guard），工作樹原本無任何 `VK_MENU` 引用。
+- **手動驗收（9 條）**：全部為人工視覺／操作驗證，依 `AGENTS.md` 交付規則與 `docs/work-items.md`「Agent 交付規則」（不要求操作視窗或人工確認畫面；視覺人工驗證不屬於本追蹤表），由人類在 Release 版上逐條執行：1) 空白查詢 grid 無數字框、footer 顯示 `Hold Alt to show shortcuts`＋`PgUp PgDn Scroll`、2) 按 `Alt` 前 10 格出現數字框且 footer 換回 `[Alt+1~0] Launch`、圖示與名稱不位移、3) 放開 `Alt` 立即復原、4) 長按五秒不閃爍（auto-repeat guard）、5) 按 `Alt` 時按 `1` 啟動第一格無嗶聲、6) 輸入字元進入清單狀態時數字框常駐且無 `Hold Alt` 句、7) grid hover 長路徑以省略號截斷不覆蓋右側句、8) 按 `Alt` 時 `Alt+Tab` 離開再重開無殘留框、9) 200% DPI 重跑 1–3。
+- **未完成**：無。九條手動驗收留待人類於 Release 版逐條打勾。

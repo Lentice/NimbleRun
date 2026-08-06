@@ -115,6 +115,9 @@ constexpr wchar_t kPageDown[] = L"PgDn";
 // NR-024: the Alt+digit quick-select hint group (design-spec §4.9).
 constexpr wchar_t kLaunch[] = L"Launch";
 constexpr wchar_t kAltOnePrefix[] = L"Alt+1~";
+// NR-045: shown in the grid state while Alt is up, in place of the
+// Alt+1~N / Launch group (design-spec §4.9).
+constexpr wchar_t kHoldAltHint[] = L"Hold Alt to show shortcuts";
 } // namespace footer_strings
 
 // NR-022: centralized English strings for the launch-failure / open-location
@@ -913,6 +916,12 @@ void StartWatchers() {
     g_watcher->SetRoots(roots, recursive);
 }
 
+// NR-045: the grid's per-cell digit boxes and the footer's Alt+1~N group are
+// revealed only while Alt is physically down; the list state is unaffected.
+// Queried per paint instead of tracked in a flag, so there is no stale state to
+// clear on Alt+Tab, focus loss or panel hide.
+bool AltHeld() { return GetKeyState(VK_MENU) < 0; }
+
 // NR-024: one shared rounded key-box draw for the footer hints and the
 // per-row digit boxes (design-spec §4.9). The caller supplies the full DIP
 // rect; the footer keeps its right-to-left advance and the row loop passes
@@ -1079,14 +1088,19 @@ void Render(HWND window) {
 
                 // NR-029: NR-024 digit box at the cell's top-right corner for
                 // the first 10 cells; the shared key-box paint is reused.
-                if (const wchar_t* key_label = nimblerun::ui::QuickSelectLabelForSlot(slot)) {
-                    const float box_right = cell.right - 4.0f;
-                    DrawKeyBox(
-                        key_label,
-                        D2D1::RectF(box_right - nimblerun::layout::kRowKeyBoxWidthDip,
-                                    cell_top + 4.0f,
-                                    box_right,
-                                    cell_top + 4.0f + nimblerun::layout::kFooterKeyBoxHeightDip));
+                // NR-045: in the grid state the box only paints while Alt is
+                // down; it is an overlay that reserves no space, so hiding it
+                // moves nothing (design-spec §4.9).
+                if (AltHeld()) {
+                    if (const wchar_t* key_label = nimblerun::ui::QuickSelectLabelForSlot(slot)) {
+                        const float box_right = cell.right - 4.0f;
+                        DrawKeyBox(
+                            key_label,
+                            D2D1::RectF(box_right - nimblerun::layout::kRowKeyBoxWidthDip,
+                                        cell_top + 4.0f,
+                                        box_right,
+                                        cell_top + 4.0f + nimblerun::layout::kFooterKeyBoxHeightDip));
+                    }
                 }
 
                 // NR-041: pinned marker -- a filled dot in the cell's top-left
@@ -1345,19 +1359,28 @@ void Render(HWND window) {
     // to the current viewport (8 visible rows -> Alt+1~8, >=10 -> Alt+1~0);
     // built per frame since the viewport can change.
     right -= nimblerun::layout::kFooterHintGapDip;
-    const int last_slot =
-        std::min(g_model ? g_model->ViewportRows() : 0,
-                 nimblerun::ui::kQuickSelectSlotCount) - 1;
-    std::wstring alt_label(footer_strings::kAltOnePrefix);
-    if (const wchar_t* last_label = nimblerun::ui::QuickSelectLabelForSlot(last_slot)) {
-        alt_label += last_label;
+    if (g_model && g_model->Columns() > 1 && !AltHeld()) {
+        // NR-045: in the grid state while Alt is up the per-cell digit boxes
+        // are hidden, so the Alt+1~N group is replaced by one sentence that
+        // says how to reveal them; drawn with the same draw_right_label the
+        // rest of the group uses (design-spec §4.9).
+        right -= draw_right_label(footer_strings::kHoldAltHint, right);
+        hints_left = std::min(hints_left, right);
+    } else {
+        const int last_slot =
+            std::min(g_model ? g_model->ViewportRows() : 0,
+                     nimblerun::ui::kQuickSelectSlotCount) - 1;
+        std::wstring alt_label(footer_strings::kAltOnePrefix);
+        if (const wchar_t* last_label = nimblerun::ui::QuickSelectLabelForSlot(last_slot)) {
+            alt_label += last_label;
+        }
+        right = draw_key_box(alt_label.c_str(), right,
+                             nimblerun::layout::kFooterWideKeyBoxWidthDip);
+        hints_left = std::min(hints_left, right);
+        right -= nimblerun::layout::kFooterKeyGapDip;
+        right -= draw_right_label(footer_strings::kLaunch, right);
+        hints_left = std::min(hints_left, right);
     }
-    right = draw_key_box(alt_label.c_str(), right,
-                         nimblerun::layout::kFooterWideKeyBoxWidthDip);
-    hints_left = std::min(hints_left, right);
-    right -= nimblerun::layout::kFooterKeyGapDip;
-    right -= draw_right_label(footer_strings::kLaunch, right);
-    hints_left = std::min(hints_left, right);
 
     // NR-029: path bar on the left half of the footer band (grid state only).
     // Hover wins over the keyboard selection; packaged apps show the source
@@ -1646,6 +1669,14 @@ LRESULT CALLBACK SearchEditProc(HWND edit, UINT message, WPARAM w_param, LPARAM 
         return 0;
     }
     case WM_SYSKEYDOWN:
+        // NR-045: repaint when Alt goes down so the grid digit boxes and the
+        // footer sentence swap in; the auto-repeat bit (bit 30) guard keeps the
+        // keyboard repeat rate from driving high-frequency repaints. Falls
+        // through to the NR-024 digit handling below.
+        if (w_param == VK_MENU && (l_param & (1 << 30)) == 0) {
+            InvalidateRect(GetParent(edit), nullptr, FALSE);
+            break;
+        }
         // NR-024: Alt+digit directly launches the corresponding visible row,
         // exactly like Enter on that row (design-spec §4.7; reuses the same
         // ActivateRow usage/hide-after-launch/NR-022 failure path). Bit 29 of
@@ -1666,6 +1697,16 @@ LRESULT CALLBACK SearchEditProc(HWND edit, UINT message, WPARAM w_param, LPARAM 
             }
         }
         break;  // unbound (e.g. Alt+Space) -> default processing
+    case WM_SYSKEYUP:
+    case WM_KEYUP:
+        // NR-045: releasing Alt (WM_SYSKEYUP; a release that follows a
+        // swallowed Alt+digit can arrive as WM_KEYUP) repaints the panel so the
+        // grid hints and the footer group revert. No repeat guard needed: keyup
+        // does not auto-repeat.
+        if (w_param == VK_MENU) {
+            InvalidateRect(GetParent(edit), nullptr, FALSE);
+        }
+        break;
     case WM_SYSCHAR:
         // NR-024: swallow the system beep for the 10 bound digits; the
         // WM_SYSKEYDOWN above already handled the launch. Everything else
