@@ -636,6 +636,58 @@ void ShowErrorDialog(HWND window, const std::wstring& message) {
     }
 }
 
+// NR-056: reads the file version out of the embedded VS_VERSION_INFO resource
+// (src/resources/NimbleRun.rc), which is the single source of truth for the
+// version number -- the About box must never carry a second hard-coded copy.
+// Returns an empty string when the resource is missing or unreadable, in which
+// case the caller simply omits the version line.
+std::wstring ProductVersionString() {
+    wchar_t module_path[MAX_PATH]{};
+    const DWORD path_len = GetModuleFileNameW(nullptr, module_path, MAX_PATH);
+    if (path_len == 0 || path_len >= MAX_PATH) {
+        return {};
+    }
+    DWORD handle = 0;
+    const DWORD size = GetFileVersionInfoSizeW(module_path, &handle);
+    if (size == 0) {
+        return {};
+    }
+    std::vector<BYTE> data(size);
+    if (!GetFileVersionInfoW(module_path, handle, size, data.data())) {
+        return {};
+    }
+    VS_FIXEDFILEINFO* info = nullptr;
+    UINT info_len = 0;
+    if (!VerQueryValueW(data.data(), L"\\", reinterpret_cast<void**>(&info),
+                        &info_len) ||
+        !info || info_len < sizeof(VS_FIXEDFILEINFO)) {
+        return {};
+    }
+    return L"Version " + std::to_wstring(HIWORD(info->dwFileVersionMS)) + L"." +
+           std::to_wstring(LOWORD(info->dwFileVersionMS)) + L"." +
+           std::to_wstring(HIWORD(info->dwFileVersionLS)) + L"." +
+           std::to_wstring(LOWORD(info->dwFileVersionLS));
+}
+
+// NR-056: design-spec §4.10 requires an About entry in the tray menu. A menu
+// item that does nothing is worse than no menu item: it reads as a bug every
+// time it is clicked. A MessageBox with the product name and version satisfies
+// the clause; anything more (icon, links, license text) is not specced.
+void ShowAboutDialog(HWND window) {
+    std::wstring message = dialog_strings::kTitle;
+    const std::wstring version = ProductVersionString();
+    if (!version.empty()) {
+        message += L"\n\n" + version;
+    }
+    g_dialog_active = true;
+    MessageBoxW(window, message.c_str(), dialog_strings::kTitle,
+                MB_OK | MB_ICONINFORMATION);
+    g_dialog_active = false;
+    if (g_search_edit) {
+        SetFocus(g_search_edit);
+    }
+}
+
 // NR-011: starts one background thread per source for a rebuild cycle; defined
 // below, forward-declared for the NR-022 launch-failure refresh path.
 void StartRebuild(HWND window, std::vector<nimblerun::CatalogSource> sources);
@@ -1886,28 +1938,10 @@ LRESULT CALLBACK SearchEditProc(HWND edit, UINT message, WPARAM w_param, LPARAM 
         CallWindowProcW(g_search_original_proc, edit, message, w_param, l_param);
         DestroyCaret();
         return 0;
-    case WM_LBUTTONDOWN: {
-        // NR-039: the search box doubles as the panel's drag handle. DragDetect
-        // blocks until the user either moves past the system drag threshold
-        // (SM_CXDRAG/SM_CYDRAG -> TRUE) or releases without dragging (FALSE), and
-        // it consumes the mouse messages either way -- so the plain-click path has
-        // to place the caret itself. Cost accepted in NR-039: drag-selecting text
-        // with the mouse is gone; double-click, Shift+arrows and Ctrl+A are not.
-        const POINT client{GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param)};
-        POINT screen = client;
-        ClientToScreen(edit, &screen);  // DragDetect takes screen coordinates
-        if (DragDetect(edit, screen)) {
-            ReleaseCapture();
-            SendMessageW(GetParent(edit), WM_NCLBUTTONDOWN, HTCAPTION, 0);
-            return 0;
-        }
-        const LRESULT hit = SendMessageW(edit, EM_CHARFROMPOS, 0,
-                                         MAKELPARAM(client.x, client.y));
-        const int index = static_cast<int>(LOWORD(hit));
-        SendMessageW(edit, EM_SETSEL, index, index);
-        SetFocus(edit);
-        return 0;
-    }
+    // NR-056: dragging the panel by its empty area is fine (see spec §4.1), but
+    // the search box is a text field first. Forwarding its clicks to
+    // HTCAPTION made mouse text selection impossible inside the one control the
+    // user types into. Panel dragging stays available everywhere else.
     case WM_SYSKEYDOWN:
         // NR-045: repaint when Alt goes down so the grid digit boxes and the
         // footer sentence swap in; the auto-repeat bit (bit 30) guard keeps the
@@ -2155,7 +2189,12 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
         return 0;
     }
     case kAboutMessage:
-        // ponytail: about dialog is not specced; this item only provides the dispatch target.
+        // NR-056: design-spec §4.10 requires an About entry in the tray menu.
+        // A menu item that does nothing is worse than no menu item: it reads as
+        // a bug every time it is clicked. A MessageBox with the product name
+        // and version satisfies the clause; anything more (icon, links, license
+        // text) is not specced.
+        ShowAboutDialog(window);
         return 0;
     case kExitMessage:
         DestroyWindow(window);

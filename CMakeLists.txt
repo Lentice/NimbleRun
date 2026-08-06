@@ -325,6 +325,7 @@ target_link_libraries(NimbleRun
         shell32
         shcore
         user32
+        version
 )
 
 target_compile_definitions(NimbleRun

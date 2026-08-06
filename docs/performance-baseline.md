@@ -4,16 +4,16 @@ These are Release x64 measurements, not Debug estimates. Record the OS build, CP
 
 | Metric | Target | Blocking threshold | Result | Environment / notes |
 | --- | ---: | ---: | --- | --- |
-| Idle CPU, 15-minute average | ≤ 0.1% logical CPU equivalent | > 0.5% | Not measured | |
-| Idle working set | ≤ 60 MiB | > 80 MiB | Not measured | |
-| Idle private bytes | ≤ 50 MiB | > 70 MiB | Not measured | |
-| Visible panel with 20 icons | ≤ 75 MiB | > 100 MiB | Not measured | |
-| Cold start to hotkey-ready | ≤ 500 ms | > 1,000 ms | Not measured | |
-| Warm hotkey to input-ready, p95 | ≤ 80 ms | > 150 ms | Not measured | |
-| Filter 500 apps, p95 | ≤ 8 ms | > 16 ms | Not measured | |
+| Idle CPU, 15-minute average | ≤ 0.1% logical CPU equivalent | > 0.5% | Not measured | 需要一支 15 分鐘 idle 的 CPU 抽樣計時，尚未實作 |
+| Idle working set | ≤ 60 MiB | > 80 MiB | 37.2 MiB | `release_evidence.ps1`，2026-08-07，hidden at rest（約 3 秒 settle）；同一樣本 handle count 394 |
+| Idle private bytes | ≤ 50 MiB | > 70 MiB | 7.7 MiB | `release_evidence.ps1`，2026-08-07，同一 idle 樣本 |
+| Visible panel with 20 icons | ≤ 75 MiB | > 100 MiB | Not measured | 需要可見面板狀態的記憶體 census，尚未實作 |
+| Cold start to hotkey-ready | ≤ 500 ms | > 1,000 ms | Not measured | 需要一支量測「程序啟動到熱鍵就緒」的計時器，尚未實作 |
+| Warm hotkey to input-ready, p95 | ≤ 80 ms | > 150 ms | Not measured | 需要一支量測「熱鍵到首幀」的計時器，尚未實作 |
+| Filter 500 apps, p95 | ≤ 8 ms | > 16 ms | 603 µs（5,000 筆、`L"e"` 查詢） | `search_engine_test` 5,000 筆 timing，2026-08-06（NR-047 交接區）；量測規模大於門檻的 500 筆，故為保守上界 |
 | Idle app-owned thread count | 2 ＋ watcher root 數 | 超出該式 | 5（預期值，未經 census 驗證） | 見下方「執行緒數的量法」 |
 | Idle process thread count | — | — | 16 | 參考值，不設門檻 |
-| `icons.cache` file size | ≤ 32 MiB | > 48 MiB | Not measured | |
+| `icons.cache` file size | ≤ 32 MiB | > 48 MiB | Not measured | 需要一次完整圖示建置後的實際檔案大小量測，尚未進行 |
 
 ## Measurement rules
 
@@ -38,5 +38,3 @@ These are Release x64 measurements, not Debug estimates. Record the OS build, CP
 已量測（Release x64，Windows 11 Pro 26200，commit `cd0f256`，catalog root = 兩個 Start Menu Programs ＋ `D:\Program files`，未接除錯器，啟動後待機 3 秒）：行程總數 16 條，全部處於 Wait、CPU 0%，handle 391，working set 38.0 MiB。
 
 app-owned 的 5 條是由上式推導的預期值（1 UI ＋ 1 icon worker ＋ 3 watcher root），本次未做 start-address census 驗證。2026-08-05 的 census 實測為 3 條（main ＋ 2 個 Programs watcher），當時還沒有常駐 icon worker、也還沒設定自訂 root，與上式一致。要把這欄從「預期值」升級為「已量測」，需要 `tests/release/release_evidence.ps1` 補上 start-address census；在那之前這欄不是硬性 gate。
-
-The first gate is the Phase 0 empty-window probe. If its idle or wake-up cost is already over a blocking threshold, fix the host architecture before adding catalog features.

@@ -400,9 +400,28 @@ git diff docs/design-spec.md
 
 ## 交接區
 
-（實作者填寫：`ctest -N` 的實際測試數量、三個工具版本字串、
-效能表格回填了哪幾列與各自的量測方法／數字／日期、哪幾列仍是
-`Not measured` 及缺什麼、About 是否成功取到版本（若否，為什麼）、
-§4 移除的是哪一行與其上下文、建置與 CTest 結果、6 條手動驗收結果
-（特別是 #1 走 testing.md 時發現的任何含糊處）、sanity greps、
-偏差、未完成事項。）
+- **`ctest -N` 實際測試數量**：23（`Total Tests: 23`，22 個執行檔測試＋`nimblerun_lifecycle_check`）。本 item 未增減測試，23 為現況；`docs/testing.md` 依此寫。
+- **三個工具版本字串**（`release_evidence.ps1` 修好後重新產出）：`cmake version 4.4.2`、`ninja 1.13.2`、`clang version 22.1.8 (…ca7933e…)`（clang++ 同 22.1.8、ctest 4.4.2）。`docs/release-evidence.md` Tool versions 表已無 `Usage`／`error`／`*****`。
+- **效能表格回填**（`docs/performance-baseline.md`，列與單位未改）：
+  - Idle working set：37.2 MiB（38977536 bytes），`release_evidence.ps1`，2026-08-07，hidden at rest（約 3 秒 settle）。
+  - Idle private bytes：7.7 MiB（8052736 bytes），同一樣本。
+  - Filter 500 apps p95：603 µs（5,000 筆、`L"e"` 查詢），`search_engine_test` timing，2026-08-06（NR-047 交接區）；量測規模 5,000 筆大於門檻的 500 筆，故為保守上界。
+  - handle count 394 沒有對應表格列（表列不可新增），記入 Idle working set 列的 notes。
+- **仍為 `Not measured` 及缺什麼**：Idle CPU 15 分鐘平均（缺 15 分鐘 idle 的 CPU 抽樣計時）；Visible panel with 20 icons（缺可見面板狀態的記憶體 census）；Cold start to hotkey-ready（缺「程序啟動到熱鍵就緒」計時器）；Warm hotkey p95（缺「熱鍵到首幀」計時器）；`icons.cache` file size（缺完整圖示建置後的實際檔案大小量測）。
+- **About 版本**：**成功取到**。RC 原本沒有 `VS_VERSION_INFO`（本 item 新增，`FILEVERSION`／`PRODUCTVERSION = 0,1,0,0`，與 manifest `0.1.0.0` 一致，成為版本唯一出處）；`main.cpp` 用 `GetModuleFileNameW`＋`GetFileVersionInfoSizeW`＋`GetFileVersionInfoW`＋`VerQueryValueW` 讀取 `VS_FIXEDFILEINFO` 並格式化為 `Version 0.1.0.0`；`build\NimbleRun.exe` 實測 `FileVersion=0.1.0.0`。CMake 唯一變更＝NimbleRun 連結 `version`。main.cpp 無硬寫版本字串（grep `\d+\.\d+\.\d+` 零命中）。
+- **§4 移除**：`SearchEditProc` 的整個 `case WM_LBUTTONDOWN`（原 :1889–1910），含 NR-039 的 `DragDetect` 與原 :1901 的 `SendMessageW(GetParent(edit), WM_NCLBUTTONDOWN, HTCAPTION, 0)` 及隨之的 caret workaround。該 case 的存在理由就是拖曳轉發；移除後 EDIT 走原生 `WM_LBUTTONDOWN`（caret、焦點、滑鼠拖曳選取皆系統行為），面板空白處的 `WM_NCLBUTTONDOWN/HTCAPTION` 拖曳（現 :2344–2352 一帶）保留。
+- **建置與 CTest**：Release clean build 成功、無新增警告；`ctest` 23/23 全綠（Total Test time 24.90 s）；`release_evidence.ps1` exit 0（All gates passed）。
+- **6 條手動驗收**：屬人工 GUI 操作，Agent 不執行（AGENTS.md 交付規則）。重寫後的 `docs/testing.md` 7 條冒煙測試均為「操作 → 預期」單句，不需前情即可照做，未發現含糊處。
+- **§7 測試**：版本讀取整段是 Win32 呼叫（`GetModuleFileNameW`／`GetFileVersionInfoW`／`VerQueryValueW`），格式化未抽成獨立純函式，依 §7 由手動驗收覆蓋（About 訊息框顯示產品名＋版本即驗證）。§4 搜尋框按壓由手動驗收覆蓋。
+- **sanity greps**：
+  - `tests/release/release_evidence.ps1` `\$args`：零命中。
+  - `docs/release-evidence.md` `Usage|error|\*\*\*\*\*`：命中 2 處均為 ctest 輸出中測試名 `nimblerun_recent_usage_test` 的子字串 `usage`（Select-String 大小寫不敏感），非版本欄位錯誤；Tool versions 五欄皆真實版本字串。
+  - `docs/testing.md` `Phase 0|probe|fake app`：零命中。
+  - `docs/design-spec.md` diff：僅 §4.8（右鍵選單四項＋面板拖曳補述）、§4.10（關於行為）、§10.3（identity 規則）三處 hunk；無 §4.1 hunk（拖曳補述依「擇一」只放 §4.8）。
+  - `main.cpp` `HTCAPTION|WM_NCLBUTTONDOWN`：1 處功能轉發（面板空白處）＋1 處 §4 的 NR-056 註解敘述（item 提供之註解文內含 HTCAPTION）。
+  - `main.cpp` `MessageBoxW`：2 次（既有 `ShowErrorDialog`＋新 `ShowAboutDialog`）；`ponytail: about dialog` 註解已移除。
+- **偏差**（皆為讓 item 自身約束一致所做的判斷）：
+  1. §10.3 舊 `UserFolder .lnk` 條目原文「以 Shell 可啟動的 canonical identity／resolved target 產生」與程式碼（以捷徑自身路徑）直接矛盾，item 提供的新條目即其修正版，故以新條目**取代**該舊條目（不採「補述在其後」留下自相矛盾的兩條）；AppsFolder 新條目則照指令補述在既有 AppsFolder 條目之後。
+  2. item 提供的 NR-056 註解與 agent check 互相衝突（註解文含 `$args`／`HTCAPTION`，grep 又要求零命中）——`release_evidence.ps1` 的註解改寫為不含 `$args` 字面 token；main.cpp 的 HTCAPTION 註解保留 item 原文（功能上僅剩面板空白處一處轉發）。
+  3. 效能表格 handle count 無對應列，記入 Idle working set notes。
+- **未完成事項**：6 條人工手動驗收（含 testing.md #1 逐條走查、About 訊息框目視、搜尋框滑鼠選取文字、面板空白處拖曳）未執行，需人工在 Release build 上驗證；效能表格 5 列維持 `Not measured`，需各自的量測工具；未 commit／未 push。

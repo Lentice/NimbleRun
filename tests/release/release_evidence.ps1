@@ -19,9 +19,13 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-function Get-CmdVersion([string]$name, [string[]]$args) {
+# NR-056: the parameter was named after PowerShell's automatic arguments
+# variable, so `& $name @Arguments` splatted the caller's own (empty) argument
+# array and --version never reached the tool. Every recorded tool version in
+# docs/release-evidence.md was therefore an error message.
+function Get-CmdVersion([string]$name, [string[]]$Arguments) {
     try {
-        $raw = & $name @args 2>&1 | Out-String
+        $raw = & $name @Arguments 2>&1 | Out-String
         return $raw.Trim().Split("`n")[0].Trim()
     } catch {
         return "(not found)"

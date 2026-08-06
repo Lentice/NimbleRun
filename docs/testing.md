@@ -8,16 +8,21 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-The current unit test covers the pure search/ranking module. Keep catalog, storage, and scoring tests free of HWND and Shell COM dependencies wherever possible.
+`ctest --test-dir build -N` lists the registered suite (currently 23 checks). They fall into three categories:
 
-## Manual smoke test for the Phase 0 probe
+- **Unit tests** (`tests/unit/*.cpp`): the bulk of the suite, one executable per library, covering the pure search, ranking, catalog, storage, settings, icons, pins, usage, and diagnostics logic. Keep catalog, storage, and scoring tests free of HWND and Shell COM dependencies wherever possible.
+- **Integration check** (`tests/integration/lifecycle_check.ps1`): registered as the `nimblerun_lifecycle_check` test; launches a real `NimbleRun.exe`, verifies the single-instance wake-up, and the tray Exit terminates cleanly. Also runs under `ctest`.
+- **Release evidence** (`tests/release/release_evidence.ps1`): builds, runs the full suite, samples the idle working set / private bytes / handle count of a settled hidden instance, and regenerates `docs/release-evidence.md`. Run manually before a release with `pwsh -NoProfile -File tests/release/release_evidence.ps1`; it is not registered as a `ctest` test.
 
-1. Start `NimbleRun.exe` from the Release output directory.
-2. Press `Alt+Space`.
-3. Confirm an English popup appears near the cursor and renders the fake app grid.
-4. Press `Esc` or click outside the window to hide it.
-5. Start the executable a second time and confirm the existing instance is brought forward.
-6. Leave the app hidden for 15 minutes and record CPU time and working-set behavior.
+## Manual smoke test
+
+1. Press `Alt+Space`. Expected: the panel appears centered in the work area of the monitor under the cursor.
+2. Leave the search box empty. Expected: the pinned / recent grid is shown (a filled grid once the NR-053 empty-state fill lands).
+3. Type a query. Expected: the view switches to a search list; `Enter` launches the selected item and the panel hides.
+4. Press `Esc`. Expected: the search box clears; a second `Esc` hides the panel.
+5. Right-click an item and choose Pin. Expected: the item is pinned; a restart keeps it pinned, and Unpin works the same way.
+6. Open the tray menu. Expected: all four entries (Open, Settings, About, Exit) work.
+7. Open the panel at 200% DPI. Expected: the layout and the icons render correctly.
 
 When testing a conflicting or Windows-reserved shortcut, confirm that NimbleRun rejects it, leaves the native shortcut unchanged, keeps any previous working shortcut, and shows only one non-blocking reminder with a settings entry.
 
