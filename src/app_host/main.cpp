@@ -2345,10 +2345,14 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
             // NR-022: the refresh the launch-failure dialog scheduled has run
             // to completion, so a future failure can schedule a fresh refresh.
             g_launch_failure_refresh.OnRefreshComplete();
+            // NR-073: the merged snapshot only changes when the whole generation
+            // has reported; refreshing the panel and writing catalog.cache for
+            // the first 1..n-1 results would reset the selection and re-persist
+            // data the UI thread already holds, every cycle (§FR-008).
+            RefreshPanelSnapshot();
+            nimblerun::SaveCatalogCache(nimblerun::DefaultSettingsDir(),
+                                        g_refresh->Snapshot());
         }
-        RefreshPanelSnapshot();
-        nimblerun::SaveCatalogCache(nimblerun::DefaultSettingsDir(),
-                                    g_refresh->Snapshot());
         InvalidateRect(window, nullptr, FALSE);
         return 0;
     }
