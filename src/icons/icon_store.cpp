@@ -612,6 +612,15 @@ bool IconStore::Compact() {
     }
 
     if (!MapFile()) {
+        // NR-075: the pack was replaced but cannot be re-mapped (AV scanner
+        // holding the file between CloseHandle and CreateFileMapping, or any
+        // mapping failure). The store is no longer writable: disabling instead
+        // of leaving a "Ready" store with a dead view keeps the Put/Flush
+        // guards (state_ != Ready / view_ == nullptr) complete and stops
+        // pending_ from growing without bound again (NR-068 class). icons.cache
+        // is a rebuildable accelerator, so no cache is a safe degradation.
+        pending_.clear();
+        state_ = StoreState::Disabled;
         return false;
     }
     header_ = newest;

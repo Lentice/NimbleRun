@@ -29,6 +29,7 @@ using nimblerun::kHeaderSize;
 using nimblerun::kIndexCapacity;
 using nimblerun::kIndexEntrySize;
 using nimblerun::kIndexOffset;
+using nimblerun::kPackByteBudget;
 using nimblerun::kPayloadStart;
 using nimblerun::MakeEmptyPack;
 using nimblerun::PackEntry;
@@ -485,6 +486,29 @@ void TestMaliciousPayloadEnd(const fs::path& dir) {
            "Put + Flush after a malicious header keeps the file bounded");
 }
 
+// NR-075: a CRC-valid pack whose payload_end exceeds the 32 MiB pack budget
+// must not be accepted as Ready even when the file itself is that large -- a
+// single Lookup could otherwise copy close to 4 GiB into a vector. Open
+// classifies it via DecodeHeader as a rebuildable corruption and recreates a
+// bounded empty pack instead of mapping a potentially GB-sized read.
+void TestOverBudgetPack(const fs::path& dir) {
+    std::vector<std::uint8_t> bytes(kPackByteBudget + 1, 0);
+    for (std::size_t slot = 0; slot < 2; ++slot) {
+        PackHeader header;
+        header.generation = static_cast<std::uint32_t>(1 - slot);
+        header.payload_end = kPackByteBudget + 1;
+        EncodeHeader(header, bytes.data() + slot * kHeaderSize);
+    }
+    WriteFileBytes(PackPath(dir), bytes);
+
+    IconStore store(IconStore::IconStorePaths{PackPath(dir)});
+    Expect(store.Open() == StoreState::Ready, "over-budget pack recreated ready");
+    Expect(store.Stats().recreated, "over-budget pack marked recreated");
+    Expect(store.Stats().entries == 0, "recreated pack empty");
+    Expect(ReadFileBytes(PackPath(dir)).size() == kPayloadStart,
+           "over-budget pack rebuilt to the bounded empty-pack size");
+}
+
 void TestRandomFuzz(const fs::path& dir) {
     std::mt19937 rng(20260805);
     for (int i = 0; i < 50; ++i) {
@@ -518,6 +542,7 @@ void RunAll(const fs::path& dir) {
     TestCompactionFailure(dir);
     TestLockedFile(dir);
     TestMaliciousPayloadEnd(dir);
+    TestOverBudgetPack(dir);
     TestRandomFuzz(dir);
 }
 

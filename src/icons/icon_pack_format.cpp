@@ -126,7 +126,15 @@ PackStatus DecodeHeader(const std::uint8_t* data, std::size_t size, PackHeader& 
         // full, and payload_end below kPayloadStart makes an append memcpy over
         // the header slots and the index.
         const std::uint64_t payload_end = ReadLe64(slot + 16);
-        if (payload_end < kPayloadStart || payload_end > size) {
+        // NR-075: a pack budget cap on top of NR-050's file-size bound. A CRC
+        // correct but bloated file (a bit flip, an old bug, or a hand-edited
+        // icons.cache in %LOCALAPPDATA%) would otherwise be accepted as Ready
+        // and a single Lookup could copy close to 4 GiB into a vector
+        // (payload_len is u32). Legit packs never exceed kPackByteBudget --
+        // Flush's eviction keeps payload_end within it -- so this rejects only
+        // pathological files. design-spec §NFR-001 caps the pack at 32 MiB.
+        if (payload_end < kPayloadStart || payload_end > size ||
+            payload_end > kPackByteBudget) {
             continue;
         }
         if (!any_valid || ReadLe32(slot + 8) > ReadLe32(data + best_slot * kHeaderSize + 8)) {

@@ -27,6 +27,11 @@ static_assert(kIndexOffset == 64);
 static_assert(kPayloadStart == 28736);
 static_assert(kHeaderSize * kHeaderSlotCount + kIndexCapacity * kIndexEntrySize == kPayloadStart);
 
+// Byte budget for the whole pack (design-spec §NFR-001); the sole source of
+// the 32 MiB figure. icon_store.h::kMaxPackBytes references this so the read
+// side (DecodeHeader) and the write side (eviction) can never drift.
+inline constexpr std::uint64_t kPackByteBudget = 32ull * 1024ull * 1024ull;
+
 // IEEE 802.3 reflected CRC-32 (poly 0xEDB88320), the same checksum used for the
 // header slots, index entries and payloads. Standard init/final XOR 0xFFFFFFFF.
 std::uint32_t Crc32(const std::uint8_t* data, std::size_t size);

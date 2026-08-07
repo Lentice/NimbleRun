@@ -19,6 +19,7 @@ using nimblerun::kHeaderSize;
 using nimblerun::kIndexCapacity;
 using nimblerun::kIndexEntrySize;
 using nimblerun::kIndexOffset;
+using nimblerun::kPackByteBudget;
 using nimblerun::kPayloadStart;
 using nimblerun::MakeEmptyPack;
 using nimblerun::MakeSourceStamp;
@@ -467,6 +468,51 @@ void TestMaliciousPayloadEnd() {
     }
 }
 
+// NR-075: payload_end is capped by the pack byte budget (design-spec §NFR-001)
+// on top of NR-050's file-size bound. Every header keeps a recomputed valid CRC
+// so the rejection is provably the new budget check, and the fixture file is
+// large enough that the file-size bound is not the deciding factor.
+void TestPackByteBudget() {
+    const auto make_pack = [](std::uint64_t a_end, std::uint64_t b_end, std::size_t size) {
+        std::vector<std::uint8_t> file(size, 0);
+        PackHeader a;
+        a.payload_end = a_end;
+        a.generation = 1;
+        EncodeHeader(a, file.data());
+        PackHeader b;
+        b.payload_end = b_end;
+        b.generation = 0;
+        EncodeHeader(b, file.data() + kHeaderSize);
+        return file;
+    };
+
+    // payload_end one byte over the budget -> both slots rejected.
+    {
+        const auto file = make_pack(kPackByteBudget + 1, kPackByteBudget + 1,
+                                    kPackByteBudget + 1);
+        PackHeader header;
+        Expect(DecodeHeader(file.data(), file.size(), header) == PackStatus::BothHeadersBad,
+               "payload_end over the budget with valid CRC -> BothHeadersBad");
+    }
+    // payload_end exactly at the budget stays legal.
+    {
+        const auto file = make_pack(kPackByteBudget, kPackByteBudget, kPackByteBudget);
+        PackHeader header;
+        Expect(DecodeHeader(file.data(), file.size(), header) == PackStatus::Ok,
+               "payload_end == budget is Ok");
+        Expect(header.payload_end == kPackByteBudget, "budget boundary payload_end round-trips");
+    }
+    // Slot A over the budget, slot B sane but older -> pick the sane slot B.
+    {
+        const auto file = make_pack(kPackByteBudget + 1, kPayloadStart, kPackByteBudget + 1);
+        PackHeader header;
+        Expect(DecodeHeader(file.data(), file.size(), header) == PackStatus::Ok,
+               "over-budget slot A, sane older slot B -> Ok");
+        Expect(header.generation == 0, "picks the sane slot B over the over-budget A");
+        Expect(header.payload_end == kPayloadStart, "sane slot's payload_end wins");
+    }
+}
+
 void TestFuzz() {
     std::mt19937 rng(20260805u);
     std::uniform_int_distribution<std::size_t> len_dist(0, kPayloadStart + 1024);
@@ -509,6 +555,7 @@ int wmain() {
     TestParseStableIdHash();
     TestMakeSourceStamp();
     TestMaliciousPayloadEnd();
+    TestPackByteBudget();
     TestFuzz();
     std::printf("NR-033 icon pack format check PASSED\n");
     return 0;

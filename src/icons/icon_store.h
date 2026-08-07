@@ -64,7 +64,9 @@ public:
     };
 
     // Byte budget for icons.cache (design-spec §NFR-001): target ≤ 32 MiB.
-    static constexpr std::uint64_t kMaxPackBytes = 32ull * 1024ull * 1024ull;
+    // Single source of the 32 MiB figure is icon_pack_format.h (NR-075); the
+    // read side (DecodeHeader) and the eviction side both derive from it.
+    static constexpr std::uint64_t kMaxPackBytes = kPackByteBudget;
 
     // max_bytes overrides the byte budget for eviction tests; production
     // callers leave it at the default.
