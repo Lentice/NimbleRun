@@ -168,3 +168,24 @@ git diff --name-only
 
 （實作者填寫：兩個 Corrupt 回傳點的重設方式、新 case 的 fixture 寫法與斷言、建置與
 CTest 結果、sanity greps、偏差、未完成事項。）
+
+實作（2026-08-08）：
+
+- **settings 重設**：`SettingsStore::Load` 兩個 `Corrupt` 回傳點各在 `return` 前加
+  `out = DefaultSettings();`（default arm `:165`——該處其實仍是 `:153` 的初始值，
+  item 要求加上以備未來；資料迴圈的 `equals == npos` `:187`——此處才是真正被部分
+  解析覆寫過的點）。`Missing`／`NewerSchema` 早退路徑未改。
+- **usage 重設**：`UsageStore::Load` 資料迴圈兩個 `Corrupt` 回傳點（`fields.size()!=3`
+  `:51`、`stable_id/欄位解析失敗` `:60`）各在 `return` 前加 `records_.clear();`；
+  default arm 不需改（`:28` 已清、迴圈未開始）。`Missing`／`NewerSchema` 未改。
+- **測試**：`settings_store_test` 新增 `TestCorruptMidFileUsesDefaults`（schema=1 含
+  2 筆合法鍵值列＋1 列無 `=` 損壞列 → Corrupt＋`hotkey==Alt+Space`＋`theme==System`
+  ＋`recent_count==20`＋`.corrupt` verbatim 保留）；`recent_usage_test` 新增
+  `TestCorruptMidFileClearsRecords`（schema=1 含 2 筆合法列＋1 列非數字欄位 → Corrupt
+  ＋`Records()` 空＋`Recent()` 空＋`.corrupt` verbatim 保留）。既有案例一字未改。
+- **建置與 CTest**：Release build 無新增警告；`ctest` 23/23 全綠。
+- **sanity greps**：`out = DefaultSettings()` 於 settings_store.cpp 3 處（初始 1＋
+  Corrupt 重設 2）；`records_.clear()` 於 usage_store.cpp 4 處（初始 1＋Corrupt 重設
+  2＋其他 1）——都 ≥2；`git diff --name-only`＝settings_store.cpp、usage_store.cpp、
+  settings_store_test.cpp、recent_usage_test.cpp，符合 item 預期。
+- **偏差**：無。未完成事項：無。
