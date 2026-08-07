@@ -2118,6 +2118,150 @@ void UpdateSearchFont(HWND window) {
 // Subclassed EDIT control: forwards Up/Down/Enter/Esc to the panel model
 // (NR-020 list navigation); Left/Right/Home/End stay with the edit control for
 // caret movement (design-spec §4.7). All other keys keep default editing.
+// NR-078: shows the per-item context menu for the row at `cell` anchored at the
+// given screen position (design-spec §4.8): Pin/Unpin, Remove from recent,
+// Open file location and Properties. Shared by the right-click handler (hit
+// cell) and the keyboard Context Menu / Shift+F10 path (selected cell) --
+// §NFR-006 requires the keyboard to reach the same commands. The g_model/g_pins
+// null guard lives here so both callers can call unconditionally.
+void ShowItemMenu(HWND window, int cell, POINT screen_pos) {
+    if (!g_model || !g_pins) {
+        return;
+    }
+    const nimblerun::AppEntry entry = g_model->Rows()[static_cast<std::size_t>(cell)];
+    const bool pinned = g_pins->IsPinned(entry.stable_id);
+
+    const HMENU menu = CreatePopupMenu();
+    if (!menu) {
+        return;
+    }
+    AppendMenuW(menu, MF_STRING, pinned ? kCmdUnpin : kCmdPin,
+                pinned ? context_menu_strings::kUnpin : context_menu_strings::kPin);
+    // NR-062: a missing-pin placeholder's menu is Unpin only -- no Remove
+    // from recent, no Open file location, no Properties. launch_identity is
+    // empty on a placeholder, so IsPathIdentity below would already be
+    // false, but an explicit early exit does not depend on that coincidence.
+    if (!nimblerun::PanelModel::IsMissingPin(entry)) {
+        // NR-040: only offered for rows actually showing in the recent region;
+        // on a pinned row -- or on an NR-053 alphabetical filler row, which also
+        // sits after RecentStartIndex() but has no usage record -- the command
+        // would silently change nothing.
+        const int recent_start = g_model->RecentStartIndex();
+        const bool in_recent = recent_start >= 0 && cell >= recent_start
+                               && cell < g_model->RecentEndIndex();
+        if (in_recent) {
+            AppendMenuW(menu, MF_STRING, kCmdForgetRecent,
+                        context_menu_strings::kRemoveFromRecent);
+        }
+        if (nimblerun::IsPathIdentity(entry.launch_identity)) {
+            AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+            AppendMenuW(menu, MF_STRING, kCmdOpenLocation,
+                        context_menu_strings::kOpenFileLocation);
+            AppendMenuW(menu, MF_STRING, kCmdProperties,
+                        context_menu_strings::kProperties);
+        }
+    }
+
+    SetForegroundWindow(window);
+    g_context_menu_active = true;
+    const UINT command = static_cast<UINT>(TrackPopupMenu(
+        menu, TPM_RIGHTBUTTON | TPM_RETURNCMD, screen_pos.x, screen_pos.y, 0, window, nullptr));
+    g_context_menu_active = false;
+    PostMessageW(window, WM_NULL, 0, 0);
+    DestroyMenu(menu);
+
+    if (command == kCmdPin || command == kCmdUnpin) {
+        if (pinned) {
+            g_pins->Unpin(entry.stable_id);
+        } else {
+            g_pins->Pin(entry.stable_id, entry.display_name,
+                        static_cast<std::int64_t>(std::time(nullptr)));
+        }
+        if (g_pins->Save()) {
+            // The catalog's is_pinned stamp drives the §4.5 pinned-first
+            // tie-break in search results, so it has to follow the store.
+            StampRankingFields();
+            // Refresh just the pin region: SetPins rebuilds the empty-query
+            // rows so the entry moves into/out of the pinned region.
+            g_model->SetPins(g_pins->Records());
+            // NR-031: the pin count drives the derived LRU cap; re-derive it.
+            if (g_icon_cache) {
+                g_icon_cache->SetMaxItems(nimblerun::IconCacheCapacityFor(
+                    g_pins->OrderedPins().size(), g_settings.recent_count));
+            }
+            InvalidateRect(window, nullptr, FALSE);
+        }
+    } else if (command == kCmdOpenLocation) {
+        OpenFileLocation(window, entry);
+    } else if (command == kCmdProperties) {
+        ShowItemProperties(window, entry);
+    } else if (command == kCmdForgetRecent) {
+        // NR-040: drop one usage record, persist, then rebuild the recent
+        // rows through the single existing path. Save() failing leaves the
+        // previous file untouched, so the view is not refreshed either.
+        if (g_usage && g_usage->Forget(entry.stable_id) && g_usage->Save()) {
+            RefreshPanelSnapshot();
+            InvalidateRect(window, nullptr, FALSE);
+        }
+    }
+}
+
+// NR-078: opens the item menu for the currently selected row (Context Menu /
+// Shift+F10; design-spec §4.7). No-op when the model is absent or the
+// selection is out of range. The menu anchors at the selected row's top-left
+// corner: the grid cell or list row rect is computed from the same
+// LayoutForDpi geometry CellAtPoint uses, then converted to screen coordinates
+// and clamped to the panel client rect.
+void OpenKeyboardItemMenu(HWND window) {
+    if (!g_model || g_model->Rows().empty()) {
+        return;
+    }
+    const std::size_t sel = g_model->SelectionIndex();
+    if (sel >= g_model->Rows().size()) {
+        return;
+    }
+    const nimblerun::layout::LayoutPx layout =
+        nimblerun::layout::LayoutForDpi(GetDpiForWindow(window));
+    const int first = g_model->FirstVisibleRow();
+    int rel = static_cast<int>(sel) - first;
+    if (rel < 0) {
+        rel = 0;
+    }
+    int left = 0;
+    int top = 0;
+    if (g_model->Columns() > 1) {
+        const int columns = g_model->Columns();
+        const int cell_width = static_cast<int>(std::lround(
+            nimblerun::layout::kCellWidthDip * layout.scale));
+        const int cell_height = static_cast<int>(std::lround(
+            nimblerun::layout::kCellHeightDip * layout.scale));
+        const int grid_left = static_cast<int>(std::lround(
+            nimblerun::layout::kGridLeftDip * layout.scale));
+        left = grid_left + (rel % columns) * cell_width;
+        top = layout.list_top + (rel / columns) * cell_height;
+    } else {
+        left = layout.list_left;
+        top = layout.list_top + rel * layout.row_height;
+    }
+    RECT client{};
+    GetClientRect(window, &client);
+    if (left < client.left) {
+        left = client.left;
+    }
+    if (top < client.top) {
+        top = client.top;
+    }
+    if (left > client.right) {
+        left = client.right;
+    }
+    if (top > client.bottom) {
+        top = client.bottom;
+    }
+    POINT screen_pos{left, top};
+    ClientToScreen(window, &screen_pos);
+    ShowItemMenu(window, static_cast<int>(sel), screen_pos);
+}
+
 LRESULT CALLBACK SearchEditProc(HWND edit, UINT message, WPARAM w_param, LPARAM l_param) {
     switch (message) {
     case WM_SETFOCUS: {
@@ -2281,6 +2425,21 @@ LRESULT CALLBACK SearchEditProc(HWND edit, UINT message, WPARAM w_param, LPARAM 
                     SetWindowTextW(edit, L"");
                 }
                 return 0;
+            case VK_APPS:
+                // NR-078: the Context Menu key opens the item menu for the
+                // selected row (design-spec §4.7). Swallowed so the EDIT never
+                // shows its native clipboard menu; no-op when there is no
+                // selection.
+                OpenKeyboardItemMenu(GetParent(edit));
+                return 0;
+            case VK_F10:
+                if ((GetKeyState(VK_SHIFT) & 0x8000) != 0) {
+                    // NR-078: Shift+F10 is the keyboard alias for the Context
+                    // Menu key. Plain F10 keeps its default (menu bar) handling.
+                    OpenKeyboardItemMenu(GetParent(edit));
+                    return 0;
+                }
+                break;
             case 'R':
                 if (GetKeyState(VK_CONTROL) < 0) {
                     // Ctrl+R forces a full catalog rebuild (design-spec §4.7).
@@ -2727,87 +2886,11 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
             DispatchTrayCommand(window, command);
             return 0;
         }
-        if (!g_model || !g_pins) {
-            return 0;
-        }
-        const nimblerun::AppEntry entry = g_model->Rows()[static_cast<std::size_t>(cell)];
-        const bool pinned = g_pins->IsPinned(entry.stable_id);
-
-        const HMENU menu = CreatePopupMenu();
-        if (!menu) {
-            return 0;
-        }
-        AppendMenuW(menu, MF_STRING, pinned ? kCmdUnpin : kCmdPin,
-                    pinned ? context_menu_strings::kUnpin : context_menu_strings::kPin);
-        // NR-062: a missing-pin placeholder's menu is Unpin only -- no Remove
-        // from recent, no Open file location, no Properties. launch_identity is
-        // empty on a placeholder, so IsPathIdentity below would already be
-        // false, but an explicit early exit does not depend on that coincidence.
-        if (!nimblerun::PanelModel::IsMissingPin(entry)) {
-            // NR-040: only offered for rows actually showing in the recent region;
-            // on a pinned row -- or on an NR-053 alphabetical filler row, which also
-            // sits after RecentStartIndex() but has no usage record -- the command
-            // would silently change nothing.
-            const int recent_start = g_model->RecentStartIndex();
-            const bool in_recent = recent_start >= 0 && cell >= recent_start
-                                   && cell < g_model->RecentEndIndex();
-            if (in_recent) {
-                AppendMenuW(menu, MF_STRING, kCmdForgetRecent,
-                            context_menu_strings::kRemoveFromRecent);
-            }
-            if (nimblerun::IsPathIdentity(entry.launch_identity)) {
-                AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-                AppendMenuW(menu, MF_STRING, kCmdOpenLocation,
-                            context_menu_strings::kOpenFileLocation);
-                AppendMenuW(menu, MF_STRING, kCmdProperties,
-                            context_menu_strings::kProperties);
-            }
-        }
-
         POINT cursor{};
         GetCursorPos(&cursor);
-        SetForegroundWindow(window);
-        g_context_menu_active = true;
-        const UINT command = static_cast<UINT>(TrackPopupMenu(
-            menu, TPM_RIGHTBUTTON | TPM_RETURNCMD, cursor.x, cursor.y, 0, window, nullptr));
-        g_context_menu_active = false;
-        PostMessageW(window, WM_NULL, 0, 0);
-        DestroyMenu(menu);
-
-        if (command == kCmdPin || command == kCmdUnpin) {
-            if (pinned) {
-                g_pins->Unpin(entry.stable_id);
-            } else {
-                g_pins->Pin(entry.stable_id, entry.display_name,
-                            static_cast<std::int64_t>(std::time(nullptr)));
-            }
-            if (g_pins->Save()) {
-                // The catalog's is_pinned stamp drives the §4.5 pinned-first
-                // tie-break in search results, so it has to follow the store.
-                StampRankingFields();
-                // Refresh just the pin region: SetPins rebuilds the empty-query
-                // rows so the entry moves into/out of the pinned region.
-                g_model->SetPins(g_pins->Records());
-                // NR-031: the pin count drives the derived LRU cap; re-derive it.
-                if (g_icon_cache) {
-                    g_icon_cache->SetMaxItems(nimblerun::IconCacheCapacityFor(
-                        g_pins->OrderedPins().size(), g_settings.recent_count));
-                }
-                InvalidateRect(window, nullptr, FALSE);
-            }
-        } else if (command == kCmdOpenLocation) {
-            OpenFileLocation(window, entry);
-        } else if (command == kCmdProperties) {
-            ShowItemProperties(window, entry);
-        } else if (command == kCmdForgetRecent) {
-            // NR-040: drop one usage record, persist, then rebuild the recent
-            // rows through the single existing path. Save() failing leaves the
-            // previous file untouched, so the view is not refreshed either.
-            if (g_usage && g_usage->Forget(entry.stable_id) && g_usage->Save()) {
-                RefreshPanelSnapshot();
-                InvalidateRect(window, nullptr, FALSE);
-            }
-        }
+        // NR-078: the item branch lives in ShowItemMenu, shared with the
+        // keyboard Context Menu / Shift+F10 path.
+        ShowItemMenu(window, cell, cursor);
         return 0;
     }
     case WM_KILLFOCUS:
