@@ -165,9 +165,20 @@ void IconWorker::Run() {
             result->bitmap = {};  // keep result allocated; fall through to the post
         }
 
+        // NR-077: hand the payload to the UI thread by token, never by a raw
+        // pointer in a WM_APP message -- an unvalidated lParam must never be
+        // dereferenced. Register under the shared mutex before posting; a full
+        // message queue (PostMessageW fails) erases the token, which deletes
+        // the object -- the old "window gone" leak guard.
+        {
+            std::lock_guard<std::mutex> lock(g_handoff_mutex);
+            g_icon_handoffs[reinterpret_cast<std::uintptr_t>(result)] =
+                std::unique_ptr<IconResult>(result);
+        }
         if (!PostMessageW(target_, result_message_, 0,
                           reinterpret_cast<LPARAM>(result))) {
-            delete result;  // window gone: never leak the handoff
+            std::lock_guard<std::mutex> lock(g_handoff_mutex);
+            g_icon_handoffs.erase(reinterpret_cast<std::uintptr_t>(result));
         }
 
         // NR-036 timing 2: when the request queue drains and there is buffered

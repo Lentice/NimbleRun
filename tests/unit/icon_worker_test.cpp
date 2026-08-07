@@ -114,6 +114,8 @@ HWND CreateMessageWindow() {
 }
 
 // Drains kReadyMessage until `want` results are collected or the timeout hits.
+// NR-077: each message's lParam is a token into the shared handoff registry;
+// the result is moved out there, exactly as the production receiver does.
 // WaitMessage blocks only while the queue is empty, so the test never busy-pins.
 bool PumpResults(HWND window, std::vector<std::unique_ptr<IconResult>>& results,
                  int want, DWORD timeout_ms = 5000) {
@@ -121,7 +123,12 @@ bool PumpResults(HWND window, std::vector<std::unique_ptr<IconResult>>& results,
     while (static_cast<int>(results.size()) < want && GetTickCount() < deadline) {
         MSG msg{};
         while (PeekMessageW(&msg, window, kReadyMessage, kReadyMessage, PM_REMOVE)) {
-            results.emplace_back(reinterpret_cast<IconResult*>(msg.lParam));
+            std::lock_guard<std::mutex> lock(nimblerun::g_handoff_mutex);
+            const auto it = nimblerun::g_icon_handoffs.find(static_cast<std::uintptr_t>(msg.lParam));
+            if (it != nimblerun::g_icon_handoffs.end()) {
+                results.emplace_back(std::move(it->second));
+                nimblerun::g_icon_handoffs.erase(it);
+            }
         }
         if (static_cast<int>(results.size()) >= want) {
             break;
@@ -132,14 +139,20 @@ bool PumpResults(HWND window, std::vector<std::unique_ptr<IconResult>>& results,
 }
 
 // Drains the queue for a fixed short window (used to assert nothing arrives).
+// An unknown token is consumed from the queue but ignored (never a result).
 bool AnyResultIn(HWND window, std::vector<std::unique_ptr<IconResult>>& results,
                  DWORD wait_ms = 150) {
     const DWORD deadline = GetTickCount() + wait_ms;
     while (GetTickCount() < deadline) {
         MSG msg{};
         while (PeekMessageW(&msg, window, kReadyMessage, kReadyMessage, PM_REMOVE)) {
-            results.emplace_back(reinterpret_cast<IconResult*>(msg.lParam));
-            return true;
+            std::lock_guard<std::mutex> lock(nimblerun::g_handoff_mutex);
+            const auto it = nimblerun::g_icon_handoffs.find(static_cast<std::uintptr_t>(msg.lParam));
+            if (it != nimblerun::g_icon_handoffs.end()) {
+                results.emplace_back(std::move(it->second));
+                nimblerun::g_icon_handoffs.erase(it);
+                return true;
+            }
         }
         Sleep(2);
     }
@@ -237,6 +250,38 @@ void TestThrowingProviderIsContained() {
     DestroyWindow(window);
 }
 
+// NR-077: a message whose lParam is not a registered handoff token must be
+// ignored, never dereferenced -- a same-integrity process can post WM_APP+9
+// to our HWND. The consumption helpers here mirror the production receiver:
+// the unknown token is removed from the queue but produces no result, and the
+// process keeps working.
+void TestUnknownTokenIgnored() {
+    const HWND window = CreateMessageWindow();
+    FakeProvider provider;
+    IconWorker worker(window, kReadyMessage, provider);
+    worker.Start();
+
+    worker.Post({Entry(L"ok"), Key(L"ok"), true});
+    std::vector<std::unique_ptr<IconResult>> results;
+    Expect(PumpResults(window, results, 1), "a real request still arrives");
+    Expect(results[0]->encoded_key == L"ok|48", "real result key matches");
+
+    // Post a token that was never registered (lParam = 1). It must not be
+    // consumed as a result.
+    PostMessageW(window, kReadyMessage, 0, 1);
+    std::vector<std::unique_ptr<IconResult>> unknown;
+    Expect(!AnyResultIn(window, unknown), "an unknown token is ignored");
+
+    // A later real request still flows through the registry normally.
+    worker.Post({Entry(L"two"), Key(L"two"), true});
+    std::vector<std::unique_ptr<IconResult>> later;
+    Expect(PumpResults(window, later, 1), "a later real request arrives");
+    Expect(later[0]->encoded_key == L"two|48", "later real result key matches");
+
+    worker.Stop();
+    DestroyWindow(window);
+}
+
 void TestVisibleJumpsTheQueue() {
     const HWND window = CreateMessageWindow();
     FakeProvider provider;
@@ -327,7 +372,12 @@ void TestStopDropsQueueAndSilencesNewPosts() {
     std::vector<std::unique_ptr<IconResult>> results;
     MSG msg{};
     while (PeekMessageW(&msg, window, kReadyMessage, kReadyMessage, PM_REMOVE)) {
-        results.emplace_back(reinterpret_cast<IconResult*>(msg.lParam));
+        std::lock_guard<std::mutex> lock(nimblerun::g_handoff_mutex);
+        const auto it = nimblerun::g_icon_handoffs.find(static_cast<std::uintptr_t>(msg.lParam));
+        if (it != nimblerun::g_icon_handoffs.end()) {
+            results.emplace_back(std::move(it->second));
+            nimblerun::g_icon_handoffs.erase(it);
+        }
     }
     const std::size_t before = results.size();
 
@@ -686,6 +736,7 @@ int wmain() {
     TestThreeRequestsDeliverThreeResults();
     TestFailureStillReports();
     TestThrowingProviderIsContained();
+    TestUnknownTokenIgnored();
     TestVisibleJumpsTheQueue();
     TestVisibleJumpsAheadOfQueuedPrewarm();
     TestStopDropsQueueAndSilencesNewPosts();

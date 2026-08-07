@@ -7,9 +7,11 @@
 #include <condition_variable>
 #include <cstdint>
 #include <deque>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 namespace nimblerun {
@@ -31,6 +33,17 @@ struct IconResult {
     std::wstring encoded_key;
     IconBitmap bitmap;  // empty on failure
 };
+
+// NR-077: worker threads hand result objects to the UI thread by token, never
+// by a raw pointer in a WM_APP message -- any same-integrity process can post
+// to our HWND, and dereferencing an unvalidated lParam is a crash vector
+// (design-spec §NFR-004). The registry owns the posted objects; a message
+// carries only the object's address as a token, and the receiver ignores
+// tokens it cannot find. Senders register under the mutex before posting and
+// erase on a failed post; the UI thread moves the object out and erases on
+// receipt; WM_DESTROY clears whatever is still in flight.
+inline std::mutex g_handoff_mutex;
+inline std::unordered_map<std::uintptr_t, std::unique_ptr<IconResult>> g_icon_handoffs;
 
 // NR-036: tagged queue element. A Load task carries an IconRequest; a Flush
 // task carries the pinned-id list and the wall-clock time the UI handed over,
