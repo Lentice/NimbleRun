@@ -88,7 +88,8 @@ void SaveCatalogCache(const std::wstring& directory, const std::vector<AppEntry>
     WriteCache(directory, entries);
 }
 
-bool LoadCatalogCache(const std::wstring& directory, std::vector<AppEntry>& out) {
+bool LoadCatalogCache(const std::wstring& directory, std::vector<AppEntry>& out,
+                      bool* newer_schema) {
     std::vector<std::wstring> lines;
     switch (ReadVersionedLines(directory, kFileName, kSchemaVersion, lines)) {
     case VersionedReadStatus::Loaded:
@@ -102,11 +103,18 @@ bool LoadCatalogCache(const std::wstring& directory, std::vector<AppEntry>& out)
         PreserveCorrupt(directory, kFileName);
         return false;
     case VersionedReadStatus::OlderSchema:
-    case VersionedReadStatus::NewerSchema:
         // NR-047: an older schema is a valid file this build cannot read, not a
-        // corrupt one. Leave it in place and rebuild over it, matching the
-        // newer-schema arm above; quarantining every user's cache on a routine
-        // schema bump produces confusing .corrupt files for a non-event.
+        // corrupt one. Leave it in place and rebuild over it; quarantining every
+        // user's cache on a routine schema bump produces confusing .corrupt
+        // files for a non-event.
+        return false;
+    case VersionedReadStatus::NewerSchema:
+        // NR-079: a newer schema is another build's data. design-spec §10.4
+        // forbids overwriting it, so report it (the host stops writing for the
+        // rest of the run) while the file is left untouched.
+        if (newer_schema) {
+            *newer_schema = true;
+        }
         return false;
     }
 

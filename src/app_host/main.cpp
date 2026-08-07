@@ -267,6 +267,12 @@ struct RebuildResult {
 // whatever is still in flight. Tokens are object addresses.
 std::unordered_map<std::uintptr_t, std::unique_ptr<RebuildResult>> g_rebuild_handoffs;
 
+// NR-079: set once at startup when the on-disk catalog.cache carries a newer
+// schema than this build reads. design-spec §10.4 forbids overwriting that
+// file, so cache writes stay off for the run (the cache is a rebuildable
+// snapshot; the in-memory one keeps working); a re-read next launch re-decides.
+bool g_catalog_cache_disable_writes = false;
+
 std::int64_t MonotonicMs() {
     return static_cast<std::int64_t>(GetTickCount64());
 }
@@ -2548,8 +2554,13 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
             // the first 1..n-1 results would reset the selection and re-persist
             // data the UI thread already holds, every cycle (§FR-008).
             RefreshPanelSnapshot();
-            nimblerun::SaveCatalogCache(nimblerun::DefaultSettingsDir(),
-                                        g_refresh->Snapshot());
+            // NR-079: a newer-schema catalog.cache is another build's data --
+            // never overwrite it (design-spec §10.4); the in-memory snapshot
+            // keeps working and the flag stays set for the whole run.
+            if (!g_catalog_cache_disable_writes) {
+                nimblerun::SaveCatalogCache(nimblerun::DefaultSettingsDir(),
+                                            g_refresh->Snapshot());
+            }
         }
         InvalidateRect(window, nullptr, FALSE);
         return 0;
@@ -3088,9 +3099,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     nimblerun::CatalogRefreshCoordinator refresh;
     g_refresh = &refresh;
     std::vector<nimblerun::AppEntry> cached;
-    if (nimblerun::LoadCatalogCache(nimblerun::DefaultSettingsDir(), cached)) {
+    bool cache_newer = false;
+    if (nimblerun::LoadCatalogCache(nimblerun::DefaultSettingsDir(), cached, &cache_newer)) {
         refresh.SetSnapshot(std::move(cached));
     }
+    // NR-079: a newer-schema file on disk must not be overwritten by this build
+    // (design-spec §10.4); the flag stays set for the whole run.
+    g_catalog_cache_disable_writes = cache_newer;
 
     nimblerun::UsageStore usage(nimblerun::DefaultSettingsDir());
     const nimblerun::UsageLoadResult usage_result = usage.Load();

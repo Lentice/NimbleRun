@@ -16,7 +16,10 @@ void SaveCatalogCache(const std::wstring& directory, const std::vector<AppEntry>
 // Returns true when a valid cache was loaded into `out`; false when the file is
 // missing, corrupt, or from a newer schema (the caller rebuilds in the
 // background). A corrupt file is renamed aside for diagnostics, never deleted
-// silently.
-bool LoadCatalogCache(const std::wstring& directory, std::vector<AppEntry>& out);
+// silently. NR-079: when the file is from a *newer* schema, `newer_schema` (if
+// non-null) is set to true so the caller can stop overwriting it (design-spec
+// §10.4 forbids overwriting a newer schema's cache).
+bool LoadCatalogCache(const std::wstring& directory, std::vector<AppEntry>& out,
+                      bool* newer_schema = nullptr);
 
 } // namespace nimblerun

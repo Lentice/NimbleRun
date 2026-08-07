@@ -401,12 +401,37 @@ void TestCorruptCacheRebuilds() {
 
 void TestNewerSchemaCacheRebuilds() {
     const std::wstring dir = TempDir();
-    std::ofstream cache(fs::path(dir) / L"catalog.cache", std::ios::binary | std::ios::trunc);
-    cache << "schema=999\n";
+    {
+        std::ofstream cache(fs::path(dir) / L"catalog.cache", std::ios::binary | std::ios::trunc);
+        cache << "schema=999\n";
+    }  // closed and flushed before Load (NR-079)
     std::vector<AppEntry> loaded;
-    Expect(!LoadCatalogCache(dir, loaded), "newer schema cache is not loaded");
+    bool newer_schema = false;
+    Expect(!LoadCatalogCache(dir, loaded, &newer_schema), "newer schema cache is not loaded");
+    Expect(newer_schema, "newer schema is reported through the out-param");
     Expect(fs::exists(fs::path(dir) / L"catalog.cache"),
            "newer schema file is left untouched");
+    RemoveTreeBestEffort(dir);
+}
+
+// NR-079: a newer schema is another build's data; the report lets the host stop
+// overwriting it, and `out` must stay untouched so nothing partial leaks in.
+void TestNewerSchemaCacheReportsAndLeavesOutUntouched() {
+    const std::wstring dir = TempDir();
+    {
+        std::ofstream cache(fs::path(dir) / L"catalog.cache", std::ios::binary | std::ios::trunc);
+        cache << "schema=3\n";
+    }  // closed and flushed before Load (NR-079)
+    std::vector<AppEntry> loaded = {Entry(L"seed", AppSource::UserStartMenu)};
+    bool newer_schema = false;
+    Expect(!LoadCatalogCache(dir, loaded, &newer_schema), "newer schema cache is not loaded");
+    Expect(newer_schema, "newer schema is reported through the out-param");
+    Expect(loaded.size() == 1 && loaded[0].stable_id == L"seed",
+           "a failed newer-schema load leaves `out` untouched");
+    Expect(fs::exists(fs::path(dir) / L"catalog.cache"),
+           "newer schema file is left untouched");
+    Expect(!fs::exists(fs::path(dir) / L"catalog.cache.corrupt"),
+           "newer schema file is not quarantined as corrupt");
     RemoveTreeBestEffort(dir);
 }
 
@@ -463,13 +488,18 @@ void TestCacheRoundTripSearchAlias() {
 }
 
 // NR-047: an older schema is a valid file this build cannot read; loading it
-// fails and the file is left in place, not quarantined as corrupt.
+// fails and the file is left in place, not quarantined as corrupt. NR-079:
+// unlike a newer schema, an older one must not set the newer-schema flag.
 void TestOlderSchemaCacheRebuilds() {
     const std::wstring dir = TempDir();
-    std::ofstream cache(fs::path(dir) / L"catalog.cache", std::ios::binary | std::ios::trunc);
-    cache << "schema=1\n";
+    {
+        std::ofstream cache(fs::path(dir) / L"catalog.cache", std::ios::binary | std::ios::trunc);
+        cache << "schema=1\n";
+    }  // closed and flushed before Load (NR-079)
     std::vector<AppEntry> loaded;
-    Expect(!LoadCatalogCache(dir, loaded), "older schema cache is not loaded");
+    bool newer_schema = false;
+    Expect(!LoadCatalogCache(dir, loaded, &newer_schema), "older schema cache is not loaded");
+    Expect(!newer_schema, "an older schema does not set the newer-schema flag");
     Expect(fs::exists(fs::path(dir) / L"catalog.cache"),
            "older schema file is left in place");
     Expect(!fs::exists(fs::path(dir) / L"catalog.cache.corrupt"),
@@ -528,8 +558,9 @@ int wmain() {
     TestSetSnapshotNormalizesSearchAlias();
     TestCacheRoundTrip();
     TestCacheRoundTripSearchAlias();
-    TestCorruptCacheRebuilds();
     TestNewerSchemaCacheRebuilds();
+    TestNewerSchemaCacheReportsAndLeavesOutUntouched();
+    TestCorruptCacheRebuilds();
     TestOlderSchemaCacheRebuilds();
     TestFailureNoRebuildTriggersOnce();
     TestFailureWithRebuildMerges();
