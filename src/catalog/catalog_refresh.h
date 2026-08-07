@@ -91,6 +91,11 @@ private:
     std::unordered_map<CatalogSource, std::vector<AppEntry>> source_entries_;
     std::unordered_map<CatalogSource, bool> pending_;
     std::unordered_map<CatalogSource, std::int64_t> last_event_ms_;
+    // NR-065: per-source event timestamp as of BeginGeneration. ApplySourceResult
+    // and ApplySourceFailure clear pending_ only when the timestamp is still the
+    // snapshot, so an event that arrived while a scan was in flight survives to
+    // trigger the existing debounce timer for a second, fresher rebuild.
+    std::unordered_map<CatalogSource, std::int64_t> generation_event_snapshot_;
     std::vector<CatalogSource> active_sources_;
     std::unordered_map<CatalogSource, bool> received_;
     std::uint64_t generation_ = 0;

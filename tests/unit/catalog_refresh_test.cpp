@@ -89,6 +89,58 @@ void TestOverflowForcesFullRescan() {
            "overflowed source is due for a full rescan");
 }
 
+// NR-065: a scan with no event arriving during it clears the pending flag as
+// before -- this round of results is the latest, so the debounce timer has
+// nothing left to do.
+void TestResultNoEventDuringScanClearsPending() {
+    CatalogRefreshCoordinator c;
+    c.NotifySourceEvent(CatalogSource::StartMenu, 1000);
+    const std::uint64_t gen = c.BeginGeneration({CatalogSource::StartMenu});
+    c.ApplySourceResult(gen, CatalogSource::StartMenu,
+                        {Entry(L"a", AppSource::UserStartMenu)});
+    Expect(!c.HasDueRebuild(1000 + CatalogRefreshCoordinator::kDebounceMs),
+           "no event during the scan clears pending");
+}
+
+// NR-065: an event arriving after BeginGeneration must survive the apply that
+// finishes the scan. The pending flag stays set, so the existing debounce timer
+// triggers a second, fresher rebuild -- the mid-scan change is not dropped.
+void TestResultEventDuringScanKeepsPending() {
+    CatalogRefreshCoordinator c;
+    c.NotifySourceEvent(CatalogSource::StartMenu, 1000);
+    const std::uint64_t gen = c.BeginGeneration({CatalogSource::StartMenu});
+    c.NotifySourceEvent(CatalogSource::StartMenu, 1200);  // mid-scan event
+    c.ApplySourceResult(gen, CatalogSource::StartMenu,
+                        {Entry(L"a", AppSource::UserStartMenu)});
+    const auto due = c.DueSources(1200 + CatalogRefreshCoordinator::kDebounceMs);
+    Expect(due.size() == 1 && due[0] == CatalogSource::StartMenu,
+           "event during the scan keeps pending for a second rebuild");
+}
+
+// NR-065: the failure wrap-up clears pending normally when nothing changed
+// mid-scan.
+void TestFailureNoEventDuringScanClearsPending() {
+    CatalogRefreshCoordinator c;
+    c.NotifySourceEvent(CatalogSource::StartMenu, 1000);
+    const std::uint64_t gen = c.BeginGeneration({CatalogSource::StartMenu});
+    c.ApplySourceFailure(gen, CatalogSource::StartMenu);
+    Expect(!c.HasDueRebuild(1000 + CatalogRefreshCoordinator::kDebounceMs),
+           "failed scan with no new event clears pending");
+}
+
+// NR-065: the failure wrap-up must not drop an event that arrived while the
+// failed scan was in flight either.
+void TestFailureEventDuringScanKeepsPending() {
+    CatalogRefreshCoordinator c;
+    c.NotifySourceEvent(CatalogSource::StartMenu, 1000);
+    const std::uint64_t gen = c.BeginGeneration({CatalogSource::StartMenu});
+    c.NotifySourceEvent(CatalogSource::StartMenu, 1200);  // mid-scan event
+    c.ApplySourceFailure(gen, CatalogSource::StartMenu);
+    const auto due = c.DueSources(1200 + CatalogRefreshCoordinator::kDebounceMs);
+    Expect(due.size() == 1 && due[0] == CatalogSource::StartMenu,
+           "event during a failed scan keeps pending for a second rebuild");
+}
+
 // An older generation completing after a newer one never overwrites the newer
 // snapshot.
 void TestStaleGenerationDoesNotOverwrite() {
@@ -460,6 +512,10 @@ void TestSettingsCopyIsIndependent() {
 int wmain() {
     TestDebounceCoalescing();
     TestOverflowForcesFullRescan();
+    TestResultNoEventDuringScanClearsPending();
+    TestResultEventDuringScanKeepsPending();
+    TestFailureNoEventDuringScanClearsPending();
+    TestFailureEventDuringScanKeepsPending();
     TestStaleGenerationDoesNotOverwrite();
     TestFailureKeepsOldSnapshot();
     TestSingleSourceFailureIsolation();

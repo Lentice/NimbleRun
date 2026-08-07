@@ -10,6 +10,10 @@ namespace nimblerun {
 namespace {
 
 constexpr std::int64_t kNever = std::numeric_limits<std::int64_t>::min();
+// NR-065: snapshot value for a source that never had an event. Distinct from
+// kNever (full-rescan marker) and from any real monotonic timestamp, so the
+// "did the timestamp change during the scan?" comparison stays truthful.
+constexpr std::int64_t kNoEventSentinel = std::numeric_limits<std::int64_t>::max();
 
 constexpr CatalogSource kSources[] = {
     CatalogSource::StartMenu,
@@ -66,8 +70,16 @@ std::uint64_t CatalogRefreshCoordinator::BeginGeneration(std::vector<CatalogSour
     ++generation_;
     active_sources_ = std::move(sources);
     received_.clear();
+    generation_event_snapshot_.clear();
     for (const CatalogSource source : active_sources_) {
         received_[source] = false;
+        // NR-065: snapshot the event timestamp at scan start; a source that
+        // never had an event stays the kNoEventSentinel, and the comparison in
+        // ApplySourceResult/Failure reads the same way so an event arriving
+        // mid-scan is always a visible change.
+        const auto event = last_event_ms_.find(source);
+        generation_event_snapshot_[source] =
+            event == last_event_ms_.end() ? kNoEventSentinel : event->second;
     }
     return generation_;
 }
@@ -79,7 +91,16 @@ bool CatalogRefreshCoordinator::ApplySourceResult(std::uint64_t generation,
         return false;  // a newer rebuild started; this worker is stale
     }
     source_entries_[source] = std::move(entries);
-    pending_[source] = false;
+    // NR-065: clear pending only when no event arrived after the scan started
+    // (the BeginGeneration timestamp snapshot is unchanged). An event mid-scan
+    // keeps pending set, and the existing 500 ms debounce timer picks the
+    // source up for a second, fresher rebuild instead of dropping the change.
+    const auto event = last_event_ms_.find(source);
+    const std::int64_t current =
+        event == last_event_ms_.end() ? kNoEventSentinel : event->second;
+    if (current == generation_event_snapshot_.at(source)) {
+        pending_[source] = false;
+    }
     received_[source] = true;
     if (GenerationComplete(generation)) {
         RebuildMerged();
@@ -92,7 +113,14 @@ bool CatalogRefreshCoordinator::ApplySourceFailure(std::uint64_t generation,
     if (generation != generation_) {
         return false;
     }
-    pending_[source] = false;
+    // NR-065: same conditional clear as ApplySourceResult -- a failure must not
+    // drop an event that arrived while the failed scan was in flight.
+    const auto event = last_event_ms_.find(source);
+    const std::int64_t current =
+        event == last_event_ms_.end() ? kNoEventSentinel : event->second;
+    if (current == generation_event_snapshot_.at(source)) {
+        pending_[source] = false;
+    }
     received_[source] = true;  // the source's old entries stay; others still apply
     if (GenerationComplete(generation)) {
         RebuildMerged();
