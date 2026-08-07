@@ -203,3 +203,33 @@ git diff --name-only
 
 （實作者填寫：registry 的實際宣告位置與型別、送訊/接收/drain 的鎖範圍、未知 token
 測試的寫法、建置與 CTest 結果、sanity greps、偏差、未完成事項。）
+
+實作（2026-08-08）：
+
+- **registry 宣告位置**：`g_handoff_mutex` 與 `g_icon_handoffs` 以 `inline` 全域宣告
+  在 `icons/icon_worker.h`（`IconResult` 的所在地，`icon_worker.cpp` 與 `main.cpp`
+  都 include 它，C++17 inline variable 保證單一實例）；`g_rebuild_handoffs`
+  （`RebuildResult` 是 main.cpp 的全域型別）宣告在 `main.cpp` 檔案範圍，與 icon map
+  共用同一個 `nimblerun::g_handoff_mutex`。兩 map 型別皆
+  `std::unordered_map<std::uintptr_t, std::unique_ptr<...>>`，token＝物件位址。
+- **送訊端**：`StartRebuild` lambda 與 `IconWorker::Run` 各在 `PostMessageW` 前 lock
+  下 `map[ptr] = std::unique_ptr(...)`；post 失敗在 lock 內 `erase`（unique_ptr
+  析構即 delete，維持 NR-063 防洩漏語意）。
+- **接收端**：兩個 case 各在解參考前 lock 下 `find((uintptr_t)l_param)`，未命中
+  `return 0`，命中 `std::move(it->second)`＋`erase(it)` 後其餘處理一字不改。
+- **`WM_DESTROY` drain**：因 map 持有 unique_ptr 擁有權，兩段 `PeekMessageW` drain
+  的 `delete reinterpret_cast<...>` **必須移除**（否則與 map 雙重釋放）；drain 只
+  PM_REMOVE 拉掉佇列訊息，之後單一 lock 下 `clear()` 兩 map 一次釋放所有在途
+  payload。這是對 item 範例的必要調整。
+- **測試**：`icon_worker_test` 的三個結果消費點（`PumpResults`／`AnyResultIn`／
+  `TestStopDropsQueueAndSilencesNewPosts` 的手工 drain）改為從 registry move-out
+  （與 production receiver 同形）；新增 `TestUnknownTokenIgnored`——post 一筆
+  `lParam=1` 的未註冊 token → 不被消費為結果、process 存活、後續真實請求照常。
+- **建置與 CTest**：Release build 無新增警告；`ctest` 23/23 全綠。
+- **sanity greps**：`g_rebuild_handoffs|g_icon_handoffs` 於 main.cpp＝宣告 1＋送訊
+  插入 1＋送訊失敗 erase 1＋接收查詢 2＋WM_DESTROY clear 2；`g_rebuild_handoffs.erase`
+  至少 1；tests 下再無 `reinterpret_cast` 成結果型別的裸指標轉換。
+- **偏差**：registry 放 `icon_worker.h`（非 main.cpp 檔案範圍），因 `IconWorker::Run`
+  與接收端跨 TU 都要看到同一個 map，這是「共用全域」的唯一可行位置；item 已預留
+  「以實際宣告位置為準」。`git diff`＝main.cpp、icon_worker.cpp、icon_worker.h、
+  icon_worker_test.cpp（多出 icon_worker.h，屬預期的宣告搬移）。未完成事項：無。
