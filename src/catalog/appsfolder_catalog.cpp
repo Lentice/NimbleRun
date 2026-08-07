@@ -127,13 +127,15 @@ AppsFolderEnumerateResult EnumerateAppsFolderCatalog() {
     AppsFolderEnumerateResult result;
     ComGuard com;
     if (!com.Usable()) {
+        result.source_ok = false;  // source-level failure (design-spec §FR-008)
         return result;
     }
 
     IShellItem* apps_item = nullptr;
     if (FAILED(SHGetKnownFolderItem(FOLDERID_AppsFolder, KF_FLAG_DEFAULT, nullptr,
                                     IID_PPV_ARGS(&apps_item)))) {
-        return result;  // source-level failure: empty result, other sources untouched
+        result.source_ok = false;  // source-level failure: keep old entries
+        return result;
     }
 
     IEnumShellItems* enumerator = nullptr;
@@ -141,6 +143,7 @@ AppsFolderEnumerateResult EnumerateAppsFolderCatalog() {
         apps_item->BindToHandler(nullptr, BHID_EnumItems, IID_PPV_ARGS(&enumerator));
     apps_item->Release();
     if (FAILED(bind)) {
+        result.source_ok = false;  // source-level failure: keep old entries
         return result;
     }
 

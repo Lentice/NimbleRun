@@ -144,6 +144,9 @@ void TestAppsFolderInvariants() {
     // Start Menu known-folder smoke test). The invariants below must hold on any
     // machine, including one with zero packaged apps.
     const AppsFolderEnumerateResult result = EnumerateAppsFolderCatalog();
+    // NR-063: the source-ok contract -- a live enumeration is a source-level
+    // success even if the machine has zero packaged apps.
+    Expect(result.source_ok, "live AppsFolder enumeration reports source_ok");
     for (const AppEntry& entry : result.entries) {
         Expect(!entry.display_name.empty(), "entry display name");
         Expect(!entry.launch_identity.empty(), "entry launch identity");

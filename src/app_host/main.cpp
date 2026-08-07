@@ -1199,26 +1199,39 @@ void StartRebuild(HWND window, std::vector<nimblerun::CatalogSource> sources) {
             result->generation = generation;
             result->source = source;
             switch (source) {
-            case nimblerun::CatalogSource::StartMenu:
-                result->entries = nimblerun::EnumerateStartMenuCatalog();
+            case nimblerun::CatalogSource::StartMenu: {
+                // NR-063: the enumerator reports source-level failure; the worker
+                // just forwards it so the coordinator keeps the old entries.
+                const auto res = nimblerun::EnumerateStartMenuCatalog();
+                result->failed = !res.source_ok;
+                result->entries = std::move(res.entries);
                 break;
+            }
             case nimblerun::CatalogSource::AppsFolder:
                 // NR-028: "Include Windows apps" off skips the enumeration
                 // entirely (no COM walk) and the source reports empty, so the
                 // merged snapshot clears old packaged-app entries via the same
                 // ApplySourceResult path.
-                result->entries = settings_snapshot.include_windows_apps
-                    ? nimblerun::EnumerateAppsFolderCatalog().entries
-                    : std::vector<nimblerun::AppEntry>{};
+                if (settings_snapshot.include_windows_apps) {
+                    const auto res = nimblerun::EnumerateAppsFolderCatalog();
+                    result->failed = !res.source_ok;
+                    result->entries = std::move(res.entries);
+                } else {
+                    result->entries = std::vector<nimblerun::AppEntry>{};
+                }
                 break;
             case nimblerun::CatalogSource::UserFolder:
                 result->entries =
                     nimblerun::EnumerateUserFolderCatalog(settings_snapshot);
                 break;
             }
-            PostMessageW(window, kRebuildDoneMessage,
-                         static_cast<WPARAM>(generation),
-                         reinterpret_cast<LPARAM>(result));
+            // NR-063: the worker owns this allocation until the UI thread takes
+            // it; a full message queue (PostMessageW fails) would leak it.
+            if (!PostMessageW(window, kRebuildDoneMessage,
+                              static_cast<WPARAM>(generation),
+                              reinterpret_cast<LPARAM>(result))) {
+                delete result;
+            }
         });
         g_rebuild_threads.push_back(std::move(worker));
     }
@@ -2249,20 +2262,27 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
         // result here can never show a partial catalog.
         std::unique_ptr<RebuildResult> result(
             reinterpret_cast<RebuildResult*>(l_param));
-        bool generation_complete = false;
+        // NR-063: result_applied names what the boolean actually is -- this
+        // source's outcome was accepted for the current generation -- not "the
+        // whole generation finished". The launch-failure gate resets only when
+        // every source in the cycle has reported.
+        bool result_applied = false;
         if (result->failed) {
-            generation_complete =
+            result_applied =
                 g_refresh->ApplySourceFailure(result->generation, result->source);
         } else {
             if (g_refresh->ApplySourceResult(result->generation, result->source,
                                              std::move(result->entries))) {
-                generation_complete = true;
+                result_applied = true;
+                // NR-063: a successful source-ok enumeration refreshes the
+                // AppsFolder staleness clock; a failure keeps it stale so the
+                // 10-minute retry can run again (design-spec §FR-008).
                 if (result->source == nimblerun::CatalogSource::AppsFolder) {
                     g_refresh->RecordAppsFolderSuccess(MonotonicMs());
                 }
             }
         }
-        if (generation_complete) {
+        if (result_applied && g_refresh->GenerationComplete(result->generation)) {
             // NR-022: the refresh the launch-failure dialog scheduled has run
             // to completion, so a future failure can schedule a fresh refresh.
             g_launch_failure_refresh.OnRefreshComplete();

@@ -228,22 +228,30 @@ std::wstring KnownFolderPath(REFKNOWNFOLDERID folder) {
 
 } // namespace
 
-std::vector<AppEntry> EnumerateStartMenuCatalog() {
-    std::vector<AppEntry> out;
+StartMenuEnumerateResult EnumerateStartMenuCatalog() {
+    StartMenuEnumerateResult result;
     ComGuard com;
     if (!com.Usable()) {
-        return out;
+        result.source_ok = false;  // source-level failure (design-spec §FR-008)
+        return result;
     }
 
     const std::wstring user_root = KnownFolderPath(FOLDERID_Programs);
     if (!user_root.empty()) {
-        EnumerateProgramsDirectory(user_root, AppSource::UserStartMenu, out);
+        EnumerateProgramsDirectory(user_root, AppSource::UserStartMenu, result.entries);
     }
     const std::wstring common_root = KnownFolderPath(FOLDERID_CommonPrograms);
     if (!common_root.empty()) {
-        EnumerateProgramsDirectory(common_root, AppSource::CommonStartMenu, out);
+        EnumerateProgramsDirectory(common_root, AppSource::CommonStartMenu, result.entries);
     }
-    return out;
+    // NR-063: at least one known folder resolved (even to an empty walk) is a
+    // success; only when both fail is this a source-level failure. A user who
+    // removed the Start Menu folder would otherwise have their old entries wiped
+    // on every rebuild.
+    if (user_root.empty() && common_root.empty()) {
+        result.source_ok = false;
+    }
+    return result;
 }
 
 void EnumerateProgramsDirectory(const std::wstring& root, AppSource source,

@@ -11,16 +11,19 @@ namespace nimblerun {
 // Result of one AppsFolder enumeration pass. entries are plain copyable
 // AppEntry values with no Shell COM pointer retained; failed_items counts
 // child items dropped for a Shell error so callers can record partial results
-// without crashing (design-spec §11).
+// without crashing (design-spec §11). source_ok is false for a source-level
+// failure (COM unavailable, known-folder lookup or BindToHandler failure); the
+// caller keeps the source's old entries in that case (design-spec §FR-008).
 struct AppsFolderEnumerateResult {
     std::vector<AppEntry> entries;
     std::size_t failed_items = 0;
+    bool source_ok = true;
 };
 
 // Enumerates packaged / Store apps through the FOLDERID_AppsFolder Shell
 // namespace. Never touches WindowsApps or the packaged directory's EXEs. A
-// source-level failure yields an empty result so other sources are untouched; a
-// single bad child is skipped and counted.
+// source-level failure yields an empty result with source_ok = false so other
+// sources are untouched; a single bad child is skipped and counted.
 //
 // A child whose parsing name is an AUMID gets its source_path from the Shell's
 // link-target property when it has one, so the row shows the real program path

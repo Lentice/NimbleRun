@@ -80,9 +80,13 @@ public:
     // Replaces the whole merged snapshot directly (startup cache load).
     void SetSnapshot(std::vector<AppEntry> merged);
 
+    // True when every source in the current generation has reported (success or
+    // failure). NR-063: exposed for the host to reset its launch-failure gate
+    // only when a whole rebuild cycle has finished, not on the first source.
+    bool GenerationComplete(std::uint64_t generation) const;
+
 private:
     void RebuildMerged();
-    bool GenerationComplete(std::uint64_t generation) const;
 
     std::unordered_map<CatalogSource, std::vector<AppEntry>> source_entries_;
     std::unordered_map<CatalogSource, bool> pending_;

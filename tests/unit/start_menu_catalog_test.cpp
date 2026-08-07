@@ -260,7 +260,11 @@ void TestMissingDirectory() {
 void TestKnownFoldersSmoke() {
     // SHGetKnownFolderPath(FOLDERID_Programs) on a dev machine resolves to the
     // real user Start Menu; acceptable as a smoke test of the wiring only.
-    const std::vector<AppEntry> entries = EnumerateStartMenuCatalog();
+    // NR-063: the struct contract is pinned here too -- a live enumeration is a
+    // source-ok success regardless of entry count.
+    const nimblerun::StartMenuEnumerateResult result = EnumerateStartMenuCatalog();
+    Expect(result.source_ok, "live enumeration reports source_ok");
+    const std::vector<AppEntry>& entries = result.entries;
     Expect(!entries.empty(), "real Start Menu produced entries");
     for (const AppEntry& entry : entries) {
         Expect(!entry.display_name.empty(), "smoke display name");
