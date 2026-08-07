@@ -358,6 +358,38 @@ void TestForgetThenRelaunch() {
     fs::remove_all(dir);
 }
 
+// NR-071: gatekeeper -- "Remove from recent" must clear the score completely,
+// not just the timestamp. Forget() deletes the whole UsageRecord, so the app
+// vanishes from Records() and its usage score can no longer influence any
+// ordering, and the wipe survives a Save/Load round trip. This pins the
+// NR-071 §4 decision that a future "clear recency only, keep the count" change
+// would be a bug.
+void TestForgetClearsScoreCompletely() {
+    const std::wstring dir = MakeTempDir("forget_score");
+    UsageStore store(dir);
+    store.Load();
+    store.RecordLaunch(L"alpha", 100);
+    store.RecordLaunch(L"alpha", 200);
+    store.RecordLaunch(L"alpha", 300);  // 3 launches; a clearly positive score
+    Expect(store.Recent()[0].total_launches == 3, "alpha accumulated launches");
+    Expect(nimblerun::UsageScore(store.Records()[0], 400) > 0,
+           "alpha has a positive usage score before forget");
+
+    Expect(store.Forget(L"alpha"), "forget removes alpha");
+    for (const UsageRecord& record : store.Records()) {
+        Expect(record.stable_id != L"alpha", "alpha record gone from memory");
+    }
+
+    Expect(store.Save(), "save after forget");
+    UsageStore reloaded(dir);
+    Expect(reloaded.Load() == UsageLoadResult::Loaded, "reload after forget");
+    for (const UsageRecord& record : reloaded.Records()) {
+        Expect(record.stable_id != L"alpha", "alpha still gone after reload");
+    }
+    Expect(reloaded.Recent().empty(), "no recent rows remain for alpha");
+    fs::remove_all(dir);
+}
+
 // NR-053: guard rail -- this item reordered the empty state in PanelModel,
 // not UsageStore. Recent() must keep its contract: newest last-launch first,
 // and never padded up to the cap with other apps.
@@ -470,6 +502,7 @@ int wmain() {
     TestForgetEmpty();
     TestForgetPersists();
     TestForgetThenRelaunch();
+    TestForgetClearsScoreCompletely();
     TestRecentNeverPads();
     TestUsageScore();
     TestReconcileDropsAbsent();

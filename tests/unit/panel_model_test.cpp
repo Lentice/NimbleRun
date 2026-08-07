@@ -758,33 +758,33 @@ void TestRecentStartIndexNoPins() {
     Expect(model.RecentStartIndex() == 0, "no pins -> recent region starts at row 0");
 }
 
-// NR-053: design-spec §4.2 rule 2 -- the non-pinned (recent) region is
-// ordered by usage score, not by last-launch recency. The fixture feeds the
-// recent list in recency order (score 5 was last launched); the model must
-// reorder it to 100, 20, 5.
+// NR-071: design-spec §4.2 rule 2 -- the non-pinned (recent) region keeps the
+// order SetRecent() was called with, which is UsageStore::Recent()'s newest-first
+// order. The fixture keeps NR-053's deliberately "wrong" scores (5/100/20) and
+// passes the entries newest-first; the model must preserve the input order and
+// ignore the scores entirely, so the app launched most recently leads.
 
-void TestRecentOrderedByUsageScore() {
+void TestRecentOrderedByRecency() {
     const std::vector<AppEntry> catalog = {
         Entry(L"low", L"Low"), Entry(L"high", L"High"), Entry(L"mid", L"Mid")};
     std::vector<AppEntry> recent = {
         Entry(L"low", L"Low"), Entry(L"high", L"High"), Entry(L"mid", L"Mid")};
-    recent[0].usage_score = 5;
-    recent[1].usage_score = 100;
+    recent[0].usage_score = 5;   // newest launch, but the worst score
+    recent[1].usage_score = 100;  // best score, but not the newest
     recent[2].usage_score = 20;
     PanelModel model(&catalog, std::move(recent));
     Expect(model.Rows().size() == 3, "three recent entries fill no catalog rows");
-    Expect(model.Rows()[0].stable_id == L"high", "score 100 leads the recent region");
-    Expect(model.Rows()[1].stable_id == L"mid", "score 20 is second");
-    Expect(model.Rows()[2].stable_id == L"low", "score 5 trails despite newest recency");
+    Expect(model.Rows()[0].stable_id == L"low", "the most recently launched leads the recent region");
+    Expect(model.Rows()[1].stable_id == L"high", "input order kept despite the best score");
+    Expect(model.Rows()[2].stable_id == L"mid", "the oldest launch trails");
     Expect(model.RecentStartIndex() == 0, "no pins keeps the recent boundary at 0");
 }
 
-// NR-053: §4.5 tie-breaks within rule 2 -- equal score compares name length,
-// then the case-insensitive name. "Beta"(4) is shorter than the two 5-char
-// names; among those the invariant-lowercase order puts "alpha" before
-// "Zebra", which a raw case-sensitive compare would flip.
+// NR-071: the recent region preserves input order even when every entry has the
+// same usage score -- the old NR-053 tie-breaks (name length, then
+// case-insensitive name) no longer apply, because the region is never sorted.
 
-void TestRecentTieBreakByLengthThenName() {
+void TestRecentIgnoresNameAndScoreTieBreaks() {
     const std::vector<AppEntry> catalog = {
         Entry(L"a", L"Zebra"), Entry(L"b", L"alpha"), Entry(L"c", L"Beta")};
     std::vector<AppEntry> recent = {catalog[0], catalog[1], catalog[2]};
@@ -792,9 +792,31 @@ void TestRecentTieBreakByLengthThenName() {
         entry.usage_score = 7;
     }
     PanelModel model(&catalog, std::move(recent));
-    Expect(model.Rows()[0].stable_id == L"c", "shorter name wins the length tie");
-    Expect(model.Rows()[1].stable_id == L"b", "case-insensitive order: alpha before Zebra");
-    Expect(model.Rows()[2].stable_id == L"a", "Zebra last among the equal scores");
+    Expect(model.Rows()[0].stable_id == L"a", "input order kept: Zebra first");
+    Expect(model.Rows()[1].stable_id == L"b", "input order kept: alpha second");
+    Expect(model.Rows()[2].stable_id == L"c", "input order kept: Beta last");
+}
+
+// NR-071: five entries with usage_score deliberately ascending (opposite to the
+// newest-first input order) must come out in exactly the input order, starting
+// at RecentStartIndex().
+
+void TestRecentPreservesInputOrder() {
+    const std::vector<AppEntry> catalog = {
+        Entry(L"id0", L"App0"), Entry(L"id1", L"App1"), Entry(L"id2", L"App2"),
+        Entry(L"id3", L"App3"), Entry(L"id4", L"App4")};
+    std::vector<AppEntry> recent = {
+        catalog[4], catalog[3], catalog[2], catalog[1], catalog[0]};
+    for (std::size_t i = 0; i < recent.size(); ++i) {
+        recent[i].usage_score = static_cast<int>(i);  // ascending, opposite to input order
+    }
+    PanelModel model(&catalog, std::move(recent));
+    Expect(model.RecentStartIndex() == 0, "recent region starts at the first row");
+    Expect(model.Rows().size() == 5, "all five entries show");
+    for (std::size_t i = 0; i < 5; ++i) {
+        Expect(model.Rows()[i].stable_id == L"id" + std::to_wstring(4 - i),
+               "recent region matches the newest-first input order exactly");
+    }
 }
 
 // NR-053: §FR-011 -- the pinned region is never sorted by score, and
@@ -818,9 +840,10 @@ void TestRecentEndIndexExcludesFiller() {
     Expect(model.RecentEndIndex() == -1, "search results have no recent region");
 }
 
-// NR-061: with the NR-053 filler removed, the pinned region is just the pins
-// in pin order and there is nothing after the recent region to fill.
-void TestPinnedRegionNotSortedByScore() {
+// NR-071: the pinned region keeps pin order even after the recent-region
+// score sort was removed entirely -- pins are never sorted by anything, and
+// RecentStartIndex() still points at the pinned/recent boundary.
+void TestPinnedRegionStillNotSorted() {
     std::vector<AppEntry> catalog = {
         Entry(L"p1", L"PinOne"), Entry(L"p2", L"PinTwo"),
         Entry(L"r1", L"RecentOne"), Entry(L"r2", L"RecentTwo")};
@@ -969,9 +992,10 @@ int wmain() {
     TestRecentStartIndexFiltered();
     TestRecentStartIndexNoPins();
     TestRecentEndIndexExcludesFiller();
-    TestRecentOrderedByUsageScore();
-    TestRecentTieBreakByLengthThenName();
-    TestPinnedRegionNotSortedByScore();
+    TestRecentOrderedByRecency();
+    TestRecentIgnoresNameAndScoreTieBreaks();
+    TestRecentPreservesInputOrder();
+    TestPinnedRegionStillNotSorted();
     TestEmptyStateEmptyCatalogNoCrash();
     TestEmptyStateHasNoFiller();
     TestEmptyStateAllEmpty();

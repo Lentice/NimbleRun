@@ -3,45 +3,8 @@
 #include "search/search_engine.h"
 
 #include <algorithm>
-#include <string_view>
 
 namespace nimblerun {
-namespace {
-
-// NR-053: mirrors search_engine.cpp's NormalizedName() so the empty state and
-// the search results order names identically (design-spec §4.4). The catalog
-// snapshot is pre-normalized; the display-name fallback covers an entry whose
-// normalized_name is empty.
-std::wstring_view DisplayNameKey(const AppEntry& entry) {
-    return entry.normalized_name.empty()
-        ? std::wstring_view(entry.display_name)
-        : std::wstring_view(entry.normalized_name);
-}
-
-// NR-053: design-spec §4.2 rule 2. The non-pinned region is ordered by the
-// usage score already stamped on each entry, with the §4.5 tie-breaks below
-// it (higher score, then shorter name, then case-insensitive name, then
-// stable id). This is the SearchApps comparator's tail (search_engine.cpp:
-// 170-181) with the "pinned first" layer dropped -- the sorted region is
-// entirely non-pinned. Keep the two in sync: the recency store only sorts by
-// last launch, so without this sort a rarely used app opened an hour ago would
-// outrank a daily driver.
-bool OrderByScoreThenName(const AppEntry& left, const AppEntry& right) {
-    if (left.usage_score != right.usage_score) {
-        return left.usage_score > right.usage_score;
-    }
-    if (left.display_name.size() != right.display_name.size()) {
-        return left.display_name.size() < right.display_name.size();
-    }
-    const std::wstring_view left_name = DisplayNameKey(left);
-    const std::wstring_view right_name = DisplayNameKey(right);
-    if (left_name != right_name) {
-        return left_name < right_name;
-    }
-    return left.stable_id < right.stable_id;
-}
-
-} // namespace
 
 PanelModel::PanelModel(const std::vector<AppEntry>* catalog,
                        std::vector<AppEntry> recent)
@@ -125,15 +88,14 @@ void PanelModel::RefreshRows() {
             }
         }
         recent_end_ = static_cast<int>(rows_.size());
-        // NR-053: design-spec §4.2 rule 2 orders the non-pinned region by
-        // usage score, not by last-launch recency. The score is the value
-        // already stamped on every snapshot entry by StampRankingFields
-        // (§4.6), so no extra lookup is needed here. The range starts at
-        // recent_start_ so the pinned region is never sorted (§FR-011), and
-        // stable_sort keeps the recency order among entries the comparator
-        // considers equal.
-        std::stable_sort(rows_.begin() + recent_start_, rows_.end(),
-                         OrderByScoreThenName);
+        // NR-071: the recent region is deliberately NOT sorted here.
+        // UsageStore::Recent() already returns records newest-first (last
+        // launch descending, stable id ascending on ties) and the loop above
+        // preserves that order, so the most recently launched app is the first
+        // non-pinned cell. NR-053 used to re-sort this range by usage_score;
+        // that made a daily driver outrank an app opened ten minutes ago,
+        // which is the opposite of what the recent region means. Apps that
+        // need a fixed position are pinned -- design-spec §4.2 rule 2.
     } else if (catalog_ != nullptr) {
         recent_start_ = -1;
         recent_end_ = -1;
