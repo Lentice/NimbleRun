@@ -545,7 +545,16 @@ int CellAtPoint(HWND window, int x, int y) {
     }
     const nimblerun::layout::LayoutPx layout =
         nimblerun::layout::LayoutForDpi(GetDpiForWindow(window));
-    if (y < layout.list_top) {
+    // NR-064: the footer band begins at kFooterTopDip for both layouts (grid 4
+    // rows and list 8 rows both end at 456 DIP), so y >= footer_top is a miss.
+    // Without this lower bound a footer click computed row first+8 (the 9th,
+    // unpainted result) and launched an app the user could not see; the point is
+    // now a window-drag (NR-039), not a launch. The hit-test bound is computed
+    // here exactly like the grid_left bound below; LayoutPx carries no footer
+    // field on purpose -- it is hit-test-only geometry, not layout geometry.
+    const int footer_top = static_cast<int>(std::lround(
+        nimblerun::layout::kFooterTopDip * layout.scale));
+    if (y < layout.list_top || y >= footer_top) {
         return -1;
     }
     const int columns = g_model->Columns();
@@ -556,6 +565,12 @@ int CellAtPoint(HWND window, int x, int y) {
             nimblerun::layout::kCellHeightDip * layout.scale));
         const int grid_left = static_cast<int>(std::lround(
             nimblerun::layout::kGridLeftDip * layout.scale));
+        // NR-064: C++ integer division truncates toward zero, so an x left of
+        // the grid (e.g. the 17 DIP margin) used to map to column 0 and launch
+        // the first cell. Reject before dividing.
+        if (x < grid_left) {
+            return -1;
+        }
         const int col = (x - grid_left) / cell_width;
         const int row = (y - layout.list_top) / cell_height;
         if (col < 0 || col >= columns || row < 0) {
@@ -564,7 +579,9 @@ int CellAtPoint(HWND window, int x, int y) {
         const int index = g_model->FirstVisibleRow() + row * columns + col;
         return index < static_cast<int>(g_model->Rows().size()) ? index : -1;
     }
-    if (x < layout.list_left) {
+    // NR-064: the margin between the row text and the window's right edge used
+    // to hit the row anyway; only the painted list region selects.
+    if (x < layout.list_left || x >= layout.list_right) {
         return -1;
     }
     const int index =
