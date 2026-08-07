@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -135,6 +136,25 @@ bool UsageStore::RecordLaunch(std::wstring stable_id, std::int64_t last_launch_u
     record.last_launch_utc = last_launch_utc;
     records_.push_back(std::move(record));
     return true;
+}
+
+bool UsageStore::Reconcile(const std::vector<AppEntry>& catalog) {
+    // An empty catalog means "no data yet" (first launch, failed scan, in-flight
+    // rebuild), never "all apps are gone". Never drop records against it: a
+    // single failed scan must not wipe usage history.
+    if (catalog.empty()) {
+        return false;
+    }
+    std::unordered_set<std::wstring_view> present;
+    present.reserve(catalog.size());
+    for (const AppEntry& entry : catalog) {
+        present.insert(entry.stable_id);
+    }
+    const std::size_t before = records_.size();
+    std::erase_if(records_, [&](const UsageRecord& record) {
+        return present.find(record.stable_id) == present.end();
+    });
+    return records_.size() != before;
 }
 
 std::vector<UsageRecord> UsageStore::Recent(int cap) const {

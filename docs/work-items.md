@@ -97,7 +97,7 @@
 | NR-058 | A corrupt or too-new user-data file reaches the user and the log | 3 | `done` | — | [NR-058](work-items/NR-058-store-load-failures-surface.md) |
 | NR-059 | `Render()` paints the same icon fallback and empty state twice | 3 | `done` | — | [NR-059](work-items/NR-059-render-duplicate-paint.md) |
 | NR-060 | Right-clicking the panel's empty area offers Refresh / Settings / About | 3 | `done` | NR-013, NR-018 | [NR-060](work-items/NR-060-panel-empty-area-context-menu.md) |
-| NR-061 | Empty state shows only pins and recents, no alphabetical filler | 3 | `ready` | NR-053 | [NR-061](work-items/NR-061-empty-state-no-filler.md) |
+| NR-061 | Empty state shows only pins and recents, no alphabetical filler | 3 | `done` | NR-053 | [NR-061](work-items/NR-061-empty-state-no-filler.md) |
 | NR-062 | A pin with no matching app shows as a removable missing tile | 3 | `ready` | NR-061 | [NR-062](work-items/NR-062-missing-pin-placeholder.md) |
 
 ## Dependency lanes

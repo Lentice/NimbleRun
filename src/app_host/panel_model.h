@@ -85,6 +85,12 @@ public:
     // Equals Rows().size() when the empty-query view happens to be all pins.
     int RecentStartIndex() const { return recent_start_; }
 
+    // One past the last row backed by an actual usage record, or -1 when there
+    // is no recent region. NR-053's alphabetical filler also lands after
+    // RecentStartIndex(), but has no usage record, so "Remove from recent"
+    // must gate on this end instead (it silently did nothing on filler rows).
+    int RecentEndIndex() const { return recent_end_; }
+
     bool HasSelection() const { return !rows_.empty() && selected_ >= 0; }
     std::size_t SelectionIndex() const { return static_cast<std::size_t>(selected_); }
     const AppEntry& SelectedEntry() const { return rows_[selected_]; }
@@ -147,6 +153,8 @@ private:
     // NR-040: first recent-region row index (see RecentStartIndex()); -1 when
     // there is no recent region.
     int recent_start_ = -1;
+    // End of the usage-backed recent rows (see RecentEndIndex()).
+    int recent_end_ = -1;
 };
 
 } // namespace nimblerun

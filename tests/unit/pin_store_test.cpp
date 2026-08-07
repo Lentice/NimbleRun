@@ -275,10 +275,9 @@ void TestPanelModelPinnedFirst() {
     const auto& rows = model.Rows();
     Expect(rows[0].stable_id == L"p", "pinned entry comes before recent");
     Expect(rows[1].stable_id == L"r1", "recent follows; pinned app not repeated");
-    // NR-053: §4.2 rule 3 fills the rest of the page, so the count grew from
-    // 2 to 3; the point of this test -- no duplicate -- is unchanged.
-    Expect(rows.size() == 3 && rows[2].stable_id == L"r2",
-           "empty-state fill appends the remaining catalog entry");
+    // NR-061 overrode NR-053's alphabetical filler: r2 has no usage record and
+    // is not pinned, so it never appears in the empty-query view.
+    Expect(rows.size() == 2, "no filler: only the pin and the one recent app show");
     std::size_t pinned_count = 0;
     for (const AppEntry& row : rows) {
         if (row.stable_id == L"p") {
@@ -294,11 +293,9 @@ void TestPanelModelHidesAbsentPin() {
     const std::vector<AppEntry> catalog = {Entry(L"a", L"Alpha")};
     PanelModel model(&catalog, {});
     model.SetPins({L"ghost_app"});
-    // NR-053: §4.2 rule 3 fills the empty state, so the catalog's entry shows
-    // even though the pin is absent; the point is that ghost_app itself is
-    // never rendered.
-    Expect(model.Rows().size() == 1 && model.Rows()[0].stable_id == L"a",
-           "absent pin is skipped; the fill shows the catalog entry");
+    // NR-061 overrode NR-053's alphabetical filler: with the pin absent and no
+    // recent apps, the empty-query view has nothing to show at all.
+    Expect(model.Rows().empty(), "absent pin and no recent apps: no rows at all");
     for (const AppEntry& row : model.Rows()) {
         Expect(row.stable_id != L"ghost_app", "absent app's pin not shown in the model");
     }

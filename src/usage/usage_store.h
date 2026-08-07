@@ -1,5 +1,7 @@
 #pragma once
 
+#include "catalog/app_entry.h"
+
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -56,6 +58,14 @@ public:
     // changed and the caller should not Save(). Persistence is the caller's
     // job, exactly as it is for RecordLaunch().
     bool Forget(std::wstring_view stable_id);
+
+    // NR-061: drops every record whose stable_id is absent from `catalog`, so
+    // an uninstalled app cannot reappear in the recent region with its old
+    // score after a reinstall. Mirrors PinStore::Reconcile's contract: the
+    // caller must pass a real (non-empty) catalog snapshot -- reconciling
+    // against an empty one during startup would wipe every record. Returns
+    // false when nothing was dropped, in which case the caller must not Save().
+    bool Reconcile(const std::vector<AppEntry>& catalog);
 
     // Recent list: newest last-launch first, ties broken by ascending
     // stable_id so the order is deterministic, capped at `cap`. Empty when

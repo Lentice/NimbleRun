@@ -109,6 +109,9 @@ namespace list_strings {
 constexpr wchar_t kWindowsApp[] = L"Windows app";
 constexpr wchar_t kBuildingCatalog[] = L"Building app catalog\u2026";
 constexpr wchar_t kNoMatchingApps[] = L"No matching apps";
+// NR-061: shown for the empty-query state now that the panel no longer fills
+// with alphabetical catalog entries (overrides NR-053's fill behavior).
+constexpr wchar_t kNoRecentApps[] = L"No pinned or recent apps yet";
 } // namespace list_strings
 
 // NR-021: centralized footer key-hint strings (design-spec §4.9). Fixed
@@ -953,10 +956,15 @@ void DrawIconOrFallback(const nimblerun::AppEntry& entry,
 }
 
 // NR-059: identical in both layouts except the row height (design-spec §4.3).
-void DrawEmptyStateHint(float row_height) {
-    const wchar_t* hint = g_model->CatalogAvailable()
-        ? list_strings::kNoMatchingApps
-        : list_strings::kBuildingCatalog;
+// NR-061: searching distinguishes "no results for this query" from "no pins
+// or recent apps yet" -- kNoMatchingApps only makes sense for the former; the
+// empty-query state no longer fills with catalog entries, so it needs its own
+// hint text.
+void DrawEmptyStateHint(float row_height, bool searching) {
+    const wchar_t* hint = !g_model->CatalogAvailable()
+        ? list_strings::kBuildingCatalog
+        : (searching ? list_strings::kNoMatchingApps
+                     : list_strings::kNoRecentApps);
     g_render_target->DrawText(
         hint, static_cast<UINT32>(wcslen(hint)), g_text_format,
         D2D1::RectF(nimblerun::layout::kListLeftDip, nimblerun::layout::kListTopDip,
@@ -1091,6 +1099,13 @@ void RefreshPanelSnapshot() {
     }
     // Pins are loaded first because they feed the is_pinned stamp.
     RefreshPins();
+    // NR-061: drops usage records for apps no longer in the catalog before
+    // ranking runs, so an uninstalled app cannot reappear in the recent region
+    // with its old score after a reinstall. Guarded on a non-empty snapshot:
+    // reconciling against an empty one during startup would wipe every record.
+    if (!g_refresh->Snapshot().empty() && g_usage->Reconcile(g_refresh->Snapshot())) {
+        g_usage->Save();
+    }
     StampRankingFields();
     g_model->SetCatalog(&g_refresh->MutableSnapshot());
     std::vector<nimblerun::UsageRecord> recent_records = g_usage->Recent(g_settings.recent_count);
@@ -1474,7 +1489,7 @@ void Render(HWND window) {
             }
 
             if (rows.empty()) {
-                DrawEmptyStateHint(nimblerun::layout::kCellHeightDip);
+                DrawEmptyStateHint(nimblerun::layout::kCellHeightDip, /*searching=*/false);
             }
         } else {
             const int first = g_model->FirstVisibleRow();
@@ -1585,7 +1600,7 @@ void Render(HWND window) {
                 }
             }
             if (rows.empty()) {
-                DrawEmptyStateHint(nimblerun::layout::kRowHeightDip);
+                DrawEmptyStateHint(nimblerun::layout::kRowHeightDip, /*searching=*/true);
             }
         }
     }
@@ -2551,9 +2566,12 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
         AppendMenuW(menu, MF_STRING, pinned ? kCmdUnpin : kCmdPin,
                     pinned ? context_menu_strings::kUnpin : context_menu_strings::kPin);
         // NR-040: only offered for rows actually showing in the recent region;
-        // on a pinned row the command would silently change nothing.
+        // on a pinned row -- or on an NR-053 alphabetical filler row, which also
+        // sits after RecentStartIndex() but has no usage record -- the command
+        // would silently change nothing.
         const int recent_start = g_model->RecentStartIndex();
-        const bool in_recent = recent_start >= 0 && cell >= recent_start;
+        const bool in_recent = recent_start >= 0 && cell >= recent_start
+                               && cell < g_model->RecentEndIndex();
         if (in_recent) {
             AppendMenuW(menu, MF_STRING, kCmdForgetRecent,
                         context_menu_strings::kRemoveFromRecent);

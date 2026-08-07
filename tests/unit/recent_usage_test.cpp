@@ -1,5 +1,7 @@
 #include "usage/usage_store.h"
 
+#include "catalog/app_entry.h"
+
 #include <windows.h>
 
 #include <cstdio>
@@ -12,6 +14,7 @@
 
 namespace fs = std::filesystem;
 
+using nimblerun::AppEntry;
 using nimblerun::UsageLoadResult;
 using nimblerun::UsageRecord;
 using nimblerun::UsageStore;
@@ -377,6 +380,58 @@ void TestUsageScore() {
     Expect(score(1, INT64_MAX) == 1 + 8, "the newest possible timestamp gets the top bonus");
 }
 
+// NR-061: Reconcile(catalog) drops usage records for apps no longer in the
+// catalog (docs/work-items/NR-061-empty-state-no-filler.md), mirroring
+// PinStore::Reconcile's shape but without a retention window -- usage history
+// is not a user decision the way a pin is (NR-040 decision 4).
+
+AppEntry CatalogEntry(std::wstring id) {
+    AppEntry entry;
+    entry.stable_id = std::move(id);
+    return entry;
+}
+
+void TestReconcileDropsAbsent() {
+    const std::wstring dir = MakeTempDir("reconcile_drop");
+    UsageStore store(dir);
+    store.Load();
+    store.RecordLaunch(L"kept1", 100);
+    store.RecordLaunch(L"kept2", 200);
+    store.RecordLaunch(L"gone", 300);
+    const std::vector<AppEntry> catalog = {CatalogEntry(L"kept1"), CatalogEntry(L"kept2")};
+    Expect(store.Reconcile(catalog), "dropping an absent record returns true");
+    Expect(store.Records().size() == 2, "only the two catalog-present records remain");
+    for (const UsageRecord& record : store.Records()) {
+        Expect(record.stable_id != L"gone", "the absent record was dropped");
+    }
+    fs::remove_all(dir);
+}
+
+void TestReconcileEmptyCatalogKeepsAll() {
+    const std::wstring dir = MakeTempDir("reconcile_empty_catalog");
+    UsageStore store(dir);
+    store.Load();
+    store.RecordLaunch(L"alpha", 100);
+    store.RecordLaunch(L"beta", 200);
+    const std::vector<AppEntry> empty_catalog;
+    Expect(!store.Reconcile(empty_catalog), "an empty catalog never drops records");
+    Expect(store.Records().size() == 2, "all records survive an empty-catalog reconcile");
+    fs::remove_all(dir);
+}
+
+void TestReconcileNoChange() {
+    const std::wstring dir = MakeTempDir("reconcile_no_change");
+    UsageStore store(dir);
+    store.Load();
+    store.RecordLaunch(L"alpha", 100);
+    store.RecordLaunch(L"beta", 200);
+    const std::vector<AppEntry> catalog = {CatalogEntry(L"alpha"), CatalogEntry(L"beta"),
+                                            CatalogEntry(L"gamma")};
+    Expect(!store.Reconcile(catalog), "no absent records means no change");
+    Expect(store.Records().size() == 2, "record count unchanged");
+    fs::remove_all(dir);
+}
+
 } // namespace
 
 int wmain() {
@@ -398,6 +453,9 @@ int wmain() {
     TestForgetThenRelaunch();
     TestRecentNeverPads();
     TestUsageScore();
-    std::printf("NR-009 recent usage check PASSED\n");
+    TestReconcileDropsAbsent();
+    TestReconcileEmptyCatalogKeepsAll();
+    TestReconcileNoChange();
+    std::printf("NR-009/NR-061 recent usage check PASSED\n");
     return 0;
 }

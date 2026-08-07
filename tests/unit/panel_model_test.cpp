@@ -1,9 +1,7 @@
 #include "app_host/panel_model.h"
-#include "icons/icon_cache.h"
 #include "search/search_engine.h"
 
 #include <algorithm>
-#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -14,9 +12,6 @@ using nimblerun::AppEntry;
 using nimblerun::AppSource;
 using nimblerun::PanelAction;
 using nimblerun::PanelModel;
-using std::chrono::duration_cast;
-using std::chrono::microseconds;
-using std::chrono::steady_clock;
 
 namespace {
 
@@ -783,8 +778,27 @@ void TestRecentTieBreakByLengthThenName() {
 
 // NR-053: §FR-011 -- the pinned region is never sorted by score, and
 // RecentStartIndex() keeps pointing at the pinned/recent boundary across the
-// score sort and the fill.
+// score sort.
 
+// NR-061 overrode NR-053's alphabetical filler (docs/work-items/NR-061-empty-
+// state-no-filler.md): RecentEndIndex() no longer needs to exclude filler
+// rows because there is no filler, but it must still mark the end of the
+// usage-backed region and go to -1 outside the empty-query state.
+void TestRecentEndIndexExcludesFiller() {
+    std::vector<AppEntry> catalog = {
+        Entry(L"p1", L"PinOne"), Entry(L"r1", L"RecentOne"),
+        Entry(L"f1", L"FillerOne"), Entry(L"f2", L"FillerTwo")};
+    PanelModel model(&catalog, {catalog[1]});
+    model.SetPins({L"p1"});
+    Expect(model.RecentStartIndex() == 1, "recent region starts after the pin");
+    Expect(model.RecentEndIndex() == 2, "recent region holds only the one recent row");
+    Expect(model.Rows().size() == 2, "no filler: only the pin and the recent row show");
+    model.SetQuery(L"pin");
+    Expect(model.RecentEndIndex() == -1, "search results have no recent region");
+}
+
+// NR-061: with the NR-053 filler removed, the pinned region is just the pins
+// in pin order and there is nothing after the recent region to fill.
 void TestPinnedRegionNotSortedByScore() {
     std::vector<AppEntry> catalog = {
         Entry(L"p1", L"PinOne"), Entry(L"p2", L"PinTwo"),
@@ -797,52 +811,8 @@ void TestPinnedRegionNotSortedByScore() {
     model.SetPins({L"p1", L"p2"});
     Expect(model.Rows()[0].stable_id == L"p1", "pin order kept despite score 1");
     Expect(model.Rows()[1].stable_id == L"p2", "pin order kept despite score 999");
-    Expect(model.RecentStartIndex() == 2, "sort and fill leave the recent boundary at 2");
-    Expect(model.Rows().size() == 4, "two pins plus the two remaining catalog entries");
-    Expect(model.Rows()[2].stable_id == L"r1" && model.Rows()[3].stable_id == L"r2",
-           "the remaining catalog entries fill after the boundary in name order");
-}
-
-// NR-053: design-spec §4.2 rule 3 -- with no pins and no recent rows the
-// empty state fills up to one visible page with the alphabetically-first
-// catalog entries.
-
-void TestEmptyStateFillsToOnePage() {
-    const std::vector<AppEntry> catalog = CatalogOf(100);
-    PanelModel model(&catalog, {});
-    Expect(model.Rows().size() == nimblerun::kIconCacheWorkingSetItems,
-           "empty state fills exactly one page of cells");
-    std::vector<AppEntry> expected = catalog;
-    std::stable_sort(expected.begin(), expected.end(),
-                     [](const AppEntry& a, const AppEntry& b) {
-                         const std::wstring_view an =
-                             a.normalized_name.empty() ? std::wstring_view(a.display_name)
-                                                       : std::wstring_view(a.normalized_name);
-                         const std::wstring_view bn =
-                             b.normalized_name.empty() ? std::wstring_view(b.display_name)
-                                                       : std::wstring_view(b.normalized_name);
-                         if (an != bn) {
-                             return an < bn;
-                         }
-                         return a.stable_id < b.stable_id;
-                     });
-    for (std::size_t i = 0; i < model.Rows().size(); ++i) {
-        Expect(model.Rows()[i].stable_id == expected[i].stable_id,
-               "fill rows are the alphabetically-first catalog entries");
-    }
-}
-
-// NR-053: a catalog smaller than one page is not padded with empty rows.
-
-void TestEmptyStateFillDoesNotManufactureRows() {
-    const std::vector<AppEntry> catalog = {
-        Entry(L"a", L"Alpha"), Entry(L"b", L"Beta"), Entry(L"c", L"Gamma")};
-    PanelModel model(&catalog, {});
-    Expect(model.Rows().size() == 3, "fewer entries than a page are not padded");
-    Expect(model.Rows()[0].stable_id == L"a" &&
-           model.Rows()[1].stable_id == L"b" &&
-           model.Rows()[2].stable_id == L"c",
-           "the catalog's three entries are all shown");
+    Expect(model.RecentStartIndex() == 2, "recent boundary sits right after the two pins");
+    Expect(model.Rows().size() == 2, "no filler: only the two pins show, no recent apps given");
 }
 
 // NR-053: both empty-catalog shapes (nullptr and an empty vector) show no
@@ -858,105 +828,25 @@ void TestEmptyStateEmptyCatalogNoCrash() {
     Expect(!model_empty.HasSelection(), "no selection with an empty catalog");
 }
 
-// NR-053: the fill must not duplicate an app that is both pinned and
-// alphabetically early.
-
-void TestEmptyStateFillExcludesPinnedApp() {
-    const std::vector<AppEntry> catalog = {
-        Entry(L"a", L"Alpha"), Entry(L"b", L"Beta"), Entry(L"c", L"Gamma")};
-    PanelModel model(&catalog, {});
-    model.SetPins({L"a"});
-    std::size_t alpha_count = 0;
-    for (const AppEntry& row : model.Rows()) {
-        if (row.stable_id == L"a") {
-            ++alpha_count;
-        }
-    }
-    Expect(model.Rows()[0].stable_id == L"a", "pinned Alpha leads the rows");
-    Expect(alpha_count == 1, "pinned Alpha is not re-added by the fill");
-    Expect(model.Rows().size() == 3, "pinned plus fill covers the whole catalog");
-}
-
-// NR-053: the fill must not duplicate an app that is both in the recent list
-// and alphabetically early.
-
-void TestEmptyStateFillExcludesRecentApp() {
-    const std::vector<AppEntry> catalog = {
-        Entry(L"a", L"Alpha"), Entry(L"b", L"Beta"), Entry(L"c", L"Gamma")};
-    std::vector<AppEntry> recent = {catalog[0]};
-    recent[0].usage_score = 99;
+// NR-061: docs/work-items/NR-061-empty-state-no-filler.md Agent check -- the
+// empty-query view is exactly the pin and the recent app, nothing else from
+// the catalog leaks in.
+void TestEmptyStateHasNoFiller() {
+    const std::vector<AppEntry> catalog = CatalogOf(4);
+    std::vector<AppEntry> recent = {catalog[1]};
     PanelModel model(&catalog, std::move(recent));
-    std::size_t alpha_count = 0;
-    for (const AppEntry& row : model.Rows()) {
-        if (row.stable_id == L"a") {
-            ++alpha_count;
-        }
-    }
-    Expect(model.Rows()[0].stable_id == L"a", "recent Alpha stays in the recent region");
-    Expect(alpha_count == 1, "recent Alpha is not re-added by the fill");
-    Expect(model.Rows().size() == 3, "recent plus fill covers the whole catalog");
+    model.SetPins({L"id0"});
+    Expect(model.Rows().size() == 2, "only the pin and the one recent app show");
+    Expect(model.Rows()[0].stable_id == L"id0", "the pin leads");
+    Expect(model.Rows()[1].stable_id == L"id1", "the recent app follows");
 }
 
-// NR-053: once pins + recent reach a full page the fill must not run at all.
-
-void TestEmptyStateNoFillAtCapacity() {
-    const std::vector<AppEntry> catalog = CatalogOf(100);
-    std::vector<AppEntry> recent;
-    for (int i = 12; i < 24; ++i) {
-        recent.push_back(catalog[static_cast<std::size_t>(i)]);
-    }
-    PanelModel model(&catalog, std::move(recent));
-    std::vector<std::wstring> pins;
-    for (int i = 0; i < 12; ++i) {
-        pins.push_back(L"id" + std::to_wstring(i));
-    }
-    model.SetPins(pins);
-    Expect(model.Rows().size() == nimblerun::kIconCacheWorkingSetItems,
-           "pins plus recent at capacity are not extended by the fill");
-    for (std::size_t i = 0; i < model.Rows().size(); ++i) {
-        Expect(model.Rows()[i].stable_id == L"id" + std::to_wstring(i),
-               "every row at capacity is a pinned or recent id, none from the fill");
-    }
-}
-
-// NR-053: the fill is an empty-query rule only; a real query shows search
-// results with no filler.
-
-void TestEmptyStateFillOnlyWhenQueryEmpty() {
-    const std::vector<AppEntry> catalog = CatalogOf(100);
+// NR-061: no pins and no recent apps means an empty Rows(), not a catalog
+// dump -- the host shows "No pinned or recent apps yet" for this state.
+void TestEmptyStateAllEmpty() {
+    const std::vector<AppEntry> catalog = CatalogOf(4);
     PanelModel model(&catalog, {});
-    Expect(model.Rows().size() == nimblerun::kIconCacheWorkingSetItems,
-           "empty query fills one page");
-    model.SetQuery(L"App");
-    Expect(model.Rows().size() == catalog.size(),
-           "a query returns the search results, never the fill");
-    Expect(model.RecentStartIndex() == -1, "search results have no recent region");
-}
-
-// NR-053: worst-path empty-state cost -- a 5000-entry catalog with no pins
-// and no recent rows exercises the alphabetical fill (and an empty score
-// sort). The threshold mirrors search_engine_test's synchronous-computation
-// budget (design-spec §4.3).
-
-void TestEmptyStateRefreshRowsTiming() {
-    std::vector<AppEntry> catalog;
-    catalog.reserve(5000);
-    for (int i = 0; i < 5000; ++i) {
-        AppEntry entry;
-        entry.stable_id = L"id" + std::to_wstring(i);
-        entry.display_name = L"App " + std::to_wstring(i) + L" edition";
-        entry.normalized_name = nimblerun::NormalizeName(entry.display_name);
-        catalog.push_back(std::move(entry));
-    }
-    const auto start = steady_clock::now();
-    PanelModel model(&catalog, {});
-    const auto elapsed_us =
-        duration_cast<microseconds>(steady_clock::now() - start).count();
-    std::wprintf(L"NR-053: RefreshRows over 5000-entry empty state took %lld us (%lld ms), rows %zu\n",
-                 elapsed_us, elapsed_us / 1000, model.Rows().size());
-    Expect(model.Rows().size() == nimblerun::kIconCacheWorkingSetItems,
-           "empty state fills one page from a 5000-entry catalog");
-    Expect(elapsed_us / 1000 < 50, "5000-entry empty state stays under 50 ms");
+    Expect(model.Rows().empty(), "no pins, no recent -> no rows at all");
 }
 
 } // namespace
@@ -1012,17 +902,13 @@ int wmain() {
     TestRecentStartIndexAllPinned();
     TestRecentStartIndexFiltered();
     TestRecentStartIndexNoPins();
+    TestRecentEndIndexExcludesFiller();
     TestRecentOrderedByUsageScore();
     TestRecentTieBreakByLengthThenName();
     TestPinnedRegionNotSortedByScore();
-    TestEmptyStateFillsToOnePage();
-    TestEmptyStateFillDoesNotManufactureRows();
     TestEmptyStateEmptyCatalogNoCrash();
-    TestEmptyStateFillExcludesPinnedApp();
-    TestEmptyStateFillExcludesRecentApp();
-    TestEmptyStateNoFillAtCapacity();
-    TestEmptyStateFillOnlyWhenQueryEmpty();
-    TestEmptyStateRefreshRowsTiming();
-    std::printf("NR-010/NR-020/NR-021/NR-024/NR-029/NR-037/NR-040/NR-053 panel model check PASSED\n");
+    TestEmptyStateHasNoFiller();
+    TestEmptyStateAllEmpty();
+    std::printf("NR-010/NR-020/NR-021/NR-024/NR-029/NR-037/NR-040/NR-053/NR-061 panel model check PASSED\n");
     return 0;
 }
