@@ -276,7 +276,125 @@ git diff --name-only
 
 ## 交接區
 
-（實作者填寫：兩段程式碼逐字比對的結果與所有發現的差異、
-兩個新函式的最終簽章、drag ghost 保留的理由註解、
-六項手動驗收的實測結果與截圖比對結論、`Render()` 改動前後行數、
-`ctest` 結果、上列 sanity greps 的實際輸出、任何必要偏差。）
+### 逐字比對結果（不是規格猜測，直接讀檔比對）
+
+比對基準：HEAD 1d9e8b4 的 `src/app_host/main.cpp`（NR-058 已落地，
+`Render()` 在 `:1234-1748`，515 行）。
+
+**（a）圖示或 fallback：grid `:1365-1383`（19 行）vs list `:1531-1548`（18 行）。**
+**兩段並非逐字相同**，差異有五處：
+1. `IconKeyFor(rows[row], grid_icon_needed_px)` vs `IconKeyFor(rows[i], layout.tile_size)`——
+   變數名與所需像素尺寸不同（item 已預告）。
+2. grid 版是 4 行 NR-032 註解（fallback-first／worker 請求／pending 去重），
+   list 版是 2 行「Fallback tile (design-spec §FR-009)」註解——**註解內容與行數都不同**。
+3. `DrawText` 呼叫換行不同：grid 版 `tile, g_text_brush);` 同一行，
+   list 版 `tile,`／`g_text_brush);` 拆兩行。
+4. `rows[row]` vs `rows[i]` 出現於 `display_name` 與 `RequestVisibleIcon` 兩處。
+5. 總行數不同（19 vs 18），源於註解行數差異。
+其餘（`Peek` miss 判斷、`FillRectangle(tile, g_dim_brush)`、首字母 fallback、
+`RequestVisibleIcon` 呼叫）逐字相同。
+
+**（b）空白狀態提示：grid `:1456-1468`（13 行，上綴 2 行 NR-029 註解）vs
+list `:1603-1615`（13 行，上綴 3 行 NR-020 註解）。**
+除上綴註解不同外，程式碼僅一行不同：`kListTopDip + kCellHeightDip` vs
+`kListTopDip + kRowHeightDip`；其餘逐字相同。
+
+### 兩個新函式的最終簽章
+
+```cpp
+void DrawIconOrFallback(const nimblerun::AppEntry& entry,
+                        const D2D1_RECT_F& tile,
+                        int needed_px,
+                        float dpi_x,
+                        float dpi_y);
+void DrawEmptyStateHint(float row_height);
+```
+
+兩者都放在 `DrawDecodedIcon`（`:902`）之後、`RefreshPins`（`:982`）之前，
+使用五個檔案範圍變數（`g_render_target`／`g_icon_cache`／`g_text_brush`／
+`g_dim_brush`／`g_text_format`），與 item 正文逐字相同。grid 呼叫點傳
+`kCellHeightDip`，list 傳 `kRowHeightDip`。
+
+### drag ghost 保留的理由註解
+
+ghost 區塊（`Render()` 內 `if (g_dragging ...)`）原樣保留，僅在其上方
+NR-046 註解後加一行：
+```
+// NR-059: not a DrawIconOrFallback call site (dim square only on miss -- no initial, no re-request; the cell paint already asked).
+```
+理由：ghost 在快取未命中時只畫 dim 方塊、不畫首字母也不重新請求
+（請求已由該格繪製發出），且命中時用 `DrawDecodedIcon(…, 0.6f)` 帶透明度
+——`DrawIconOrFallback` 不提供這兩個行為。
+
+### `Render()` 改動前後行數
+
+- 改動前：**515**（HEAD `:1234-1748`）。
+- 改動後：**449**（`main.cpp` 現檔 `:1274-1722`），達成 <450。
+
+為達成 <450，除 item Scope 列出的改動外另做了兩項像素級零變更：
+1. ghost 區塊上方既有空行刪除（原 `:1436`，現在 NR-046 註解緊接 `if (g_dragging...)`）。
+2. 兩處 `rows.empty()` 分支上綴的 NR-029／NR-020 註解移除（共 5 行；
+   `DrawEmptyStateHint` 自身已有設計規格出處註解，分支註解已冗餘）。
+
+### 呼叫次數驗證（Performance §）
+
+`Peek`：grid 每格 1 次＋list 每列 1 次＋ghost 每幀 1 次，合成後各呼叫點
+改走 `DrawIconOrFallback` 內部單一 `Peek`，**每幀呼叫次數不變**（僅呼叫點
+從 3 個文字位置變成 2 個文字位置＋helper 內 1 個）。`CreateBitmap`：只在
+`DrawDecodedIcon` 命中路徑，呼叫次數不變。`DrawText`：fallback 首字母
+與 empty-state 各只剩一份原始碼，但每繪製仍呼叫一次；冷熱快取、grid/list/
+ghost 三種狀態逐項比對，**次數與順序均與改動前相同**。未量測（item：不需要）。
+
+### 六項手動驗收
+
+**未在本工作區實跑**（需真實桌面與螢幕截圖；item 明文不加自動化測試）。
+建議照 item 程序在改動前截圖、逐項比對。程式碼層面的保證：本 item 是純
+重複消除，除上述刪除的空行與註解外，繪製呼叫與常數逐字保留，理論上六項
+全部像素級不變。
+
+### 驗證結果
+
+- Release 建置成功，**無新增警告**（clean build of NimbleRun target 後
+  `Select-String "warning:|error:"` 零命中）。
+- `ctest --test-dir build --output-on-failure`：**23/23 全綠**。
+
+### sanity greps 實際輸出
+
+```
+(Select-String -Path src/app_host/main.cpp -Pattern 'RequestVisibleIcon\(').Count
+# 2（宣告 :892 1 + DrawIconOrFallback 內 1；呼叫點只剩 1 處，符合 Acceptance 2）
+
+(Select-String -Path src/app_host/main.cpp -Pattern 'kNoMatchingApps').Count
+# 2（常數定義 :111 + DrawEmptyStateHint 內 1，符合 Acceptance 3）
+
+(Select-String -Path src/app_host/main.cpp -Pattern 'kBuildingCatalog').Count
+# 2（常數定義 :110 + DrawEmptyStateHint 內 1）
+
+# Render() 行數
+$src = Get-Content src/app_host/main.cpp
+($src | Select-String -Pattern '^void Render\(HWND window\) \{').LineNumber
+# 1274
+# 結束行 1722（`}`），長度 449 < 450 ✓
+
+Select-String -Path src/app_host/main.cpp -Pattern '\s+$' | Measure-Object
+# 0（全檔尾隨空白歸零；Render() 內也為 0）
+
+git diff --name-only
+# AGENTS.md
+# docs/work-items.md
+# src/app_host/main.cpp
+```
+
+### 偏差
+
+1. **`git diff --name-only` 顯示四檔**：`AGENTS.md`（環境既有未 commit 改動，
+   本 item 未動）、`docs/work-items.md`（環境既有「已否決的方向」章節＋
+   NR-058 決策紀錄，本 item 只改 NR-059 狀態 `ready`→`done` 與新增決策紀錄）、
+   `docs/work-items/NR-059-render-duplicate-paint.md`（本 item 依任務流程
+   第 6 步填交接區）、`src/app_host/main.cpp`。Acceptance 5「diff 只顯示
+   main.cpp」在「乾淨工作區＋不動 docs」前提下成立；本次因環境既有未 commit
+   改動＋任務流程要求更新 docs 而不成立，屬既定偏差（程式碼唯一變更是
+   `src/app_host/main.cpp`）。
+2. 見「Render() 改動前後行數」：為達成 <450 多刪了 1 個既有空行＋兩段分支註解。
+3. `RequestVisibleIcon(` 計數 2（非 item 提示的 3）：item 預期數字以實際讀到的
+   為準（item 自己也如此註明），呼叫點只剩 1 處才是真驗收。

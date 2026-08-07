@@ -925,6 +925,46 @@ void DrawDecodedIcon(const nimblerun::IconBitmap& icon,
     bitmap->Release();
 }
 
+// NR-059: the grid cell and the list row painted this identical block. It is
+// not just drawing -- it also drives the NR-032 request de-duplication, so two
+// copies meant the "one request per key" invariant had two homes. The only
+// thing that ever differed is the rect and the pixel size the layout needs.
+void DrawIconOrFallback(const nimblerun::AppEntry& entry,
+                        const D2D1_RECT_F& tile,
+                        int needed_px,
+                        float dpi_x,
+                        float dpi_y) {
+    const nimblerun::IconKey key = IconKeyFor(entry, needed_px);
+    const std::wstring encoded = key.Encode();
+    if (const nimblerun::IconBitmap* icon =
+            g_icon_cache ? g_icon_cache->Peek(encoded) : nullptr) {
+        DrawDecodedIcon(*icon, tile, dpi_x, dpi_y);
+        return;
+    }
+    // design-spec §FR-009: fallback-first, drawn into the same rect the real
+    // icon will occupy, so a late icon never reflows anything.
+    g_render_target->FillRectangle(tile, g_dim_brush);
+    const std::wstring initial = entry.display_name.empty()
+        ? std::wstring(L"?")
+        : std::wstring(1, entry.display_name.front());
+    g_render_target->DrawText(initial.c_str(), static_cast<UINT32>(initial.size()),
+                              g_text_format, tile, g_text_brush);
+    RequestVisibleIcon(entry, key, encoded);
+}
+
+// NR-059: identical in both layouts except the row height (design-spec §4.3).
+void DrawEmptyStateHint(float row_height) {
+    const wchar_t* hint = g_model->CatalogAvailable()
+        ? list_strings::kNoMatchingApps
+        : list_strings::kBuildingCatalog;
+    g_render_target->DrawText(
+        hint, static_cast<UINT32>(wcslen(hint)), g_text_format,
+        D2D1::RectF(nimblerun::layout::kListLeftDip, nimblerun::layout::kListTopDip,
+                    nimblerun::layout::kListRightDip,
+                    nimblerun::layout::kListTopDip + row_height),
+        g_dim_brush);
+}
+
 // NR-058: single non-blocking tray balloon for a store-load failure; defined
 // next to ShowHotkeyConflictNotice below.
 void ShowLoadIssueNotice(HWND window, const std::wstring& text);
@@ -1362,26 +1402,7 @@ void Render(HWND window) {
                     icon_left, icon_top,
                     icon_left + nimblerun::layout::kIconSizeDip,
                     icon_top + nimblerun::layout::kIconSizeDip);
-                const nimblerun::IconKey key = IconKeyFor(rows[row], grid_icon_needed_px);
-                const std::wstring encoded = key.Encode();
-                if (const nimblerun::IconBitmap* icon = g_icon_cache ? g_icon_cache->Peek(encoded) : nullptr) {
-                    DrawDecodedIcon(*icon, tile, dpi_x, dpi_y);
-                } else {
-                    // NR-032: fallback-first (design-spec §FR-009). The real
-                    // icon is requested from the worker right here; the paint
-                    // never waits on Shell, and the key is deduplicated by the
-                    // pending set until its result arrives.
-                    g_render_target->FillRectangle(tile, g_dim_brush);
-                    const std::wstring initial =
-                        rows[row].display_name.empty()
-                            ? std::wstring(L"?")
-                            : std::wstring(1, rows[row].display_name.front());
-                    g_render_target->DrawText(
-                        initial.c_str(), static_cast<UINT32>(initial.size()), g_text_format,
-                        tile, g_text_brush);
-                    RequestVisibleIcon(rows[row], key, encoded);
-                }
-
+                DrawIconOrFallback(rows[row], tile, grid_icon_needed_px, dpi_x, dpi_y);
                 // NR-029: single-line centered name in the lower half. The grid
                 // name format is NO_WRAP + character ellipsis (see the
                 // SetTrimming setup), so name length never changes cell
@@ -1434,6 +1455,7 @@ void Render(HWND window) {
             // every cell. Cache miss -> a dim square, so something always
             // follows the cursor; the icon request was already issued by the
             // cell paint. The row guard covers a catalog swap landing mid-drag.
+            // NR-059: not a DrawIconOrFallback call site (dim square only on miss -- no initial, no re-request; the cell paint already asked).
             if (g_dragging && g_drag_row >= 0 &&
                 static_cast<std::size_t>(g_drag_row) < rows.size()) {
                 const float scale = dpi_x / nimblerun::layout::kDpi96;
@@ -1451,20 +1473,8 @@ void Render(HWND window) {
                 }
             }
 
-            // NR-029 empty state (design-spec §4.3): the grid is never blank.
-            // Same strings as the list state, drawn in the first grid row.
             if (rows.empty()) {
-                const wchar_t* hint = g_model->CatalogAvailable()
-                    ? list_strings::kNoMatchingApps
-                    : list_strings::kBuildingCatalog;
-                g_render_target->DrawText(
-                    hint,
-                    static_cast<UINT32>(wcslen(hint)),
-                    g_text_format,
-                    D2D1::RectF(nimblerun::layout::kListLeftDip, nimblerun::layout::kListTopDip,
-                                nimblerun::layout::kListRightDip,
-                                nimblerun::layout::kListTopDip + nimblerun::layout::kCellHeightDip),
-                    g_dim_brush);
+                DrawEmptyStateHint(nimblerun::layout::kCellHeightDip);
             }
         } else {
             const int first = g_model->FirstVisibleRow();
@@ -1488,7 +1498,6 @@ void Render(HWND window) {
                 g_render_target->FillRectangle(
                     row_rect,
                     selected ? g_selected_brush : g_card_brush);
-    
                 // NR-015: the selected row also gets a border in a color distinct
                 // from the fill, so selection is never conveyed by color alone
                 // (design-spec §NFR-006).
@@ -1514,7 +1523,6 @@ void Render(HWND window) {
                                     row_rect.bottom),
                         g_selected_border_brush);
                 }
-    
                 // NR-012: fixed tile inside the row, vertically centered. The decoded
                 // icon (when cached) is drawn into the same rect the placeholder
                 // occupies, so geometry is constant and a late-arriving icon never
@@ -1527,26 +1535,7 @@ void Render(HWND window) {
                     tile_left, tile_top,
                     tile_left + nimblerun::layout::kTileSizeDip,
                     tile_top + nimblerun::layout::kTileSizeDip);
-    
-                const nimblerun::IconKey key = IconKeyFor(rows[i], layout.tile_size);
-                const std::wstring encoded = key.Encode();
-                if (const nimblerun::IconBitmap* icon = g_icon_cache ? g_icon_cache->Peek(encoded) : nullptr) {
-                    DrawDecodedIcon(*icon, tile, dpi_x, dpi_y);
-                } else {
-                    // Fallback tile (design-spec §FR-009): drawn on the first frame
-                    // and kept until the icon arrives or the request fails.
-                    g_render_target->FillRectangle(tile, g_dim_brush);
-                    const std::wstring initial =
-                        rows[i].display_name.empty()
-                            ? std::wstring(L"?")
-                            : std::wstring(1, rows[i].display_name.front());
-                    g_render_target->DrawText(
-                        initial.c_str(), static_cast<UINT32>(initial.size()), g_text_format,
-                        tile,
-                        g_text_brush);
-                    RequestVisibleIcon(rows[i], key, encoded);
-                }
-    
+                DrawIconOrFallback(rows[i], tile, layout.tile_size, dpi_x, dpi_y);
                 // NR-020: name in the upper half of the row, source path in the
                 // lower half (design-spec §4.2). Packaged apps show a fixed label
                 // instead of a Shell parsing name. Single-line with trailing
@@ -1577,7 +1566,6 @@ void Render(HWND window) {
                     D2D1::RectF(text_left, row_mid, text_right,
                                 row_top + nimblerun::layout::kRowHeightDip),
                     g_dim_brush);
-    
                 // NR-024: per-row quick-select digit (design-spec §4.7/§4.9). The
                 // slot is the row's position in the viewport; rows beyond the
                 // 10-digit sequence get no box but keep the reserved text width.
@@ -1596,22 +1584,8 @@ void Render(HWND window) {
                             row_mid + nimblerun::layout::kFooterKeyBoxHeightDip / 2.0f));
                 }
             }
-    
-            // NR-020 empty state (design-spec §4.3): the panel is never blank. A
-            // null/empty catalog snapshot means background enumeration is still
-            // running.
             if (rows.empty()) {
-                const wchar_t* hint = g_model->CatalogAvailable()
-                    ? list_strings::kNoMatchingApps
-                    : list_strings::kBuildingCatalog;
-                g_render_target->DrawText(
-                    hint,
-                    static_cast<UINT32>(wcslen(hint)),
-                    g_text_format,
-                    D2D1::RectF(nimblerun::layout::kListLeftDip, nimblerun::layout::kListTopDip,
-                                nimblerun::layout::kListRightDip,
-                                nimblerun::layout::kListTopDip + nimblerun::layout::kRowHeightDip),
-                    g_dim_brush);
+                DrawEmptyStateHint(nimblerun::layout::kRowHeightDip);
             }
         }
     }
