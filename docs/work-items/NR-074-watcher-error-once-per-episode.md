@@ -188,3 +188,16 @@ git diff --name-only
 
 （實作者填寫：旗標放置處、手動驗收 3/4 的實際觀察、建置與 CTest 結果、sanity greps、
 偏差、未完成事項。）
+
+實作（2026-08-08）：
+
+- **旗標放置處**：`WatchLoop` 的 `for (;;)` 迴圈外宣告 `bool reported = false;`
+  （`buffer` 之後，NR-074 註解兩行）。錯誤路徑的 full-rescan `PostMessageW` 包
+  `!reported` 條件、之後 `reported = true; Sleep(1000); continue;`；`ok == TRUE`
+  路徑（`bytes_returned == 0` 的 overflow 分支之前）重置 `reported = false`。
+- **建置與 CTest**：Release build 無新增警告；`ctest` 23/23 全綠。
+- **sanity greps**：`reported` 命中 5 處（宣告＋註解＋`!reported` 守門＋錯誤路徑
+  設 true＋成功路徑重置 false），符合 item 的「宣告／設 true／重置 false」三點；
+  `git diff --name-only`＝只有 catalog_watcher.cpp。
+- **手動驗收**：拔碟／重插碟的 rebuild 頻率為實機觀察，本工作區未實跑。
+- **偏差**：無。未完成事項：無。
