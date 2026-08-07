@@ -165,6 +165,29 @@ void TestDuplicatePinIdempotent() {
     fs::remove_all(dir);
 }
 
+// NR-070: favorites.txt is untrusted input -- a hand-edited last_seen of
+// INT64_MIN used to make `now - pin.last_seen_utc` a signed overflow (UB) that
+// wrapped negative and kept the pin forever. The comparison form
+// `last_seen_utc >= now - kPinRetentionSeconds` treats it as expired instead:
+// the pin is dropped for an absent app, no UB, no permanent retention.
+void TestAbsentPinWithInt64MinLastSeenIsDropped() {
+    const std::wstring dir = MakeTempDir("int64min");
+    const std::string content =
+        "schema=2\nghost_app\t-9223372036854775808\tGhost App\n";
+    WriteBytes(dir + L"\\favorites.txt", content);
+    PinStore store(dir);
+    Expect(store.Load() == PinLoadResult::Loaded, "INT64_MIN last_seen loads normally");
+    Expect(store.IsPinned(L"ghost_app"), "the pin exists after load");
+
+    // The app is absent from a real catalog; an INT64_MIN last_seen is far
+    // outside the retention window, so the pin expires instead of overflowing.
+    std::vector<AppEntry> catalog = {Entry(L"present_app", L"Present")};
+    store.Reconcile(catalog, 1000 + kPinRetentionSeconds);
+    Expect(!store.IsPinned(L"ghost_app"), "INT64_MIN pin dropped as expired, no UB");
+    Expect(store.IsPinned(L"present_app") == false, "no pin for the catalog-only app");
+    fs::remove_all(dir);
+}
+
 // A pin for an app absent from a real (non-empty) catalog survives a
 // reconcile; it is not deleted on the first failed/missing scan.
 void TestAbsentPinSurvivesReconcile() {
@@ -419,6 +442,7 @@ int wmain() {
     TestUnpinRemovesOnlyThatPin();
     TestDuplicatePinIdempotent();
     TestAbsentPinSurvivesReconcile();
+    TestAbsentPinWithInt64MinLastSeenIsDropped();
     TestEmptyCatalogNeverDeletes();
     TestReconcile30DayExpiry();
     TestCorrupt();

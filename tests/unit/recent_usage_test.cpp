@@ -223,6 +223,24 @@ void TestMalformedRow() {
     fs::remove_all(dir);
 }
 
+// NR-070: usage.tsv is untrusted input -- a hand-edited total_launches=-1 used
+// to load as ULLONG_MAX (wcstoull accepts '-' and wraps without ERANGE), pinning
+// the app at the top of the usage order and persisting itself on the next save.
+// The sign is now rejected up front, so the file takes the corrupt path.
+void TestNegativeTotalLaunchesRejected() {
+    const std::wstring dir = MakeTempDir("neglaunch");
+    const std::string content = "schema=1\npolluting_app\t-1\t1000\n";
+    WriteBytes(dir + L"\\usage.tsv", content);
+    UsageStore store(dir);
+    Expect(store.Load() == UsageLoadResult::Corrupt,
+           "negative total_launches reports Corrupt");
+    Expect(store.Recent().empty(), "a negative-launch file yields the empty safe default");
+    Expect(store.Records().empty(), "the negative-launch record is not loaded");
+    Expect(!fs::exists(dir + L"\\usage.tsv"), "negative-launch file moved aside");
+    Expect(fs::exists(dir + L"\\usage.tsv.corrupt"), "negative-launch file preserved");
+    fs::remove_all(dir);
+}
+
 void TestNewerSchema() {
     const std::wstring dir = MakeTempDir("newer");
     const std::string content = "schema=99\n" + std::string("not_in_catalog") + "\t5\t1000\n";
@@ -444,6 +462,7 @@ int wmain() {
     TestRoundTrip();
     TestCorrupt();
     TestMalformedRow();
+    TestNegativeTotalLaunchesRejected();
     TestNewerSchema();
     TestAtomicWriteFailure();
     TestForgetExisting();

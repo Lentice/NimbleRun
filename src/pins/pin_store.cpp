@@ -199,7 +199,14 @@ void PinStore::Reconcile(const std::vector<AppEntry>& catalog, std::int64_t now)
             pin.last_seen_utc = now;  // seen again: restart the retention clock
             kept.push_back(std::move(pin));
         } else if (pin.last_seen_utc == 0 ||
-                   now - pin.last_seen_utc <= kPinRetentionSeconds) {
+                   // NR-070: compare last_seen against (now - retention) instead
+                   // of subtracting last_seen from now -- a hand-edited
+                   // favorites.txt can carry INT64_MIN, and the subtraction would
+                   // be signed overflow (UB). `now` is a real clock reading and
+                   // the constant subtraction cannot overflow; an INT64_MIN pin
+                   // compares as expired and is dropped, which is the sane
+                   // disposal of an absurd timestamp.
+                   pin.last_seen_utc >= now - kPinRetentionSeconds) {
             kept.push_back(std::move(pin));  // absent but recent (or unknown age): keep
         }
         // else: absent for more than the retention window -> dropped here.

@@ -208,6 +208,14 @@ inline bool ParseUint64(std::wstring_view text, std::uint64_t& out) {
     if (value.empty()) {
         return false;
     }
+    // NR-070: C's wcstoull accepts a leading '-' and wraps it modulo 2^64
+    // ("-1" -> ULLONG_MAX) without setting ERANGE, so a hand-edited data file
+    // with a negative unsigned field would load as a legal value and pollute
+    // the store. Reject the sign here; the caller's corrupt path isolates the
+    // file.
+    if (value.front() == L'-') {
+        return false;
+    }
     wchar_t* end = nullptr;
     errno = 0;
     const unsigned long long parsed = wcstoull(value.c_str(), &end, 10);
