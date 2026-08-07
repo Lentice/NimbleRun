@@ -186,3 +186,25 @@ git diff --name-only
 
 （實作者填寫：守門的實際形狀、三個 Corrupt 回傳點的清理方式、兩個新 case 的 fixture
 寫法與 byte-compare 斷言、建置與 CTest 結果、sanity greps、偏差、未完成事項。）
+
+實作（2026-08-08）：
+
+- **守門形狀**：`main.cpp` 的 `RefreshPins` 把無條件 `Reconcile`＋`Save` 包進
+  `if (result == Loaded || result == Missing) { ... }` 區塊，`SetPins` 留在守門外
+  （`Corrupt`／`NewerSchema` 時 `Records()` 為空 → model 收到空清單）。NR-072 註解
+  四行照 item 正文。
+- **Corrupt 回傳點清理**：`pin_store.cpp` 三個 `Corrupt` 回傳點（`default` arm 與
+  迴圈內兩處）在 `PreserveCorrupt` 之後、`return` 之前各加 `pins_.clear()`；
+  `NewerSchema` 回傳點未改（`:27` 開頭已清）。
+- **測試**：新增 `TestCorruptMidFileClearsPins`（schema=2 檔含 2 筆有效列＋1 列
+  1-field 錯誤）——斷言回 `Corrupt`、`Records()` 為空、原檔改名 `.corrupt` 且內容
+  verbatim 保留。較新 schema 的 byte-unchanged 守門由既有 `TestNewerSchema` 覆蓋
+  （已斷言 `Records()` 空＋檔內容不變＋無 `.corrupt`），故未另立 duplicate case。
+  既有案例一字未改。
+- **建置與 CTest**：Release build 無新增警告；`ctest` 23/23 全綠。
+- **sanity greps**：`g_pins->Save` 在 `RefreshPins` 內僅 1 處且位於守門區塊
+  （另有 2 處為選單/拖曳重排的顯式 Save，非載入後隱含持久化路徑，屬預期）；
+  `pins_.clear()` 4 處（Load 開頭 1＋Corrupt 回傳 3）；`git diff --name-only`＝
+  main.cpp、pin_store.cpp、pin_store_test.cpp。
+- **偏差**：item 正文「`g_pins->Save()` 只在 `:1143`」的審計筆記與現況不符
+  （選單與拖曳重排各有一處顯式 Save），守門語意不受影響；未完成事項：無。
