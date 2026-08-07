@@ -23,21 +23,6 @@ constexpr int kSchemaVersion = 1;
 constexpr int kMinRecentCount = 8;
 constexpr int kMaxRecentCount = 40;
 
-std::wstring Trim(std::wstring_view value) {
-    const auto is_space = [](wchar_t c) {
-        return c == L' ' || c == L'\t' || c == L'\r' || c == L'\n';
-    };
-    std::size_t begin = 0;
-    std::size_t end = value.size();
-    while (begin < end && is_space(value[begin])) {
-        ++begin;
-    }
-    while (end > begin && is_space(value[end - 1])) {
-        --end;
-    }
-    return std::wstring(value.substr(begin, end - begin));
-}
-
 std::wstring ToLower(std::wstring_view value) {
     std::wstring out;
     out.reserve(value.size());
@@ -115,22 +100,6 @@ Theme ParseTheme(std::wstring_view text) {
     return Theme::System;
 }
 
-std::vector<std::wstring> SplitLines(std::wstring_view text) {
-    std::vector<std::wstring> lines;
-    std::size_t start = 0;
-    for (std::size_t i = 0; i <= text.size(); ++i) {
-        if (i == text.size() || text[i] == L'\n') {
-            std::wstring line(text.substr(start, i - start));
-            if (!line.empty() && line.back() == L'\r') {
-                line.pop_back();
-            }
-            lines.push_back(std::move(line));
-            start = i + 1;
-        }
-    }
-    return lines;
-}
-
 } // namespace
 
 // A local absolute path: drive-letter root (e.g. C:\...). UNC, network,
@@ -183,53 +152,21 @@ SettingsStore::SettingsStore(std::wstring directory)
 SettingsLoadResult SettingsStore::Load(Settings& out) const {
     out = DefaultSettings();
 
-    const std::wstring path = JoinPath(directory_, kFileName);
-    std::string bytes;
-    if (!ReadAllBytes(path, bytes)) {
-        const DWORD error = GetLastError();
-        if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND) {
-            return SettingsLoadResult::Missing;
-        }
-        PreserveCorrupt(directory_, kFileName);
-        return SettingsLoadResult::Corrupt;
-    }
-
-    std::wstring text;
-    if (!DecodeUtf8(bytes, text) || text.empty()) {
-        PreserveCorrupt(directory_, kFileName);
-        return SettingsLoadResult::Corrupt;
-    }
-    if (text.front() == L'\uFEFF') {
-        text.erase(text.begin());
-    }
-
-    const std::vector<std::wstring> lines = SplitLines(text);
-    if (lines.empty()) {
-        PreserveCorrupt(directory_, kFileName);
-        return SettingsLoadResult::Corrupt;
-    }
-
-    const std::wstring schema_line = Trim(lines[0]);
-    if (schema_line.size() <= kSchemaPrefix.size() ||
-        schema_line.compare(0, kSchemaPrefix.size(), kSchemaPrefix) != 0) {
-        PreserveCorrupt(directory_, kFileName);
-        return SettingsLoadResult::Corrupt;
-    }
-    int schema = 0;
-    if (!ParseInt(schema_line.substr(kSchemaPrefix.size()), schema)) {
-        PreserveCorrupt(directory_, kFileName);
-        return SettingsLoadResult::Corrupt;
-    }
-    if (schema > kSchemaVersion) {
-        return SettingsLoadResult::NewerSchema;
-    }
-    if (schema != kSchemaVersion) {
+    std::vector<std::wstring> lines;
+    switch (ReadVersionedLines(directory_, kFileName, kSchemaVersion, lines)) {
+    case VersionedReadStatus::Loaded:
+        break;
+    case VersionedReadStatus::Missing:
+        return SettingsLoadResult::Missing;
+    case VersionedReadStatus::NewerSchema:
+        return SettingsLoadResult::NewerSchema;  // original untouched (design-spec §10.4)
+    default:  // Unreadable / Malformed / OlderSchema
         PreserveCorrupt(directory_, kFileName);
         return SettingsLoadResult::Corrupt;
     }
 
     bool extensions_replaced = false;
-    for (std::size_t i = 1; i < lines.size(); ++i) {
+    for (std::size_t i = 0; i < lines.size(); ++i) {
         const std::wstring line = Trim(lines[i]);
         if (line.empty()) {
             continue;

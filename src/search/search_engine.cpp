@@ -30,10 +30,6 @@ std::wstring CollapseWhitespace(std::wstring_view value) {
     return result;
 }
 
-bool StartsWith(std::wstring_view value, std::wstring_view prefix) {
-    return value.size() >= prefix.size() && value.compare(0, prefix.size(), prefix) == 0;
-}
-
 enum class MatchRank : int {
     Exact = 0,
     NamePrefix = 1,
@@ -48,13 +44,13 @@ MatchRank Rank(std::wstring_view name, std::wstring_view query) {
     if (name == query) {
         return MatchRank::Exact;
     }
-    if (StartsWith(name, query)) {
+    if (name.starts_with(query)) {
         return MatchRank::NamePrefix;
     }
 
     std::size_t word_start = 0;
     while (word_start < name.size()) {
-        if (StartsWith(name.substr(word_start), query)) {
+        if (name.substr(word_start).starts_with(query)) {
             return MatchRank::WordPrefix;
         }
         const std::size_t separator = name.find(L' ', word_start);

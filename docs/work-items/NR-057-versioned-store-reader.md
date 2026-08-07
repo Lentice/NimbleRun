@@ -1,6 +1,6 @@
 # NR-057 — One versioned text-store reader, not four copies
 
-Phase 3 · Status `ready` · Depends on: —
+Phase 3 · Status `done` · Depends on: —
 
 - Source: `AGENTS.md` §Engineering rules（最小可行改動、先重用既有程式碼、先用標準函式庫）
 - Origin: 2026-08-07 repo audit（重複程式碼；行為變更僅限一處明列的錯誤路徑）
@@ -326,6 +326,69 @@ git diff --stat
 
 ## 交接區
 
-（實作者填寫：逐檔改動位置、四個 `switch` 與原行為的逐案對照、
-Scope §4 的選擇與理由、`ctest` 結果、上列 sanity greps 的實際輸出、
-任何必要偏差。）
+（NR-057 完成，2026-08-07，Agent 實作。）
+
+### 逐檔改動位置
+
+- `src/storage/atomic_text_file.h`：include 區補 `<cerrno>/<cstdint>/<cstdlib>/<utility>/<vector>`；`UnescapeText` 之後、`PreserveCorrupt` 之前新增共用解析器 `Trim`（:147）／`SplitLines`（:162）／`SplitFields`（:179）／`ParseInt64`（:191）／`ParseUint64`（:206）、`VersionedReadStatus` 列舉（:221）與 `ReadVersionedLines`（:237）；`PreserveCorrupt`（:295）的屬性判斷改為先驗 `INVALID_FILE_ATTRIBUTES` sentinel。
+- `src/pins/pin_store.cpp`：刪除私有 `Trim/SplitLines/SplitFields/ParseInt64` 與 `<cerrno>/<cstdlib>`；`PinStore::Load()` 檔頭段改為 `ReadVersionedLines`＋switch（:30）；資料行迴圈起點 `i=1`→`i=0`（檔頭已由共用函式剔除）。
+- `src/usage/usage_store.cpp`：刪除私有 `Trim/SplitLines/SplitFields/ParseInt64/ParseUint64` 與 `<cerrno>/<cstdlib>`；`UsageStore::Load()` 檔頭段改為 switch（:30）；資料行迴圈起點 `i=1`→`i=0`。
+- `src/settings/settings_store.cpp`：刪除私有 `Trim/SplitLines`（INI 專用 `ParseInt` 保留，仍用 `errno/wcstol`，故 `<cerrno>/<cstdlib>` 保留）；`SettingsStore::Load()` 檔頭段改為 switch（:156）；資料行迴圈起點 `i=1`→`i=0`。
+- `src/catalog/catalog_cache.cpp`：刪除私有 `SplitFields` 與 `<cerrno>/<cstdlib>`（`wcstoll`＋`errno` 檔頭解析隨之消失）；`LoadCatalogCache()` 檔頭段改為 switch（:93）；資料行迴圈起點 `i=1`→`i=0`。
+- `src/search/search_engine.cpp`：刪除手寫 `StartsWith`；呼叫點改 `std::wstring_view::starts_with`（`name.starts_with(query)` :47、`name.substr(word_start).starts_with(query)` :53）。
+- `src/settings/settings_editor.cpp`：新增 `#include "storage/atomic_text_file.h"`（:3），刪除第四份私有 `Trim`。
+- `tests/unit/settings_store_test.cpp`：新增一組 `TestReadVersionedLines`（每狀態一例＋Loaded 驗證不含檔頭），純新增，既有斷言零修改。
+
+### 四個 switch 與原行為的逐案對照
+
+共用函式回報六種狀態；各呼叫端把它對回「今天的回傳值＋今天是否 `PreserveCorrupt`」：
+
+| 狀態 | pin_store | usage_store | settings_store | catalog_cache |
+|---|---|---|---|---|
+| Loaded | break → 資料行迴圈 | 同左 | 同左 | break → 資料行迴圈 |
+| Missing | `Missing`（不改名） | `Missing` | `Missing` | `return false`（不改名） |
+| Unreadable | default → `PreserveCorrupt`＋`Corrupt` | 同左 | 同左 | `return false`（不改名） |
+| Malformed | default → `PreserveCorrupt`＋`Corrupt` | 同左 | 同左 | `PreserveCorrupt`＋`return false` |
+| OlderSchema | default → `PreserveCorrupt`＋`Corrupt`（現行「schema≠版本→corrupt 改名」） | 同左 | 同左 | `return false`（不改名，NR-047 註解原樣保留） |
+| NewerSchema | `NewerSchema`（不改名） | `NewerSchema` | `NewerSchema` | `return false`（不改名） |
+
+`catalog_cache` 是唯一不同形：`Missing/Unreadable/Older/Newer` 一律不改名直接 `return false`，`Malformed` 才 `PreserveCorrupt`。三個使用者 store 走同一個 default arm（`Unreadable/Malformed/OlderSchema` → `PreserveCorrupt`＋`Corrupt`）。
+
+### Scope §4 的選擇
+
+**收進共用標頭（刪除 `settings_editor.cpp` 的私有 `Trim`）。** 理由：item 的決策規則以「include `atomic_text_file.h` 是否會把 `<windows.h>` 拉進這個模組」為準，而 `settings_editor.cpp` **第 3 行本就直接 include `<windows.h>`**（`VK_SPACE`／`MOD_CONTROL` 等熱鍵常數需要），故引入共用標頭不會新增 `<windows.h>` 依賴——規則的條件不成立，採「一份定義」的主路徑（Acceptance 1 的無例外形式）。若日後熱鍵常數抽離、此檔不再 include `<windows.h>`，可再依 item 例外規則把 Trim 留回原地。
+
+### 驗證結果
+
+- Release 建置成功、**無新增警告**（clean 基準 `nr057_baseline_build.txt` 與改後 `nr057_build.txt` 皆零 warning／error）。
+- `ctest --test-dir build --output-on-failure`：**23/23 全綠**（含新增案例後的 `nimblerun_settings_test`）。
+
+### Sanity greps 實際輸出
+
+```text
+# 解析器各只剩一份定義（全在 atomic_text_file.h）：
+src\storage\atomic_text_file.h:147: inline std::wstring Trim(std::wstring_view value) {
+src\storage\atomic_text_file.h:162: inline std::vector<std::wstring> SplitLines(std::wstring_view text) {
+src\storage\atomic_text_file.h:179: inline std::vector<std::wstring_view> SplitFields(std::wstring_view line) {
+src\storage\atomic_text_file.h:191: inline bool ParseInt64(std::wstring_view text, std::int64_t& out) {
+src\storage\atomic_text_file.h:206: inline bool ParseUint64(std::wstring_view text, std::uint64_t& out) {
+
+# kSchemaPrefix（4 個 store 只剩「定義＋Save 用字面」，檔頭比對邏輯只在標頭）：
+catalog_cache.cpp:19   定義；:75  text += kSchemaPrefix;（Save）
+pin_store.cpp:17       定義；:70  text += kSchemaPrefix;（Save）
+settings_store.cpp:21  定義；:248 text += kSchemaPrefix;（Save）
+usage_store.cpp:17     定義；:74  text += kSchemaPrefix;（Save）
+atomic_text_file.h:266-273     檔頭比對（length 檢查＋compare＋substr）
+
+# ReadVersionedLines 計數：5（1 定義 + 4 呼叫點）
+# StartsWith in search_engine.cpp：0 命中
+# INVALID_FILE_ATTRIBUTES in atomic_text_file.h：1 行（:295）
+# git diff --stat：8 檔，244 insertions / 374 deletions（淨 -130 行）
+```
+
+### 必要偏差
+
+1. **sanity grep 指令在 PowerShell 7 需調整**：`Select-String -Path src -Pattern 'kSchemaPrefix' -Recurse` 在 PS7 無 `-Recurse` 參數，改用 `Get-ChildItem -Path src -Recurse -Include *.cpp,*.h | Select-String 'kSchemaPrefix'`（結果相同）。
+2. **item 前提與實況不符（決策不變）**：item 假設 `settings_editor.cpp` 是不含 `<windows.h>` 的純邏輯模組，實況是第 3 行已直接 include `<windows.h>`。依 item 自己的決策規則處理，見 Scope §4。
+3. **新增測試的 ok fixture 不含結尾換行**（`"schema=1\nline one\nline two"`）：`SplitLines` 對結尾 `\n` 會多產出一個空行（既有 store 迴圈靠 `if (line.empty()) continue;` 跳過），若 fixture 帶結尾換行則回傳 lines 為 3 筆（含末筆空字串），與「恰為資料兩行」的斷言不符。共用函式行為與既有四份實作一致，僅測試 fixture 調整。
+4. **`catalog_cache` 檔頭嚴格化是 item 明列的唯一有意行為變更**：現行 `LoadCatalogCache` 對 `schema=` 檔頭不 Trim、無長度檢查，例如 `"  schema=2"`（前導空白）現行會 `PreserveCorrupt` 改名，新實作會 Trim 後視為 `NewerSchema` → 不改名直接重建。兩種結果都是「不使用該快取」，符合 §Decision 5 與 Acceptance。

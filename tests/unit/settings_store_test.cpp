@@ -1,5 +1,7 @@
 #include "settings/settings_store.h"
 
+#include "storage/atomic_text_file.h"
+
 #include <windows.h>
 
 #include <cstdio>
@@ -8,14 +10,17 @@
 #include <fstream>
 #include <iterator>
 #include <string>
+#include <vector>
 
 namespace fs = std::filesystem;
 
 using nimblerun::DefaultSettings;
+using nimblerun::ReadVersionedLines;
 using nimblerun::Settings;
 using nimblerun::SettingsLoadResult;
 using nimblerun::SettingsStore;
 using nimblerun::Theme;
+using nimblerun::VersionedReadStatus;
 
 namespace {
 
@@ -220,6 +225,47 @@ void TestAtomicWriteFailure(const std::wstring& dir) {
     Expect(loaded.recent_count == 25, "original value preserved after failed save");
 }
 
+// NR-057: one direct case per VersionedReadStatus, plus the Loaded case
+// asserting the schema header is excluded from the returned data lines.
+void TestReadVersionedLines(const std::wstring& dir) {
+    std::vector<std::wstring> lines;
+
+    Expect(ReadVersionedLines(dir, L"missing.txt", 1, lines) == VersionedReadStatus::Missing,
+           "missing file reports Missing");
+    Expect(lines.empty(), "missing file leaves lines empty");
+
+    WriteBytes(dir + L"\\bad_utf8.txt", std::string("\xC3\x28", 2));
+    Expect(ReadVersionedLines(dir, L"bad_utf8.txt", 1, lines) == VersionedReadStatus::Malformed,
+           "undecodable UTF-8 reports Malformed");
+    Expect(lines.empty(), "undecodable UTF-8 leaves lines empty");
+
+    WriteBytes(dir + L"\\empty.txt", "");
+    Expect(ReadVersionedLines(dir, L"empty.txt", 1, lines) == VersionedReadStatus::Malformed,
+           "empty file reports Malformed");
+
+    WriteBytes(dir + L"\\no_schema.txt", "first\nsecond\n");
+    Expect(ReadVersionedLines(dir, L"no_schema.txt", 1, lines) == VersionedReadStatus::Malformed,
+           "file without a schema= header reports Malformed");
+
+    WriteBytes(dir + L"\\bad_version.txt", "schema=abc\n");
+    Expect(ReadVersionedLines(dir, L"bad_version.txt", 1, lines) == VersionedReadStatus::Malformed,
+           "non-integer schema version reports Malformed");
+
+    WriteBytes(dir + L"\\older.txt", "schema=0\nline1\n");
+    Expect(ReadVersionedLines(dir, L"older.txt", 1, lines) == VersionedReadStatus::OlderSchema,
+           "older schema reports OlderSchema");
+
+    WriteBytes(dir + L"\\newer.txt", "schema=2\n");
+    Expect(ReadVersionedLines(dir, L"newer.txt", 1, lines) == VersionedReadStatus::NewerSchema,
+           "newer schema reports NewerSchema");
+
+    WriteBytes(dir + L"\\ok.txt", "schema=1\nline one\nline two");
+    Expect(ReadVersionedLines(dir, L"ok.txt", 1, lines) == VersionedReadStatus::Loaded,
+           "valid file reports Loaded");
+    Expect(lines.size() == 2 && lines[0] == L"line one" && lines[1] == L"line two",
+           "loaded lines exclude the schema header line");
+}
+
 } // namespace
 
 int wmain() {
@@ -233,6 +279,7 @@ int wmain() {
     TestCorrupt(MakeTempDir("corrupt"));
     TestNewerSchema(MakeTempDir("newer"));
     TestAtomicWriteFailure(MakeTempDir("atomic"));
+    TestReadVersionedLines(MakeTempDir("versioned"));
     std::printf("NR-004 settings store check PASSED\n");
     return 0;
 }

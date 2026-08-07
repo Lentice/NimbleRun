@@ -7,8 +7,6 @@
 #include <windows.h>
 
 #include <algorithm>
-#include <cerrno>
-#include <cstdlib>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -24,18 +22,6 @@ constexpr int kSchemaVersion = 2;
 constexpr int kFieldCount = 7;  // stable_id, display_name, normalized_name,
                                 // launch_identity, source_path, source,
                                 // search_alias
-
-std::vector<std::wstring_view> SplitFields(std::wstring_view line) {
-    std::vector<std::wstring_view> fields;
-    std::size_t start = 0;
-    for (std::size_t i = 0; i <= line.size(); ++i) {
-        if (i == line.size() || line[i] == L'\t') {
-            fields.push_back(line.substr(start, i - start));
-            start = i + 1;
-        }
-    }
-    return fields;
-}
 
 bool ParseSource(std::wstring_view text, AppSource& out) {
     if (text == L"0") {
@@ -103,52 +89,20 @@ void SaveCatalogCache(const std::wstring& directory, const std::vector<AppEntry>
 }
 
 bool LoadCatalogCache(const std::wstring& directory, std::vector<AppEntry>& out) {
-    const std::wstring path = JoinPath(directory, kFileName);
-    std::string bytes;
-    if (!ReadAllBytes(path, bytes)) {
-        return false;
-    }
-    std::wstring text;
-    if (!DecodeUtf8(bytes, text) || text.empty()) {
-        PreserveCorrupt(directory, kFileName);
-        return false;
-    }
-    if (text.front() == L'\uFEFF') {
-        text.erase(text.begin());
-    }
-
     std::vector<std::wstring> lines;
-    std::size_t start = 0;
-    for (std::size_t i = 0; i <= text.size(); ++i) {
-        if (i == text.size() || text[i] == L'\n') {
-            std::wstring line(text.substr(start, i - start));
-            if (!line.empty() && line.back() == L'\r') {
-                line.pop_back();
-            }
-            lines.push_back(std::move(line));
-            start = i + 1;
-        }
-    }
-    if (lines.empty()) {
+    switch (ReadVersionedLines(directory, kFileName, kSchemaVersion, lines)) {
+    case VersionedReadStatus::Loaded:
+        break;
+    case VersionedReadStatus::Missing:
+    case VersionedReadStatus::Unreadable:
+        // The cache is a rebuildable snapshot, not user data: a missing or
+        // unreadable file is simply rebuilt, never quarantined.
+        return false;
+    case VersionedReadStatus::Malformed:
         PreserveCorrupt(directory, kFileName);
         return false;
-    }
-    if (lines[0].compare(0, kSchemaPrefix.size(), kSchemaPrefix) != 0) {
-        PreserveCorrupt(directory, kFileName);
-        return false;
-    }
-    const std::wstring schema_text = lines[0].substr(kSchemaPrefix.size());
-    wchar_t* end = nullptr;
-    errno = 0;
-    const long long schema = wcstoll(schema_text.c_str(), &end, 10);
-    if (errno == ERANGE || end == schema_text.c_str() || *end != L'\0') {
-        PreserveCorrupt(directory, kFileName);
-        return false;
-    }
-    if (schema > kSchemaVersion) {
-        return false;  // newer schema: leave the file, rebuild
-    }
-    if (schema != kSchemaVersion) {
+    case VersionedReadStatus::OlderSchema:
+    case VersionedReadStatus::NewerSchema:
         // NR-047: an older schema is a valid file this build cannot read, not a
         // corrupt one. Leave it in place and rebuild over it, matching the
         // newer-schema arm above; quarantining every user's cache on a routine
@@ -158,7 +112,7 @@ bool LoadCatalogCache(const std::wstring& directory, std::vector<AppEntry>& out)
 
     out.clear();
     out.reserve(lines.size());
-    for (std::size_t i = 1; i < lines.size(); ++i) {
+    for (std::size_t i = 0; i < lines.size(); ++i) {
         if (lines[i].empty()) {
             continue;
         }

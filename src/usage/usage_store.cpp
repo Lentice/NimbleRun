@@ -4,8 +4,6 @@
 
 #include <windows.h>
 
-#include <cerrno>
-#include <cstdlib>
 #include <algorithm>
 #include <string>
 #include <string_view>
@@ -19,80 +17,6 @@ constexpr std::wstring_view kFileName = L"usage.tsv";
 constexpr std::wstring_view kSchemaPrefix = L"schema=";
 constexpr int kSchemaVersion = 1;
 
-std::wstring Trim(std::wstring_view value) {
-    const auto is_space = [](wchar_t c) {
-        return c == L' ' || c == L'\t' || c == L'\r' || c == L'\n';
-    };
-    std::size_t begin = 0;
-    std::size_t end = value.size();
-    while (begin < end && is_space(value[begin])) {
-        ++begin;
-    }
-    while (end > begin && is_space(value[end - 1])) {
-        --end;
-    }
-    return std::wstring(value.substr(begin, end - begin));
-}
-
-std::vector<std::wstring> SplitLines(std::wstring_view text) {
-    std::vector<std::wstring> lines;
-    std::size_t start = 0;
-    for (std::size_t i = 0; i <= text.size(); ++i) {
-        if (i == text.size() || text[i] == L'\n') {
-            std::wstring line(text.substr(start, i - start));
-            if (!line.empty() && line.back() == L'\r') {
-                line.pop_back();
-            }
-            lines.push_back(std::move(line));
-            start = i + 1;
-        }
-    }
-    return lines;
-}
-
-// Splits a TSV row on tabs. Views point into `line`, which outlives the use.
-std::vector<std::wstring_view> SplitFields(std::wstring_view line) {
-    std::vector<std::wstring_view> fields;
-    std::size_t start = 0;
-    for (std::size_t i = 0; i <= line.size(); ++i) {
-        if (i == line.size() || line[i] == L'\t') {
-            fields.push_back(line.substr(start, i - start));
-            start = i + 1;
-        }
-    }
-    return fields;
-}
-
-bool ParseInt64(std::wstring_view text, std::int64_t& out) {
-    const std::wstring value = Trim(text);
-    if (value.empty()) {
-        return false;
-    }
-    wchar_t* end = nullptr;
-    errno = 0;
-    const long long parsed = wcstoll(value.c_str(), &end, 10);
-    if (errno == ERANGE || end == value.c_str() || *end != L'\0') {
-        return false;
-    }
-    out = parsed;
-    return true;
-}
-
-bool ParseUint64(std::wstring_view text, std::uint64_t& out) {
-    const std::wstring value = Trim(text);
-    if (value.empty()) {
-        return false;
-    }
-    wchar_t* end = nullptr;
-    errno = 0;
-    const unsigned long long parsed = wcstoull(value.c_str(), &end, 10);
-    if (errno == ERANGE || end == value.c_str() || *end != L'\0') {
-        return false;
-    }
-    out = static_cast<std::uint64_t>(parsed);
-    return true;
-}
-
 } // namespace
 
 UsageStore::UsageStore(std::wstring directory)
@@ -102,52 +26,20 @@ UsageStore::UsageStore(std::wstring directory)
 UsageLoadResult UsageStore::Load() {
     records_.clear();
 
-    const std::wstring path = JoinPath(directory_, kFileName);
-    std::string bytes;
-    if (!ReadAllBytes(path, bytes)) {
-        const DWORD error = GetLastError();
-        if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND) {
-            return UsageLoadResult::Missing;
-        }
+    std::vector<std::wstring> lines;
+    switch (ReadVersionedLines(directory_, kFileName, kSchemaVersion, lines)) {
+    case VersionedReadStatus::Loaded:
+        break;
+    case VersionedReadStatus::Missing:
+        return UsageLoadResult::Missing;
+    case VersionedReadStatus::NewerSchema:
+        return UsageLoadResult::NewerSchema;  // original untouched (design-spec §10.4)
+    default:  // Unreadable / Malformed / OlderSchema
         PreserveCorrupt(directory_, kFileName);
         return UsageLoadResult::Corrupt;
     }
 
-    std::wstring text;
-    if (!DecodeUtf8(bytes, text) || text.empty()) {
-        PreserveCorrupt(directory_, kFileName);
-        return UsageLoadResult::Corrupt;
-    }
-    if (text.front() == L'\uFEFF') {
-        text.erase(text.begin());
-    }
-
-    const std::vector<std::wstring> lines = SplitLines(text);
-    if (lines.empty()) {
-        PreserveCorrupt(directory_, kFileName);
-        return UsageLoadResult::Corrupt;
-    }
-
-    const std::wstring schema_line = Trim(lines[0]);
-    if (schema_line.size() <= kSchemaPrefix.size() ||
-        schema_line.compare(0, kSchemaPrefix.size(), kSchemaPrefix) != 0) {
-        PreserveCorrupt(directory_, kFileName);
-        return UsageLoadResult::Corrupt;
-    }
-    std::int64_t schema = 0;
-    if (!ParseInt64(schema_line.substr(kSchemaPrefix.size()), schema)) {
-        PreserveCorrupt(directory_, kFileName);
-        return UsageLoadResult::Corrupt;
-    }
-    if (schema > kSchemaVersion) {
-        return UsageLoadResult::NewerSchema;
-    }
-    if (schema != kSchemaVersion) {
-        PreserveCorrupt(directory_, kFileName);
-        return UsageLoadResult::Corrupt;
-    }
-
-    for (std::size_t i = 1; i < lines.size(); ++i) {
+    for (std::size_t i = 0; i < lines.size(); ++i) {
         const std::wstring line = Trim(lines[i]);
         if (line.empty()) {
             continue;

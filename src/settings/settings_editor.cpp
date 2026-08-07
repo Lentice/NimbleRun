@@ -1,5 +1,7 @@
 #include "settings/settings_editor.h"
 
+#include "storage/atomic_text_file.h"
+
 #include <windows.h>
 
 #include <algorithm>
@@ -12,21 +14,6 @@ namespace {
 
 constexpr int kMinRecentCount = 8;
 constexpr int kMaxRecentCount = 40;
-
-std::wstring Trim(std::wstring_view value) {
-    const auto is_space = [](wchar_t c) {
-        return c == L' ' || c == L'\t' || c == L'\r' || c == L'\n';
-    };
-    std::size_t begin = 0;
-    std::size_t end = value.size();
-    while (begin < end && is_space(value[begin])) {
-        ++begin;
-    }
-    while (end > begin && is_space(value[end - 1])) {
-        --end;
-    }
-    return std::wstring(value.substr(begin, end - begin));
-}
 
 bool AreEqualCaseInsensitive(std::wstring_view left, std::wstring_view right) {
     if (left.size() != right.size()) {
