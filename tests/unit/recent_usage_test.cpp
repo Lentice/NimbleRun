@@ -241,6 +241,27 @@ void TestNegativeTotalLaunchesRejected() {
     fs::remove_all(dir);
 }
 
+// NR-080: a corrupt row in the middle of an otherwise valid usage.tsv must not
+// leak the valid prefix into the live store -- the non-Loaded contract is
+// "store is empty" (usage_store.h). The prefix records were already pushed
+// before the bad row, so Load must clear them before reporting Corrupt, or the
+// partial records would enter ranking and the recent region for the session.
+void TestCorruptMidFileClearsRecords() {
+    const std::wstring dir = MakeTempDir("midcorrupt");
+    const std::string content =
+        "schema=1\nvalid_app_1\t5\t1000\nvalid_app_2\t7\t2000\nbad_app\tnotanumber\t3000\n";
+    WriteBytes(dir + L"\\usage.tsv", content);
+    UsageStore store(dir);
+    Expect(store.Load() == UsageLoadResult::Corrupt, "mid-file corrupt row reports Corrupt");
+    Expect(store.Records().empty(), "corrupt load leaves no partial records in the store");
+    Expect(store.Recent().empty(), "corrupt load yields the empty safe default");
+    Expect(!fs::exists(dir + L"\\usage.tsv"), "corrupt file moved aside");
+    Expect(fs::exists(dir + L"\\usage.tsv.corrupt"), "corrupt file preserved");
+    Expect(ReadBytes(dir + L"\\usage.tsv.corrupt") == content,
+           "corrupt content preserved verbatim");
+    fs::remove_all(dir);
+}
+
 void TestNewerSchema() {
     const std::wstring dir = MakeTempDir("newer");
     const std::string content = "schema=99\n" + std::string("not_in_catalog") + "\t5\t1000\n";
@@ -495,6 +516,7 @@ int wmain() {
     TestCorrupt();
     TestMalformedRow();
     TestNegativeTotalLaunchesRejected();
+    TestCorruptMidFileClearsRecords();
     TestNewerSchema();
     TestAtomicWriteFailure();
     TestForgetExisting();

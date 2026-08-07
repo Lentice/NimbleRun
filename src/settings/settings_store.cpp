@@ -162,6 +162,7 @@ SettingsLoadResult SettingsStore::Load(Settings& out) const {
         return SettingsLoadResult::NewerSchema;  // original untouched (design-spec §10.4)
     default:  // Unreadable / Malformed / OlderSchema
         PreserveCorrupt(directory_, kFileName);
+        out = DefaultSettings();  // NR-080: honor "non-Loaded out holds DefaultSettings"
         return SettingsLoadResult::Corrupt;
     }
 
@@ -180,6 +181,10 @@ SettingsLoadResult SettingsStore::Load(Settings& out) const {
         }
         if (equals == std::wstring::npos) {
             PreserveCorrupt(directory_, kFileName);
+            // NR-080: a mid-file corrupt row must not leak the valid prefix
+            // that was already parsed into `out` -- the non-Loaded contract is
+            // DefaultSettings(), never a partial parse (settings_store.h).
+            out = DefaultSettings();
             return SettingsLoadResult::Corrupt;
         }
         const std::wstring key = Trim(line.substr(0, equals));

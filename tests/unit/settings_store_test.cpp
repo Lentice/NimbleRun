@@ -194,6 +194,28 @@ void TestCorrupt(const std::wstring& dir) {
     Expect(ReadBytes(dir + L"\\settings.ini.corrupt") == content, "corrupt content preserved verbatim");
 }
 
+// NR-080: a corrupt row in the middle of an otherwise valid settings.ini must
+// not leak the valid prefix into the live settings -- the non-Loaded contract
+// is DefaultSettings(), never a partial parse (settings_store.h). Without the
+// reset, the prefix's hotkey/theme would be adopted while the balloon claims
+// "defaults in use".
+void TestCorruptMidFileUsesDefaults(const std::wstring& dir) {
+    const std::string content =
+        "schema=1\nhotkey=Ctrl+1\ntheme=Dark\nthis_line_has_no_equals\n";
+    WriteBytes(dir + L"\\settings.ini", content);
+    SettingsStore store(dir);
+    Settings loaded;
+    Expect(store.Load(loaded) == SettingsLoadResult::Corrupt,
+           "mid-file corrupt row reports Corrupt");
+    Expect(loaded.hotkey == L"Alt+Space", "corrupt load resets to the default hotkey");
+    Expect(loaded.theme == Theme::System, "corrupt load resets to the default theme");
+    Expect(loaded.recent_count == 20, "corrupt load resets to the default recent_count");
+    Expect(!fs::exists(dir + L"\\settings.ini"), "corrupt file moved aside");
+    Expect(fs::exists(dir + L"\\settings.ini.corrupt"), "corrupt file preserved");
+    Expect(ReadBytes(dir + L"\\settings.ini.corrupt") == content,
+           "corrupt content preserved verbatim");
+}
+
 void TestNewerSchema(const std::wstring& dir) {
     const std::string content = "schema=99\nrecent_count=30\n";
     WriteBytes(dir + L"\\settings.ini", content);
@@ -277,6 +299,7 @@ int wmain() {
     TestCatalogRootsRoundTrip(MakeTempDir("catalogroots"));
     TestCatalogRootsValidation(MakeTempDir("catalogvalidation"));
     TestCorrupt(MakeTempDir("corrupt"));
+    TestCorruptMidFileUsesDefaults(MakeTempDir("midcorrupt"));
     TestNewerSchema(MakeTempDir("newer"));
     TestAtomicWriteFailure(MakeTempDir("atomic"));
     TestReadVersionedLines(MakeTempDir("versioned"));

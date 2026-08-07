@@ -48,6 +48,7 @@ UsageLoadResult UsageStore::Load() {
         const std::vector<std::wstring_view> fields = SplitFields(line);
         if (fields.size() != 3) {
             PreserveCorrupt(directory_, kFileName);
+            records_.clear();  // NR-080: a partial parse must not leak into ranking
             return UsageLoadResult::Corrupt;
         }
         UsageRecord record;
@@ -56,6 +57,7 @@ UsageLoadResult UsageStore::Load() {
             !ParseUint64(fields[1], record.total_launches) ||
             !ParseInt64(fields[2], record.last_launch_utc)) {
             PreserveCorrupt(directory_, kFileName);
+            records_.clear();  // NR-080: a partial parse must not leak into ranking
             return UsageLoadResult::Corrupt;
         }
         // When the same stable id appears twice, the last line wins.
