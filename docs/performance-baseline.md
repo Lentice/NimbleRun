@@ -14,8 +14,43 @@ These are Release x64 measurements, not Debug estimates. Record the OS build, CP
 | Idle app-owned thread count | 2 ＋ watcher root 數 | 超出該式 | 5（預期值，未經 census 驗證） | 見下方「執行緒數的量法」 |
 | Idle process thread count | — | — | 16 | 參考值，不設門檻 |
 | `icons.cache` file size | ≤ 32 MiB | > 48 MiB | Not measured | 需要一次完整圖示建置後的實際檔案大小量測，尚未進行 |
+| 單次整窗重繪（grid，24 格） | — | — | 1.40 ms（p95 1.94 ms） | 見下方「整窗重繪的成本」，2026-08-07；參考值，不設門檻 |
+| 單次整窗重繪（list，8 列） | — | — | 0.74 ms（p95 0.95 ms） | 同上。這是每次按鍵 `EN_UPDATE` 整窗失效的實際代價 |
 
-## Measurement rules
+## 整窗重繪的成本
+
+2026-08-07 稽核提出兩個效能假設，兩個都以量測否決，**不開 work item**：
+
+1. **`DrawDecodedIcon` 每格每幀 `CreateBitmap`**（`src/app_host/main.cpp`）。
+2. **`EN_UPDATE` 每次按鍵整窗失效**（同檔的搜尋框訊息處理）。
+
+量法：獨立的 D2D 基準程式，與 `Render()` 相同的面板尺寸與逐格繪製呼叫
+（`Clear`、搜尋框、每格 fill＋icon＋文字、footer band），
+`D2D1_PRESENT_OPTIONS_IMMEDIATELY` 以避開 vsync，
+`QueryPerformanceCounter` 量 `BeginDraw`～`EndDraw`，
+每組 500 幀取後 400 幀。程式為一次性量測，未進 repo。
+環境：Release x64、clang 22.1.8 `-O2`、Windows 11 Pro 26200、未接除錯器。
+
+| 情境 | 現行（每幀 `CreateBitmap`） | 若快取 `ID2D1Bitmap` | 差 |
+| --- | ---: | ---: | ---: |
+| grid 24 格 @100% | 1.40 ms | 0.48 ms | 0.92 ms |
+| grid 24 格 @150% | 1.43 ms | 0.78 ms | 0.65 ms |
+| list 8 列 @100% | 0.74 ms | 0.35 ms | 0.39 ms |
+| list 8 列 @150% | 0.74 ms | 0.49 ms | 0.26 ms |
+
+結論：
+
+- `CreateBitmap` 約 **40 µs／圖示**，與 DPI 無關（成本綁在 48×48 的像素上傳，
+  不是目標矩形）。它確實佔 grid 首幀的 **66%**——但整幀仍是 **1.4 ms**，
+  是「暖狀態快捷鍵至可輸入 p95 ≤ 80 ms」預算的 **1.8%**。
+  快取 `ID2D1Bitmap` 要同時處理裝置遺失、圖示晚到替換、LRU 逐出三個失效點，
+  **用三個失效點換 0.9 ms 不划算**。
+- 打字路徑是 list 版面：每次按鍵 **0.74 ms 重繪 ＋ 0.6 ms 搜尋**（上表 NR-047 數字）
+  ≈ **1.4 ms**。以 20 字元／秒連打計，約佔單核 **3%**。
+  debounce、incremental narrowing、局部失效**全部沒有數字支持**。
+
+重新開啟這兩個議題的門檻：**先量到一幀超過 8 ms**（或高 DPI ／軟體算繪
+fallback 下超過該值），再談改法。
 
 - Use a Release x64 build without an attached debugger.
 - Record working set, private working set, private bytes, CPU time, context switches, thread count, handle count, GDI objects, and USER objects.
