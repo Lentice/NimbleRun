@@ -60,7 +60,7 @@ void PanelModel::SetRecent(std::vector<AppEntry> recent) {
     RefreshRows();
 }
 
-void PanelModel::SetPins(std::vector<std::wstring> pins) {
+void PanelModel::SetPins(std::vector<PinRecord> pins) {
     pins_ = std::move(pins);
     RefreshRows();
 }
@@ -84,16 +84,32 @@ void PanelModel::RefreshRows() {
     // second blank test that could drift from it.
     if (NormalizeName(query_).empty()) {
         rows_.clear();
-        // Pinned apps first, in pin order, resolved from the catalog snapshot
-        // so a pin for an app currently absent from the catalog is not shown
-        // (the record itself stays in the store, design-spec §FR-011).
+        // Pinned apps first, in pin order, resolved from the catalog snapshot.
+        // A pin for an app currently absent from the catalog is still shown --
+        // as a placeholder row (IsMissingPin(), NR-062) synthesized from the
+        // pin record -- rather than skipped, so the user can see and unpin it
+        // instead of it silently vanishing. The record itself stays in the
+        // store either way (design-spec §FR-011).
         if (catalog_ != nullptr) {
-            for (const std::wstring& pin_id : pins_) {
+            for (const PinRecord& pin : pins_) {
+                bool found = false;
                 for (const AppEntry& entry : *catalog_) {
-                    if (entry.stable_id == pin_id) {
+                    if (entry.stable_id == pin.stable_id) {
                         rows_.push_back(entry);
+                        found = true;
                         break;
                     }
+                }
+                if (!found) {
+                    AppEntry placeholder;
+                    placeholder.stable_id = pin.stable_id;
+                    placeholder.display_name =
+                        pin.display_name.empty() ? pin.stable_id : pin.display_name;
+                    placeholder.normalized_name = placeholder.display_name;
+                    placeholder.is_pinned = true;
+                    // launch_identity and source_path stay empty: that is what
+                    // IsMissingPin() tests, and it keeps the row unlaunchable.
+                    rows_.push_back(std::move(placeholder));
                 }
             }
         }
@@ -101,7 +117,10 @@ void PanelModel::RefreshRows() {
         // in both regions (design-spec §4.2, AC-002).
         recent_start_ = static_cast<int>(rows_.size());
         for (const AppEntry& entry : recent_) {
-            if (std::find(pins_.begin(), pins_.end(), entry.stable_id) == pins_.end()) {
+            const bool pinned = std::find_if(pins_.begin(), pins_.end(),
+                [&](const PinRecord& pin) { return pin.stable_id == entry.stable_id; }) !=
+                pins_.end();
+            if (!pinned) {
                 rows_.push_back(entry);
             }
         }
@@ -221,7 +240,11 @@ std::vector<std::wstring> PanelModel::EmptyStatePrewarmIds(std::size_t max_items
     std::vector<std::wstring> ids;
     ids.reserve(count);
     for (std::size_t i = 0; i < count; ++i) {
-        ids.push_back(rows_[i].stable_id);
+        // NR-062: a missing-pin placeholder has no icon to prewarm (non-goal:
+        // no icon caching/prewarm for placeholder tiles).
+        if (!IsMissingPin(rows_[i])) {
+            ids.push_back(rows_[i].stable_id);
+        }
     }
     return ids;
 }

@@ -44,6 +44,23 @@ std::vector<AppEntry> CatalogOf(int count) {
     return catalog;
 }
 
+// NR-062: SetPins takes pin records, not bare ids; this builds the common case
+// (no display name needed by the test) tersely.
+nimblerun::PinRecord Pin(std::wstring id, std::wstring display_name = L"") {
+    nimblerun::PinRecord pin;
+    pin.stable_id = std::move(id);
+    pin.display_name = std::move(display_name);
+    return pin;
+}
+
+std::vector<nimblerun::PinRecord> Pins(std::initializer_list<std::wstring> ids) {
+    std::vector<nimblerun::PinRecord> pins;
+    for (const std::wstring& id : ids) {
+        pins.push_back(Pin(id));
+    }
+    return pins;
+}
+
 void TestEmptyQueryShowsRecent() {
     const std::vector<AppEntry> catalog = {Entry(L"a", L"Alpha"), Entry(L"b", L"Beta")};
     std::vector<AppEntry> recent = {Entry(L"b", L"Beta"), Entry(L"a", L"Alpha")};
@@ -134,7 +151,7 @@ void TestWhitespaceQueryStaysInGrid() {
     const std::vector<AppEntry> catalog = CatalogOf(8);
     PanelModel model(&catalog, catalog);
     model.SetGridColumns(6);
-    model.SetPins({L"id0", L"id1"});
+    model.SetPins(Pins({L"id0", L"id1"}));
     const std::size_t rows_before = model.Rows().size();
     const int columns_before = model.Columns();
     Expect(columns_before == 6, "empty query uses the grid columns");
@@ -169,7 +186,7 @@ void TestTrimmedQuerySameAsUntrimmed() {
 void TestSetQueryEmptyMatchesReset() {
     const std::vector<AppEntry> catalog = CatalogOf(6);
     PanelModel model(&catalog, catalog);
-    model.SetPins({L"id0", L"id2"});
+    model.SetPins(Pins({L"id0", L"id2"}));
     model.SetQuery(L"App");
     Expect(model.Columns() == 1, "query switches to the list layout");
     model.SetQuery(L"");
@@ -302,7 +319,7 @@ void TestResetOperationsClearScroll() {
     model.MoveSelection(1);
     model.MoveSelection(1);
     Expect(model.FirstVisibleRow() == 1, "viewport scrolled down again");
-    model.SetPins(std::vector<std::wstring>{L"id0"});
+    model.SetPins({Pin(L"id0")});
     Expect(model.FirstVisibleRow() == 0, "SetPins resets first visible");
 }
 
@@ -612,7 +629,7 @@ void TestEmptyStatePrewarmIdsPinsThenRecent() {
         recent.push_back(catalog[static_cast<std::size_t>(i)]);
     }
     PanelModel model(&catalog, std::move(recent));
-    model.SetPins({L"id0", L"id1", L"id2"});
+    model.SetPins(Pins({L"id0", L"id1", L"id2"}));
     const std::vector<std::wstring> ids = model.EmptyStatePrewarmIds(24);
     Expect(ids.size() == 8, "3 pins + 5 recent prewarm 8 ids");
     Expect(ids.size() == model.Rows().size(), "prewarm count matches the row count");
@@ -625,9 +642,9 @@ void TestEmptyStatePrewarmIdsPinsThenRecent() {
 
 void TestEmptyStatePrewarmIdsCapsAtOnePage() {
     const std::vector<AppEntry> catalog = CatalogOf(40);
-    std::vector<std::wstring> pins;
+    std::vector<nimblerun::PinRecord> pins;
     for (int i = 0; i < 40; ++i) {
-        pins.push_back(L"id" + std::to_wstring(i));
+        pins.push_back(Pin(L"id" + std::to_wstring(i)));
     }
     PanelModel model(&catalog, {});
     model.SetPins(pins);
@@ -660,7 +677,7 @@ void TestEmptyStatePrewarmIdsEmptyCatalog() {
 void TestEmptyStatePrewarmIdsIsConst() {
     const std::vector<AppEntry> catalog = CatalogOf(10);
     PanelModel model(&catalog, catalog);
-    model.SetPins({L"id0", L"id1"});
+    model.SetPins(Pins({L"id0", L"id1"}));
     model.SetGridColumns(6);
     const std::size_t selection_before = model.SelectionIndex();
     const int first_before = model.FirstVisibleRow();
@@ -675,12 +692,16 @@ void TestEmptyStatePrewarmIdsIsConst() {
     Expect(model.Rows().size() == rows_before, "prewarm query leaves rows_ untouched");
 }
 
+// NR-062 overrode the old "absent pin is hidden" behavior: an absent pin now
+// shows as a placeholder row in Rows() (see TestMissingPinBecomesPlaceholder
+// below), but it still has no icon to prewarm (non-goal: no icon caching or
+// prewarm for placeholder tiles), so it must stay out of the prewarm id list.
 void TestEmptyStatePrewarmIdsAbsentPinSkipped() {
     const std::vector<AppEntry> catalog = CatalogOf(12);
     PanelModel model(&catalog, catalog);
-    model.SetPins({L"id0", L"ghost", L"id1"});
+    model.SetPins(Pins({L"id0", L"ghost", L"id1"}));
     const std::vector<std::wstring> ids = model.EmptyStatePrewarmIds(24);
-    Expect(ids.size() == 12, "an absent pin is filtered out of the empty-query rows");
+    Expect(ids.size() == 12, "the placeholder row is excluded from the prewarm ids");
     for (const std::wstring& id : ids) {
         Expect(id != L"ghost", "an absent pin's id is never prewarmed");
         bool found = false;
@@ -704,7 +725,7 @@ void TestRecentStartIndexPinsThenRecent() {
         recent.push_back(catalog[static_cast<std::size_t>(i)]);
     }
     PanelModel model(&catalog, std::move(recent));
-    model.SetPins({L"id0", L"id1", L"id2"});
+    model.SetPins(Pins({L"id0", L"id1", L"id2"}));
     Expect(model.RecentStartIndex() == 3, "recent region starts after 3 pins");
     Expect(model.Rows().size() == 8, "3 pins + 5 recent rows");
     for (std::size_t i = 3; i < model.Rows().size(); ++i) {
@@ -716,7 +737,7 @@ void TestRecentStartIndexPinsThenRecent() {
 void TestRecentStartIndexAllPinned() {
     const std::vector<AppEntry> catalog = CatalogOf(5);
     PanelModel model(&catalog, catalog);
-    model.SetPins({L"id0", L"id1", L"id2", L"id3", L"id4"});
+    model.SetPins(Pins({L"id0", L"id1", L"id2", L"id3", L"id4"}));
     Expect(model.Rows().size() == 5, "all 5 pinned rows shown");
     Expect(model.RecentStartIndex() == static_cast<int>(model.Rows().size()),
            "all-pinned empty view has no recent rows");
@@ -789,7 +810,7 @@ void TestRecentEndIndexExcludesFiller() {
         Entry(L"p1", L"PinOne"), Entry(L"r1", L"RecentOne"),
         Entry(L"f1", L"FillerOne"), Entry(L"f2", L"FillerTwo")};
     PanelModel model(&catalog, {catalog[1]});
-    model.SetPins({L"p1"});
+    model.SetPins(Pins({L"p1"}));
     Expect(model.RecentStartIndex() == 1, "recent region starts after the pin");
     Expect(model.RecentEndIndex() == 2, "recent region holds only the one recent row");
     Expect(model.Rows().size() == 2, "no filler: only the pin and the recent row show");
@@ -808,7 +829,7 @@ void TestPinnedRegionNotSortedByScore() {
     catalog[2].usage_score = 50;
     catalog[3].usage_score = 10;
     PanelModel model(&catalog, {});
-    model.SetPins({L"p1", L"p2"});
+    model.SetPins(Pins({L"p1", L"p2"}));
     Expect(model.Rows()[0].stable_id == L"p1", "pin order kept despite score 1");
     Expect(model.Rows()[1].stable_id == L"p2", "pin order kept despite score 999");
     Expect(model.RecentStartIndex() == 2, "recent boundary sits right after the two pins");
@@ -835,7 +856,7 @@ void TestEmptyStateHasNoFiller() {
     const std::vector<AppEntry> catalog = CatalogOf(4);
     std::vector<AppEntry> recent = {catalog[1]};
     PanelModel model(&catalog, std::move(recent));
-    model.SetPins({L"id0"});
+    model.SetPins(Pins({L"id0"}));
     Expect(model.Rows().size() == 2, "only the pin and the one recent app show");
     Expect(model.Rows()[0].stable_id == L"id0", "the pin leads");
     Expect(model.Rows()[1].stable_id == L"id1", "the recent app follows");
@@ -847,6 +868,51 @@ void TestEmptyStateAllEmpty() {
     const std::vector<AppEntry> catalog = CatalogOf(4);
     PanelModel model(&catalog, {});
     Expect(model.Rows().empty(), "no pins, no recent -> no rows at all");
+}
+
+// NR-062: docs/work-items/NR-062-missing-pin-placeholder.md Agent checks --
+// a pin whose app is absent from the catalog is synthesized into a
+// placeholder row instead of being dropped.
+
+void TestMissingPinBecomesPlaceholder() {
+    const std::vector<AppEntry> catalog = {Entry(L"other", L"Other")};
+    PanelModel model(&catalog, {});
+    model.SetPins({Pin(L"p1", L"Gone App")});
+    Expect(model.Rows().size() == 1, "the missing pin still produces one row");
+    Expect(model.Rows()[0].stable_id == L"p1", "placeholder keeps the pin's stable id");
+    Expect(model.Rows()[0].display_name == L"Gone App",
+           "placeholder shows the pin's recorded display name");
+    Expect(PanelModel::IsMissingPin(model.Rows()[0]),
+           "the synthesized row is reported as a missing pin");
+}
+
+void TestMissingPinKeepsOrder() {
+    const std::vector<AppEntry> catalog = {Entry(L"p2", L"Present")};
+    PanelModel model(&catalog, {});
+    model.SetPins({Pin(L"p1", L"Gone"), Pin(L"p2")});
+    Expect(model.Rows().size() == 2, "one placeholder plus one present pin");
+    Expect(PanelModel::IsMissingPin(model.Rows()[0]), "the missing pin sits first, in pin order");
+    Expect(model.Rows()[1].stable_id == L"p2", "the present pin follows in pin order");
+    Expect(!PanelModel::IsMissingPin(model.Rows()[1]), "the present pin is not a placeholder");
+    Expect(model.RecentStartIndex() == 2, "both pinned rows count toward the pinned region");
+}
+
+void TestMissingPinNotInSearch() {
+    const std::vector<AppEntry> catalog = {Entry(L"other", L"Other")};
+    PanelModel model(&catalog, {});
+    model.SetPins({Pin(L"p1", L"Gone App")});
+    model.SetQuery(L"gone");
+    for (const AppEntry& row : model.Rows()) {
+        Expect(row.stable_id != L"p1", "a missing pin's placeholder never appears in search results");
+    }
+}
+
+void TestPresentPinIsNotMissing() {
+    const std::vector<AppEntry> catalog = {Entry(L"p1", L"Present")};
+    PanelModel model(&catalog, {});
+    model.SetPins({Pin(L"p1")});
+    Expect(model.Rows().size() == 1, "the present pin produces its one row");
+    Expect(!PanelModel::IsMissingPin(model.Rows()[0]), "a resolved pin is never reported as missing");
 }
 
 } // namespace
@@ -909,6 +975,10 @@ int wmain() {
     TestEmptyStateEmptyCatalogNoCrash();
     TestEmptyStateHasNoFiller();
     TestEmptyStateAllEmpty();
-    std::printf("NR-010/NR-020/NR-021/NR-024/NR-029/NR-037/NR-040/NR-053/NR-061 panel model check PASSED\n");
+    TestMissingPinBecomesPlaceholder();
+    TestMissingPinKeepsOrder();
+    TestMissingPinNotInSearch();
+    TestPresentPinIsNotMissing();
+    std::printf("NR-010/NR-020/NR-021/NR-024/NR-029/NR-037/NR-040/NR-053/NR-061/NR-062 panel model check PASSED\n");
     return 0;
 }

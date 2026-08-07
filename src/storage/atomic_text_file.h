@@ -231,9 +231,13 @@ enum class VersionedReadStatus {
 };
 
 // Reads <directory>\<name>, strips a BOM, splits into lines and validates the
-// first line's schema= header. On success `lines` receives the data lines
-// without the header (verbatim, not Trimmed). This function never renames,
-// writes or deletes any file: disposition is the caller's decision.
+// first line's schema= header. On Loaded or OlderSchema, `lines` receives the
+// data lines without the header (verbatim, not Trimmed) -- OlderSchema still
+// gets them so a caller that knows how to migrate an older format forward can
+// (NR-062); a caller that does not want to migrate simply does not read
+// `lines` in that branch. On any other status `lines` is left empty. This
+// function never renames, writes or deletes any file: disposition is the
+// caller's decision.
 inline VersionedReadStatus ReadVersionedLines(std::wstring_view directory,
                                               std::wstring_view name,
                                               int expected_schema,
@@ -273,16 +277,24 @@ inline VersionedReadStatus ReadVersionedLines(std::wstring_view directory,
     if (!ParseInt64(schema_line.substr(kSchemaPrefix.size()), schema)) {
         return VersionedReadStatus::Malformed;
     }
+    // NR-062: populate `lines` before the version comparison, not just on the
+    // Loaded path. A caller that must migrate an older format forward (e.g.
+    // PinStore upgrading a schema=1 favorites.txt) needs the actual data lines
+    // on OlderSchema, not an empty vector -- otherwise "handle OlderSchema as
+    // valid" silently degrades into "treat it as empty", which is the data
+    // loss this comment is here to prevent. Callers that leave the file
+    // untouched on a schema mismatch (the common case) simply do not read
+    // `lines` in that branch, so this is free for them.
+    lines.reserve(all_lines.size() - 1);
+    for (std::size_t i = 1; i < all_lines.size(); ++i) {
+        lines.push_back(all_lines[i]);
+    }
+
     if (schema > expected_schema) {
         return VersionedReadStatus::NewerSchema;
     }
     if (schema != expected_schema) {
         return VersionedReadStatus::OlderSchema;
-    }
-
-    lines.reserve(all_lines.size() - 1);
-    for (std::size_t i = 1; i < all_lines.size(); ++i) {
-        lines.push_back(all_lines[i]);
     }
     return VersionedReadStatus::Loaded;
 }

@@ -112,6 +112,10 @@ constexpr wchar_t kNoMatchingApps[] = L"No matching apps";
 // NR-061: shown for the empty-query state now that the panel no longer fills
 // with alphabetical catalog entries (overrides NR-053's fill behavior).
 constexpr wchar_t kNoRecentApps[] = L"No pinned or recent apps yet";
+// NR-062: footer path-bar label for a missing-pin placeholder, distinct from
+// kWindowsApp (a packaged app with no filesystem path is not the same case as
+// a pin whose app cannot be found at all).
+constexpr wchar_t kMissingApp[] = L"App not found";
 } // namespace list_strings
 
 // NR-021: centralized footer key-hint strings (design-spec §4.9). Fixed
@@ -786,6 +790,13 @@ void ActivateRow(std::size_t index, HWND window) {
         return;
     }
     const nimblerun::AppEntry entry = g_model->Rows()[index];
+    // NR-062: a missing-pin placeholder is not launchable (Enter, a click, and
+    // Alt+digit quick-select all funnel through this one function, so this single
+    // guard covers every launch entry point). No error dialog, no launch
+    // failure flow -- nothing happens at all.
+    if (nimblerun::PanelModel::IsMissingPin(entry)) {
+        return;
+    }
     const nimblerun::LaunchResult result = nimblerun::LaunchEntry(entry, window);
     if (!result.ok) {
         // NR-022: on failure, first trigger one background catalog refresh
@@ -955,6 +966,26 @@ void DrawIconOrFallback(const nimblerun::AppEntry& entry,
     RequestVisibleIcon(entry, key, encoded);
 }
 
+// NR-062: a pinned row whose app is absent from the catalog (PanelModel::
+// IsMissingPin) draws an X instead of the usual icon/fallback -- "this is not
+// here", not a question mark or a generic gray tile (the user's explicit
+// decision, see the work item). Uses the existing g_dim_brush; no new brush,
+// image, or font resource. Inset ~25% of the icon rect on each side.
+void DrawMissingPinTile(const D2D1_RECT_F& icon_rect, float dpi_x) {
+    const float inset_x = (icon_rect.right - icon_rect.left) * 0.25f;
+    const float inset_y = (icon_rect.bottom - icon_rect.top) * 0.25f;
+    const float left = icon_rect.left + inset_x;
+    const float top = icon_rect.top + inset_y;
+    const float right = icon_rect.right - inset_x;
+    const float bottom = icon_rect.bottom - inset_y;
+    const float scale = dpi_x / nimblerun::layout::kDpi96;
+    const float stroke_width = 2.0f * scale;
+    g_render_target->DrawLine(D2D1::Point2F(left, top), D2D1::Point2F(right, bottom),
+                              g_dim_brush, stroke_width);
+    g_render_target->DrawLine(D2D1::Point2F(left, bottom), D2D1::Point2F(right, top),
+                              g_dim_brush, stroke_width);
+}
+
 // NR-059: identical in both layouts except the row height (design-spec §4.3).
 // NR-061: searching distinguishes "no results for this query" from "no pins
 // or recent apps yet" -- kNoMatchingApps only makes sense for the former; the
@@ -1058,7 +1089,7 @@ void RefreshPins() {
     g_pins->Reconcile(g_refresh->Snapshot(),
                       static_cast<std::int64_t>(std::time(nullptr)));
     g_pins->Save();
-    g_model->SetPins(g_pins->OrderedPins());
+    g_model->SetPins(g_pins->Records());
 }
 
 // design-spec §4.5: among equal text matches the order is pinned first, then
@@ -1417,7 +1448,11 @@ void Render(HWND window) {
                     icon_left, icon_top,
                     icon_left + nimblerun::layout::kIconSizeDip,
                     icon_top + nimblerun::layout::kIconSizeDip);
-                DrawIconOrFallback(rows[row], tile, grid_icon_needed_px, dpi_x, dpi_y);
+                if (nimblerun::PanelModel::IsMissingPin(rows[row])) {
+                    DrawMissingPinTile(tile, dpi_x);
+                } else {
+                    DrawIconOrFallback(rows[row], tile, grid_icon_needed_px, dpi_x, dpi_y);
+                }
                 // NR-029: single-line centered name in the lower half. The grid
                 // name format is NO_WRAP + character ellipsis (see the
                 // SetTrimming setup), so name length never changes cell
@@ -1715,10 +1750,11 @@ void Render(HWND window) {
             path_entry = &g_model->Rows()[g_model->SelectionIndex()];
         }
         if (path_entry) {
-            const wchar_t* path =
-                nimblerun::IsDisplayablePath(path_entry->source_path)
-                    ? path_entry->source_path.c_str()
-                    : list_strings::kWindowsApp;
+            const wchar_t* path = nimblerun::PanelModel::IsMissingPin(*path_entry)
+                ? list_strings::kMissingApp
+                : (nimblerun::IsDisplayablePath(path_entry->source_path)
+                       ? path_entry->source_path.c_str()
+                       : list_strings::kWindowsApp);
             g_render_target->DrawText(
                 path, static_cast<UINT32>(wcslen(path)), g_small_format,
                 D2D1::RectF(nimblerun::layout::kListLeftDip,
@@ -2499,7 +2535,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
                         entry == -1 ? row : entry)].stable_id);
                 }
                 if (g_pins && g_pins->ReorderPresent(order) && g_pins->Save()) {
-                    g_model->SetPins(g_pins->OrderedPins());
+                    g_model->SetPins(g_pins->Records());
                 }
             }
             // Else: dragging and dropped outside the pinned region (gap < 0)
@@ -2565,23 +2601,29 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
         }
         AppendMenuW(menu, MF_STRING, pinned ? kCmdUnpin : kCmdPin,
                     pinned ? context_menu_strings::kUnpin : context_menu_strings::kPin);
-        // NR-040: only offered for rows actually showing in the recent region;
-        // on a pinned row -- or on an NR-053 alphabetical filler row, which also
-        // sits after RecentStartIndex() but has no usage record -- the command
-        // would silently change nothing.
-        const int recent_start = g_model->RecentStartIndex();
-        const bool in_recent = recent_start >= 0 && cell >= recent_start
-                               && cell < g_model->RecentEndIndex();
-        if (in_recent) {
-            AppendMenuW(menu, MF_STRING, kCmdForgetRecent,
-                        context_menu_strings::kRemoveFromRecent);
-        }
-        if (nimblerun::IsPathIdentity(entry.launch_identity)) {
-            AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-            AppendMenuW(menu, MF_STRING, kCmdOpenLocation,
-                        context_menu_strings::kOpenFileLocation);
-            AppendMenuW(menu, MF_STRING, kCmdProperties,
-                        context_menu_strings::kProperties);
+        // NR-062: a missing-pin placeholder's menu is Unpin only -- no Remove
+        // from recent, no Open file location, no Properties. launch_identity is
+        // empty on a placeholder, so IsPathIdentity below would already be
+        // false, but an explicit early exit does not depend on that coincidence.
+        if (!nimblerun::PanelModel::IsMissingPin(entry)) {
+            // NR-040: only offered for rows actually showing in the recent region;
+            // on a pinned row -- or on an NR-053 alphabetical filler row, which also
+            // sits after RecentStartIndex() but has no usage record -- the command
+            // would silently change nothing.
+            const int recent_start = g_model->RecentStartIndex();
+            const bool in_recent = recent_start >= 0 && cell >= recent_start
+                                   && cell < g_model->RecentEndIndex();
+            if (in_recent) {
+                AppendMenuW(menu, MF_STRING, kCmdForgetRecent,
+                            context_menu_strings::kRemoveFromRecent);
+            }
+            if (nimblerun::IsPathIdentity(entry.launch_identity)) {
+                AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+                AppendMenuW(menu, MF_STRING, kCmdOpenLocation,
+                            context_menu_strings::kOpenFileLocation);
+                AppendMenuW(menu, MF_STRING, kCmdProperties,
+                            context_menu_strings::kProperties);
+            }
         }
 
         POINT cursor{};
@@ -2598,7 +2640,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
             if (pinned) {
                 g_pins->Unpin(entry.stable_id);
             } else {
-                g_pins->Pin(entry.stable_id,
+                g_pins->Pin(entry.stable_id, entry.display_name,
                             static_cast<std::int64_t>(std::time(nullptr)));
             }
             if (g_pins->Save()) {
@@ -2607,7 +2649,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
                 StampRankingFields();
                 // Refresh just the pin region: SetPins rebuilds the empty-query
                 // rows so the entry moves into/out of the pinned region.
-                g_model->SetPins(g_pins->OrderedPins());
+                g_model->SetPins(g_pins->Records());
                 // NR-031: the pin count drives the derived LRU cap; re-derive it.
                 if (g_icon_cache) {
                     g_icon_cache->SetMaxItems(nimblerun::IconCacheCapacityFor(

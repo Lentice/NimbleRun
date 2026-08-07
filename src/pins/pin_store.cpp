@@ -15,7 +15,7 @@ namespace {
 
 constexpr std::wstring_view kFileName = L"favorites.txt";
 constexpr std::wstring_view kSchemaPrefix = L"schema=";
-constexpr int kSchemaVersion = 1;
+constexpr int kSchemaVersion = 2;
 
 } // namespace
 
@@ -34,7 +34,10 @@ PinLoadResult PinStore::Load() {
         return PinLoadResult::Missing;
     case VersionedReadStatus::NewerSchema:
         return PinLoadResult::NewerSchema;  // original untouched (design-spec §10.4)
-    default:  // Unreadable / Malformed / OlderSchema
+    case VersionedReadStatus::OlderSchema:
+        break;  // NR-062: a schema=1 file has no name column; its 2-field lines
+                // are still valid and are upgraded on the next Save().
+    default:  // Unreadable / Malformed
         PreserveCorrupt(directory_, kFileName);
         return PinLoadResult::Corrupt;
     }
@@ -45,7 +48,9 @@ PinLoadResult PinStore::Load() {
             continue;
         }
         const std::vector<std::wstring_view> fields = SplitFields(line);
-        if (fields.size() != 2) {
+        // NR-062: schema=1 lines have 2 fields (no display_name); schema=2
+        // lines have 3. Anything else is still corrupt.
+        if (fields.size() != 2 && fields.size() != 3) {
             PreserveCorrupt(directory_, kFileName);
             return PinLoadResult::Corrupt;
         }
@@ -54,6 +59,9 @@ PinLoadResult PinStore::Load() {
         if (pin.stable_id.empty() || !ParseInt64(fields[1], pin.last_seen_utc)) {
             PreserveCorrupt(directory_, kFileName);
             return PinLoadResult::Corrupt;
+        }
+        if (fields.size() == 3) {
+            pin.display_name = UnescapeText(fields[2]);
         }
         // Line order is pin order, so a duplicated stable id keeps its first
         // position.
@@ -77,25 +85,29 @@ bool PinStore::Save() const {
         text += EscapeText(pin.stable_id);
         text += L'\t';
         text += std::to_wstring(pin.last_seen_utc);
+        text += L'\t';
+        text += EscapeText(pin.display_name);
         text += L'\n';
     }
 
     return AtomicWriteUtf8Text(directory_, kFileName, text);
 }
 
-bool PinStore::Pin(std::wstring stable_id, std::int64_t now) {
+bool PinStore::Pin(std::wstring stable_id, std::wstring display_name, std::int64_t now) {
     if (stable_id.empty()) {
         return false;
     }
     for (PinRecord& pin : pins_) {
         if (pin.stable_id == stable_id) {
             pin.last_seen_utc = now;
+            pin.display_name = std::move(display_name);
             return true;
         }
     }
     PinRecord pin;
     pin.stable_id = std::move(stable_id);
     pin.last_seen_utc = now;
+    pin.display_name = std::move(display_name);
     pins_.push_back(std::move(pin));
     return true;
 }

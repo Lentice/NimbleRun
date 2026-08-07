@@ -1,6 +1,7 @@
 #pragma once
 
 #include "catalog/app_entry.h"
+#include "pins/pin_store.h"
 #include "search/search_engine.h"
 
 #include <cstddef>
@@ -34,11 +35,20 @@ public:
     // Replaces the recent list (used when usage changes or a snapshot swaps).
     void SetRecent(std::vector<AppEntry> recent);
 
-    // Replaces the pinned stable IDs in pin order (NR-018). Pins are resolved
+    // Replaces the pin records in pin order (NR-018). Pins are resolved
     // against the catalog snapshot in the empty-query state; a pin for an app
-    // absent from the catalog is simply not shown (its record stays in the
-    // store, design-spec §FR-011).
-    void SetPins(std::vector<std::wstring> pins);
+    // absent from the catalog is shown as a placeholder row (IsMissingPin(),
+    // NR-062) rather than dropped -- its record stays in the store either way
+    // (design-spec §FR-011).
+    void SetPins(std::vector<PinRecord> pins);
+
+    // NR-062: a pinned row whose app is absent from the catalog. Such a row is
+    // synthesized from the pin record, carries an empty launch_identity, and
+    // must never be launched. The single test for "is this a placeholder"; do
+    // not re-derive it from empty fields at each call site.
+    static bool IsMissingPin(const AppEntry& row) {
+        return row.is_pinned && row.launch_identity.empty();
+    }
 
     // Resets to the empty-query state (pinned apps then recent apps).
     void Reset();
@@ -141,7 +151,7 @@ private:
 
     const std::vector<AppEntry>* catalog_ = nullptr;
     std::vector<AppEntry> recent_;
-    std::vector<std::wstring> pins_;
+    std::vector<PinRecord> pins_;
     std::vector<AppEntry> rows_;
     std::wstring query_;
     int selected_ = -1;
