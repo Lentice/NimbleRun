@@ -2509,11 +2509,36 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
     case WM_RBUTTONDOWN: {
         // NR-018: right-click offers Pin/Unpin (per the item's current pinned
         // state) and "Open file location" for valid paths (design-spec §4.8).
-        if (!g_model || !g_pins) {
-            return 0;
-        }
+        // CellAtPoint() returns -1 on its own when g_model is null, so it is
+        // safe to compute before the g_model/g_pins check below.
         const int cell = CellAtPoint(window, GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param));
         if (cell < 0) {
+            // NR-060: right-clicking the panel's empty area (gaps, footer, the
+            // area below the grid) offers the app-level commands. Settings
+            // already exists behind the tray menu; before this the user had to
+            // dismiss the panel to reach it. The search EDIT is deliberately not
+            // covered -- design-spec §4.9 keeps its native clipboard menu.
+            const HMENU menu = CreatePopupMenu();
+            if (!menu) {
+                return 0;
+            }
+            AppendMenuW(menu, MF_STRING, kCmdRefresh, L"Refresh Apps");
+            AppendMenuW(menu, MF_STRING, kCmdSettings, L"Settings");
+            AppendMenuW(menu, MF_STRING, kCmdAbout, L"About");
+
+            POINT cursor{};
+            GetCursorPos(&cursor);
+            SetForegroundWindow(window);
+            g_context_menu_active = true;
+            const UINT command = static_cast<UINT>(TrackPopupMenu(
+                menu, TPM_RIGHTBUTTON | TPM_RETURNCMD, cursor.x, cursor.y, 0, window, nullptr));
+            g_context_menu_active = false;
+            PostMessageW(window, WM_NULL, 0, 0);
+            DestroyMenu(menu);
+            DispatchTrayCommand(window, command);
+            return 0;
+        }
+        if (!g_model || !g_pins) {
             return 0;
         }
         const nimblerun::AppEntry entry = g_model->Rows()[static_cast<std::size_t>(cell)];

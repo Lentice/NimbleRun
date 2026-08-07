@@ -7,6 +7,7 @@
 ## 使用方式
 
 1. Agent 先讀本頁、[AGENTS.md](../AGENTS.md)、來源 Spec 章節與該 item 文件。
+   撰寫新 item 前另需讀本頁的 [§已否決的方向](#已否決的方向--不要重開)。
 2. 只處理一個 item 的範圍；不要順手實作相鄰 item。
 3. 完成前執行 item 文件指定的 Agent checks，保留命令與結果作為證據。
 4. 更新本頁的狀態與 item 文件的交接備註；若被阻塞，寫出具體原因與需要的外部決策。
@@ -22,6 +23,8 @@
 | `done` | Agent checks 通過且交接資料完整 |
 | `deferred` | 保留在 Spec／roadmap，但刻意延後 |
 | `superseded` | 曾完成，但產品決策改變後由另一個 item 取代；文件與完成紀錄保留作為決策軌跡 |
+
+**狀態與依賴只存在於本頁的 Item 總覽表格，item 文件不得自行宣告。** 同一份狀態存兩個地方必然會分岔：2026-08-07 清理前，15 個 item 文件的檔頭寫著自己的狀態，其中 12 個寫 `ready` 而表格早已是 `done`——冷讀該檔的 agent 會以為那是待辦工作。item 文件的檔頭只寫撰寫當下的定位（Phase、Depends on），狀態一律看本頁。
 
 ## Agent 交付規則
 
@@ -93,6 +96,9 @@
 | NR-057 | One versioned text-store reader, not four copies | 3 | `done` | — | [NR-057](work-items/NR-057-versioned-store-reader.md) |
 | NR-058 | A corrupt or too-new user-data file reaches the user and the log | 3 | `done` | — | [NR-058](work-items/NR-058-store-load-failures-surface.md) |
 | NR-059 | `Render()` paints the same icon fallback and empty state twice | 3 | `done` | — | [NR-059](work-items/NR-059-render-duplicate-paint.md) |
+| NR-060 | Right-clicking the panel's empty area offers Refresh / Settings / About | 3 | `done` | NR-013, NR-018 | [NR-060](work-items/NR-060-panel-empty-area-context-menu.md) |
+| NR-061 | Empty state shows only pins and recents, no alphabetical filler | 3 | `ready` | NR-053 | [NR-061](work-items/NR-061-empty-state-no-filler.md) |
+| NR-062 | A pin with no matching app shows as a removable missing tile | 3 | `ready` | NR-061 | [NR-062](work-items/NR-062-missing-pin-placeholder.md) |
 
 ## Dependency lanes
 
@@ -141,6 +147,18 @@ NR-056（文件對齊實況）── 獨立；與 NR-054 同動 design-spec 但�
 ```
 
 可平行處理的前提是依賴已完成且寫入的資料／訊息邊界穩定；不要為了平行而複製同一份邏輯。
+
+## 已否決的方向 — 不要重開
+
+寫新 item 前先讀這節（[AGENTS.md](../AGENTS.md) §Work item authoring rules 要求）。以下方向都已有明確依據被否決；**要重開是允許的，但新 item 內必須寫出覆寫與新證據**，不要在此節之外默默開一個。此節只收「有依據的否決」，純粹的優先序取捨屬於下面的 §計畫決策紀錄。
+
+| 方向 | 依據 | 否決理由 |
+|---|---|---|
+| 以「搜尋太慢」為前提的 item：debounce、incremental narrowing、搜尋移到背景執行緒、結果筆數上限 | NR-047 交接區的兩條實測 | 5000 筆 catalog：既有 `L"e"` 查詢 **603 µs**，NR-047 最壞路徑（名稱全不命中＋每筆都有 alias）**204 µs**，ceiling 是 **50 ms**。差三個數量級，前提不成立。要重開需先提出新的量測。 |
+| 另立一套搜尋鍵抽象：`SearchKeys(entry)` 存取器或 `std::vector<std::wstring> search_keys` | NR-047 §How this stays maintainable | vector 會在熱掃描路徑上多一次 per-entry 堆積配置與一層內迴圈，換來的是目前不存在的擴充性。新增搜尋鍵請從既有的 `search_alias` 欄位與 `MatchRank::Alias` 層級接。 |
+| 中文拼音／注音／同義詞展開 | `docs/design-spec.md:180`（§4.4）、`:1046` | MVP 明文排除。這是**唯一真正通用**解決「不想打中文」的方案，但要重開屬於 spec 層級決策（需要對照資料與 §4.5 的新層級），**先問使用者是否把它移出 MVP 排除清單，不要逕自開 item**。 |
+| 用 Catalog 項目把空白狀態的格狀填滿（NR-053 的 §4.2 規則 3） | NR-061 的使用者決策（2026-08-07） | 實機上填出 40 格 `3D Vision 相...`／`AccessPort`／`AlertMail48` 這類從未開過的項目，把「我釘的或我用過的」這個唯一語意稀釋掉，且這些格子的右鍵「Remove from recent」按了毫無反應。空白狀態的內容一律只來自釘選清單與使用紀錄；沒有就顯示一行提示。**NR-053 依 `usage_score` 排序的那一半保留。** |
+| 把 FR-004a 的 program-like 判準套用到 FR-005 使用者自訂資料夾 | `docs/design-spec.md:354` | 明文「此判準**不套用於** FR-005 的使用者自訂資料夾」。該來源的把關者是使用者自己勾選的副檔名清單；二次過濾會無聲擋掉使用者手動加入的副檔名。 |
 
 ## 計畫決策紀錄
 
