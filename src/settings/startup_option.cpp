@@ -67,14 +67,22 @@ StartupStatus GetStartupStatus(const StartupOptionRegistry& registry) {
         RegCloseKey(key);
         return StartupStatus::UnknownError;
     }
-    std::wstring value(size / sizeof(wchar_t), L'\0');
+    // NR-069: the Run value is untrusted input -- any same-user process can
+    // write it, and RegQueryValueExW does not guarantee a NUL terminator (the
+    // reported cbData is bytes, and may or may not include the terminator).
+    // One extra slot pre-filled with NUL absorbs an odd byte count (the API
+    // never writes past the slack) and gives find() a terminator to find; when
+    // the value truly has none, fall back to the read length instead of letting
+    // the resize throw length_error and kill the process.
+    std::wstring value(size / sizeof(wchar_t) + 1, L'\0');
     status = RegQueryValueExW(key, kRunValueName, nullptr, &type,
                               reinterpret_cast<BYTE*>(value.data()), &size);
     RegCloseKey(key);
     if (status != ERROR_SUCCESS) {
         return StartupStatus::UnknownError;
     }
-    value.resize(value.find(L'\0'));
+    const std::size_t length = value.find(L'\0');
+    value.resize(length == std::wstring::npos ? size / sizeof(wchar_t) : length);
 
     const std::wstring module = CurrentModulePath();
     if (module.empty()) {
