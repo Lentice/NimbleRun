@@ -210,3 +210,30 @@ git diff --name-only
 
 （實作者填寫：常數搬移的實際形狀、兩個新 case 的 CRC 重算 fixture 寫法、`Compact`
 失敗出口的降級實作、建置與 CTest 結果、sanity greps、偏差、未完成事項。）
+
+實作（2026-08-08）：
+
+- **常數搬移**：`icon_pack_format.h` 在 `kPayloadStart` 的 static_assert 之後新增
+  `inline constexpr std::uint64_t kPackByteBudget = 32ull * 1024ull * 1024ull;`
+  （全 repo 唯一 32 MiB 字面值）；`icon_store.h` 的 `kMaxPackBytes` 改為
+  `= kPackByteBudget`（註解標明單一來源在格式層）。
+- **`DecodeHeader` 上限**：`icon_pack_format.cpp` 的 slot 有效性判斷加第三條件
+  `payload_end > kPackByteBudget`，NR-075 註解五段說明語意（合法 pack 由 eviction
+  保證 ≤ 預算，不會誤殺）。
+- **`Compact` 降級**：`icon_store.cpp` 最後一個 `if (!MapFile())` 出口改為
+  `pending_.clear(); state_ = StoreState::Disabled; return false;`，NR-075 註解。
+  其他失敗出口（CreateFileW/WriteFile/replace 失敗）原樣保留（那時 view 已被
+  `Unmap`，但原始檔仍在、`MapFile()` 可恢復，非「Ready＋死 view」狀態）。
+- **測試**：`icon_pack_format_test` 新增 `TestPackByteBudget`（fixture 以
+  `make_pack` lambda 手寫雙 header＋重算 CRC；`budget+1`→BothHeadersBad、
+  `==budget`→Ok、壞 A 好 B→選好 B）；`icon_store_test` 新增 `TestOverBudgetPack`
+  （手寫 `kPackByteBudget+1` 大小的 icons.cache、雙槽 payload_end 超預算＋重算
+  CRC → `Open` 回 Ready 且 `recreated`、檔重建回 `kPayloadStart` 有界大小）。
+- **建置與 CTest**：Release build 無新增警告；`ctest` 23/23 全綠。
+- **sanity greps**：`32ull * 1024ull * 1024ull` 全 repo 只有 icon_pack_format.h:33
+  一份；`kPackByteBudget` 引用處＝icon_store.h:69＋DecodeHeader；`StoreState::Disabled`
+  於 icon_store.cpp 的 Compact 失敗出口（:623）新增一處；`git diff --name-only`＝
+  6 檔符合 item 預期。
+- **手動驗收**：手改 icons.cache payload_end 為超大值的 worker 開啟行為為實機驗證，
+  本工作區未實跑。
+- **偏差**：無。未完成事項：無。
