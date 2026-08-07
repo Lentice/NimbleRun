@@ -31,6 +31,29 @@ std::wstring TakeCoTaskString(wchar_t* raw) {
     return result;
 }
 
+// The Shell keeps the real program behind an AUMID child in this property.
+// Not declared by the toolchain's headers, so it is spelled out here:
+// PKEY_Link_TargetParsingPath.
+constexpr PROPERTYKEY kLinkTargetParsingPath = {
+    {0xb9b4b3fc, 0x2b51, 0x4a42, {0xb5, 0xd8, 0x32, 0x41, 0x46, 0xaf, 0xcf, 0x25}}, 2};
+
+// The absolute path of the program an AppsFolder child launches, or empty for a
+// genuinely packaged app (which has no such path) or a Shell that will not
+// answer. Display only -- see the call site.
+std::wstring LinkTargetPath(IShellItem* child) {
+    IShellItem2* item2 = nullptr;
+    if (FAILED(child->QueryInterface(IID_PPV_ARGS(&item2)))) {
+        return {};
+    }
+    wchar_t* raw = nullptr;
+    const HRESULT hr = item2->GetString(kLinkTargetParsingPath, &raw);
+    item2->Release();
+    if (FAILED(hr)) {
+        return {};
+    }
+    return TakeCoTaskString(raw);
+}
+
 } // namespace
 
 std::wstring ExpandKnownFolderPrefix(const std::wstring& parsing_name) {
@@ -138,6 +161,13 @@ AppsFolderEnumerateResult EnumerateAppsFolderCatalog() {
         if (SUCCEEDED(child->GetDisplayName(SIGDN_DESKTOPABSOLUTEPARSING, &raw_parsing))) {
             parsing_name = TakeCoTaskString(raw_parsing);
         }
+        // Most AUMID children are ordinary desktop apps whose Start Menu
+        // shortcut merely declares an AppUserModelID; the Shell still knows
+        // their EXE. Fetched only for display: it never feeds the identity key,
+        // because unrelated shortcuts share a target (both AutoHotkey entries
+        // point at AutoHotkeyUX.exe, Anaconda Prompt at cmd.exe) and would
+        // otherwise collapse into one row (§FR-007).
+        const std::wstring target_path = LinkTargetPath(child);
         child->Release();
 
         AppEntry entry;
@@ -145,6 +175,9 @@ AppsFolderEnumerateResult EnumerateAppsFolderCatalog() {
                                   ExpandKnownFolderPrefix(parsing_name))) {
             ++result.failed_items;  // skip one child, keep enumerating
             continue;
+        }
+        if (!IsDisplayablePath(entry.source_path) && IsDisplayablePath(target_path)) {
+            entry.source_path = target_path;  // §4.2/§4.9: show the program path
         }
         result.entries.push_back(std::move(entry));
     }

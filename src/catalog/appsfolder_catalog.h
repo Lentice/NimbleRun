@@ -21,6 +21,10 @@ struct AppsFolderEnumerateResult {
 // namespace. Never touches WindowsApps or the packaged directory's EXEs. A
 // source-level failure yields an empty result so other sources are untouched; a
 // single bad child is skipped and counted.
+//
+// A child whose parsing name is an AUMID gets its source_path from the Shell's
+// link-target property when it has one, so the row shows the real program path
+// instead of the "Windows app" label. Display only, never the identity key.
 AppsFolderEnumerateResult EnumerateAppsFolderCatalog();
 
 // An AppsFolder parsing name for a legacy app is often Known Folder relative,
