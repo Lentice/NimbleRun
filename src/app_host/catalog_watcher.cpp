@@ -14,6 +14,10 @@ constexpr DWORD kBufferBytes = 64 * 1024;
 
 void WatchLoop(std::shared_ptr<CatalogWatcher::Watch> watch) {
     std::vector<BYTE> buffer(kBufferBytes);
+    // NR-074: one full-rescan notice per failure episode. A persistent error
+    // (root removed, access denied) must not post a marker every second -- that
+    // drives a 1 Hz rebuild loop in the host (§FR-008/NFR-002).
+    bool reported = false;
     for (;;) {
         DWORD bytes_returned = 0;
         const BOOL ok = ReadDirectoryChangesW(
@@ -35,14 +39,18 @@ void WatchLoop(std::shared_ptr<CatalogWatcher::Watch> watch) {
             }
             // ERROR_INVALID_PARAMETER (root not a directory / too small buffer)
             // or a transient failure: report a full rescan and back off instead
-            // of busy-looping.
-            if (watch->window && IsWindow(watch->window)) {
+            // of busy-looping. Report the first failure only; the backoff sleep
+            // continues, and the next successful ReadDirectoryChangesW resets
+            // the flag so a genuine later event is reported again.
+            if (!reported && watch->window && IsWindow(watch->window)) {
                 PostMessageW(watch->window, watch->message,
                              static_cast<WPARAM>(watch->index), 1);
             }
+            reported = true;
             Sleep(1000);
             continue;
         }
+        reported = false;
         if (bytes_returned == 0) {
             // Buffer overflow: the event list is incomplete, rescan the source.
             if (watch->window && IsWindow(watch->window)) {
