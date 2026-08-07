@@ -156,3 +156,18 @@ git diff --name-only
 
 （實作者填寫：搬移後的位置與縮排、`ctest` 結果、sanity greps、手動驗收 3/4 的實際
 觀察、偏差、未完成事項。）
+
+實作（2026-08-08）：
+
+- **搬移**：`RefreshPanelSnapshot()` 與 `SaveCatalogCache(...)` 兩行移進
+  `if (result_applied && g_refresh->GenerationComplete(result->generation)) { ... }`
+  區塊（`OnRefreshComplete()` 之後、`InvalidateRect` 留在外），NR-073 註解六行照
+  item 正文，縮排與區塊一致。
+- **`ctest`**：Release build 無新增警告；`ctest` 23/23 全綠（coordinator 一字未動）。
+- **sanity greps**：`RefreshPanelSnapshot(` 的 6 個呼叫點中，屬於 `kRebuildDoneMessage`
+  的唯一呼叫位於 `GenerationComplete` 區塊（另 5 處為 ShowPanel／設定套用／啟動等
+  合法獨立呼叫端）；`SaveCatalogCache(` 全 repo 僅 1 處、位於該區塊；`git diff
+  --name-only`＝只有 main.cpp。
+- **手動驗收**：三來源 rebuild 進行中的選取／捲動重置與 `catalog.cache` 每輪重寫
+  次數為視覺／檔案時間戳驗證，本工作區未實跑。
+- **偏差**：無。未完成事項：無。
