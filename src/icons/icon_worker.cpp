@@ -124,35 +124,45 @@ void IconWorker::Run() {
         auto* result = new IconResult;
         result->encoded_key = request.key.Encode();
 
-        if (store_ != nullptr) {
-            // NR-036 fetch order (design-spec §FR-009): memory LRU (UI side),
-            // then the disk pack, then Shell. The worker owns every store call.
-            const std::uint64_t source_stamp = SourceStampFor(request.entry);
-            const std::uint64_t now_utc = UtcNow();
-            const std::vector<std::uint8_t> png =
-                store_->Lookup(request.entry.stable_id, request.key.variant,
-                               source_stamp, now_utc);
-            if (!png.empty()) {
-                result->bitmap =
-                    DecodeIconPng(png.data(), png.size(), request.key.variant);
-            }
-            // A hit that fails to decode (or a miss / stale stamp / TTL)
-            // falls through to Shell, exactly like a miss.
-            if (result->bitmap.Empty()) {
-                result->bitmap = provider_.Load(request.entry, request.key);
-                if (!result->bitmap.Empty()) {
-                    const std::vector<std::uint8_t> encoded =
-                        EncodeIconPng(result->bitmap);
-                    // An un-encodable bitmap is reported but not persisted.
-                    if (!encoded.empty()) {
-                        store_->Put(request.entry.stable_id, request.key.variant,
-                                    std::move(encoded), source_stamp, now_utc);
-                        ++pending_puts_;
+        try {
+            if (store_ != nullptr) {
+                // NR-036 fetch order (design-spec §FR-009): memory LRU (UI side),
+                // then the disk pack, then Shell. The worker owns every store call.
+                const std::uint64_t source_stamp = SourceStampFor(request.entry);
+                const std::uint64_t now_utc = UtcNow();
+                const std::vector<std::uint8_t> png =
+                    store_->Lookup(request.entry.stable_id, request.key.variant,
+                                   source_stamp, now_utc);
+                if (!png.empty()) {
+                    result->bitmap =
+                        DecodeIconPng(png.data(), png.size(), request.key.variant);
+                }
+                // A hit that fails to decode (or a miss / stale stamp / TTL)
+                // falls through to Shell, exactly like a miss.
+                if (result->bitmap.Empty()) {
+                    result->bitmap = provider_.Load(request.entry, request.key);
+                    if (!result->bitmap.Empty()) {
+                        const std::vector<std::uint8_t> encoded =
+                            EncodeIconPng(result->bitmap);
+                        // An un-encodable bitmap is reported but not persisted.
+                        if (!encoded.empty()) {
+                            store_->Put(request.entry.stable_id, request.key.variant,
+                                        std::move(encoded), source_stamp, now_utc);
+                            ++pending_puts_;
+                        }
                     }
                 }
+            } else {
+                result->bitmap = provider_.Load(request.entry, request.key);
             }
-        } else {
-            result->bitmap = provider_.Load(request.entry, request.key);
+        } catch (...) {
+            // NR-076: a throwing Shell/WIC/alloc path must not terminate the
+            // process (design-spec §11: catch, log, discard). Report an empty
+            // bitmap so the UI clears the pending key and keeps the fallback.
+            if (store_ != nullptr) {
+                store_->WriteLog(L"icon-worker", L"exception");
+            }
+            result->bitmap = {};  // keep result allocated; fall through to the post
         }
 
         if (!PostMessageW(target_, result_message_, 0,

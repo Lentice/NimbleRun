@@ -19,6 +19,7 @@
 #include <filesystem>
 #include <memory>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -75,8 +76,12 @@ public:
     HANDLE gate = nullptr;             // when set, Load waits on it first
     std::atomic<bool> entered{false};  // true once a gated Load is in flight
     std::vector<std::wstring> failing;
+    bool throw_on_load = false;        // NR-076: simulates a throwing Shell/WIC path
 
     IconBitmap Load(const AppEntry&, const IconKey& key) override {
+        if (throw_on_load) {
+            throw std::runtime_error("injected icon load failure");
+        }
         if (gate != nullptr) {
             entered.store(true);
             WaitForSingleObject(gate, INFINITE);
@@ -199,6 +204,34 @@ void TestFailureStillReports() {
     Expect(PumpResults(window, results, 1), "a failed load still reports a result");
     Expect(results[0]->encoded_key == L"bad|48", "failure carries the encoded key");
     Expect(results[0]->bitmap.Empty(), "failure carries an empty bitmap");
+
+    worker.Stop();
+    DestroyWindow(window);
+}
+
+// NR-076: a provider that throws must not terminate the worker thread (design-
+// spec §11: catch, log, discard). The worker reports an empty bitmap so the UI
+// clears the pending key and keeps the fallback, and later requests are still
+// processed normally.
+void TestThrowingProviderIsContained() {
+    const HWND window = CreateMessageWindow();
+    FakeProvider provider;
+    provider.throw_on_load = true;
+    IconWorker worker(window, kReadyMessage, provider);
+    worker.Start();
+
+    worker.Post({Entry(L"boom"), Key(L"boom"), true});
+    std::vector<std::unique_ptr<IconResult>> results;
+    Expect(PumpResults(window, results, 1), "a throwing load still reports a result");
+    Expect(results[0]->encoded_key == L"boom|48", "thrown load carries the encoded key");
+    Expect(results[0]->bitmap.Empty(), "thrown load reports an empty bitmap (fallback)");
+
+    // The worker survived; a second request is processed normally.
+    provider.throw_on_load = false;
+    worker.Post({Entry(L"fine"), Key(L"fine"), true});
+    std::vector<std::unique_ptr<IconResult>> later;
+    Expect(PumpResults(window, later, 1), "a later request is processed");
+    Expect(!later[0]->bitmap.Empty(), "a later request returns a real bitmap");
 
     worker.Stop();
     DestroyWindow(window);
@@ -652,6 +685,7 @@ int wmain() {
     TestPostReturnsImmediatelyAndResultArrivesAsync();
     TestThreeRequestsDeliverThreeResults();
     TestFailureStillReports();
+    TestThrowingProviderIsContained();
     TestVisibleJumpsTheQueue();
     TestVisibleJumpsAheadOfQueuedPrewarm();
     TestStopDropsQueueAndSilencesNewPosts();

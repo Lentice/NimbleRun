@@ -1257,32 +1257,44 @@ void StartRebuild(HWND window, std::vector<nimblerun::CatalogSource> sources) {
             auto* result = new RebuildResult;
             result->generation = generation;
             result->source = source;
-            switch (source) {
-            case nimblerun::CatalogSource::StartMenu: {
-                // NR-063: the enumerator reports source-level failure; the worker
-                // just forwards it so the coordinator keeps the old entries.
-                const auto res = nimblerun::EnumerateStartMenuCatalog();
-                result->failed = !res.source_ok;
-                result->entries = std::move(res.entries);
-                break;
-            }
-            case nimblerun::CatalogSource::AppsFolder:
-                // NR-028: "Include Windows apps" off skips the enumeration
-                // entirely (no COM walk) and the source reports empty, so the
-                // merged snapshot clears old packaged-app entries via the same
-                // ApplySourceResult path.
-                if (settings_snapshot.include_windows_apps) {
-                    const auto res = nimblerun::EnumerateAppsFolderCatalog();
+            try {
+                switch (source) {
+                case nimblerun::CatalogSource::StartMenu: {
+                    // NR-063: the enumerator reports source-level failure; the worker
+                    // just forwards it so the coordinator keeps the old entries.
+                    const auto res = nimblerun::EnumerateStartMenuCatalog();
                     result->failed = !res.source_ok;
                     result->entries = std::move(res.entries);
-                } else {
-                    result->entries = std::vector<nimblerun::AppEntry>{};
+                    break;
                 }
-                break;
-            case nimblerun::CatalogSource::UserFolder:
-                result->entries =
-                    nimblerun::EnumerateUserFolderCatalog(settings_snapshot);
-                break;
+                case nimblerun::CatalogSource::AppsFolder:
+                    // NR-028: "Include Windows apps" off skips the enumeration
+                    // entirely (no COM walk) and the source reports empty, so the
+                    // merged snapshot clears old packaged-app entries via the same
+                    // ApplySourceResult path.
+                    if (settings_snapshot.include_windows_apps) {
+                        const auto res = nimblerun::EnumerateAppsFolderCatalog();
+                        result->failed = !res.source_ok;
+                        result->entries = std::move(res.entries);
+                    } else {
+                        result->entries = std::vector<nimblerun::AppEntry>{};
+                    }
+                    break;
+                case nimblerun::CatalogSource::UserFolder:
+                    result->entries =
+                        nimblerun::EnumerateUserFolderCatalog(settings_snapshot);
+                    break;
+                }
+            } catch (...) {
+                // NR-076: an allocation/enumeration exception must not terminate
+                // the process (design-spec §11). Report a source failure so the
+                // coordinator keeps this source's old entries (design-spec
+                // §NFR-003); the enumerators' own failures already flow through
+                // source_ok.
+                result->failed = true;
+                if (g_diag) {
+                    g_diag->Write(L"rebuild", L"exception");
+                }
             }
             // NR-063: the worker owns this allocation until the UI thread takes
             // it; a full message queue (PostMessageW fails) would leak it.

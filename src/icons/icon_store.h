@@ -104,6 +104,12 @@ public:
     // either way.
     bool Flush(const std::vector<std::wstring>& pinned_ids, std::uint64_t now_utc);
 
+    // NR-076: the icon worker reports its own failures through the store's
+    // diagnostic channel (the worker owns the store and the store owns the
+    // DiagnosticLog pointer). Stage/detail are sanitized event names; this is
+    // the "log" half of design-spec §11's catch-and-log boundary.
+    void WriteLog(std::wstring_view stage, std::wstring_view detail);
+
 private:
     struct Pending {
         std::uint64_t stable_id_hash = 0;
@@ -137,7 +143,6 @@ private:
                   const std::vector<bool>& touched, bool allow_pinned);
     bool GrowView(std::uint64_t needed);
     bool Compact();
-    void WriteLog(std::wstring_view stage, std::wstring_view detail);
 
     std::filesystem::path pack_path_;
     std::uint64_t max_bytes_;
