@@ -194,3 +194,27 @@ git diff --name-only
 
 （實作者填寫：out-param 的實際形狀、旗標的宣告位置與守門形狀、新 case 的 fixture
 寫法、建置與 CTest 結果、sanity greps、手動驗收 4 的實際觀察、偏差、未完成事項。）
+
+實作（2026-08-08）：
+
+- **out-param**：`catalog_cache.h` 簽名改
+  `bool LoadCatalogCache(const std::wstring&, std::vector<AppEntry>&, bool* newer_schema = nullptr)`；
+  `NewerSchema` arm 拆分（`OlderSchema` 獨立保留 NR-047 註解），只在 `NewerSchema`
+  時 `*newer_schema = true`。`Missing/Unreadable/Malformed/OlderSchema` 皆不設。
+- **旗標**：main.cpp 檔案範圍 `bool g_catalog_cache_disable_writes = false;`
+  （NR-077 的 `g_rebuild_handoffs` 之後）；啟動載入傳 `&cache_newer` 並
+  `g_catalog_cache_disable_writes = cache_newer;`（在 `g_refresh` 設好後）；
+  `kRebuildDoneMessage` 的 `SaveCatalogCache`（NR-073 已收進 `GenerationComplete`
+  區塊）包 `if (!g_catalog_cache_disable_writes)`。
+- **測試**：`catalog_refresh_test` 新增 `TestNewerSchemaCacheReportsAndLeavesOutUntouched`
+  （schema=3 → 回 false＋`newer_schema==true`＋`out` 未變＋檔未動＋無 `.corrupt`）；
+  `TestOlderSchemaCacheRebuilds` 加 `!newer_schema` 斷言。**測試 bug 修正**：cache
+  fixture 的 `std::ofstream` 改 block-scope（寫完即析構 flush）再 `Load`——原測試
+  的 ofstream 緩衝未 flush，`LoadCatalogCache` 讀到的是空檔（Malformed 路徑），
+  舊測試只因「開啟中的檔擋住 PreserveCorrupt 改名」而僥倖通過。
+- **建置與 CTest**：Release build 無新增警告；`ctest` 23/23 全綠。
+- **sanity greps**：`g_catalog_cache_disable_writes` 於 main.cpp＝宣告 1＋守門 1＋
+  設值 1；`newer_schema` 於 catalog_cache.cpp＝簽名＋arm 各 1＋；`git diff
+  --name-only`＝catalog_cache.h、catalog_cache.cpp、main.cpp、catalog_refresh_test.cpp。
+- **手動驗收**：schema=3 快取不被覆寫為實機驗證，本工作區未實跑。
+- **偏差**：無。未完成事項：無。
