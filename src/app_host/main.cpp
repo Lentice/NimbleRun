@@ -310,6 +310,13 @@ bool g_dragging = false;  // true once the press passed the system drag threshol
 POINT g_drag_origin{};    // client coords of the press, for the threshold test
 POINT g_drag_cursor{};    // latest client coords, for the ghost icon
 
+// NR-066: sub-notch wheel-delta carry for WM_MOUSEWHEEL. Precision touchpads
+// and high-resolution wheels report deltas of 30-60 per message, which divided
+// by WHEEL_DELTA (120) is always zero; the remainder is accumulated here so a
+// full notch's worth of movement still scrolls (MSDN's recommended pattern).
+// Message-layer state, never model state -- it follows the panel, not the list.
+int g_wheel_delta_carry = 0;
+
 template <typename T>
 void Release(T*& resource) {
     if (resource) {
@@ -2437,8 +2444,13 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
             lines == WHEEL_PAGESCROLL) {
             lines = g_model ? static_cast<UINT>(g_model->ViewportRows()) : 0;
         }
-        const int steps =
-            static_cast<int>(GET_WHEEL_DELTA_WPARAM(w_param)) / WHEEL_DELTA;
+        // NR-066: accumulate the raw delta and take whole notches out, keeping
+        // the remainder for the next message. A precision touchpad sends a run
+        // of 30-60-delta messages, so the panel stays scrollable on it while a
+        // classic 120-multiple wheel behaves exactly as before.
+        g_wheel_delta_carry += static_cast<int>(GET_WHEEL_DELTA_WPARAM(w_param));
+        const int steps = g_wheel_delta_carry / WHEEL_DELTA;
+        g_wheel_delta_carry %= WHEEL_DELTA;
         if (g_model && lines > 0 && steps != 0) {
             g_model->ScrollBy(-steps * static_cast<int>(lines));
             InvalidateRect(window, nullptr, FALSE);
