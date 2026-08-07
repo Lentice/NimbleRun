@@ -108,6 +108,15 @@
 | NR-069 | GetStartupStatus treats the Run value as untrusted input | 3 | `done` | — | [NR-069](work-items/NR-069-startup-regsz-robust.md) |
 | NR-070 | Store data files are untrusted input (ParseUint64 `-`, Reconcile overflow) | 3 | `done` | — | [NR-070](work-items/NR-070-store-files-untrusted.md) |
 | NR-071 | 常用區依最後啟動時間排序，最新在最前 | 3 | `done` | NR-061 | [NR-071](work-items/NR-071-recent-ordered-by-recency.md) |
+| NR-072 | RefreshPins 不得覆寫較新 schema／部分解析的 favorites.txt | 3 | `planned` | — | [NR-072](work-items/NR-072-refreshpins-preserve-newer-schema.md) |
+| NR-073 | rebuild 只在整代完成時刷新面板並寫 catalog.cache | 3 | `planned` | — | [NR-073](work-items/NR-073-rebuild-complete-refresh-once.md) |
+| NR-074 | 監看錯誤每段連續期只報一次 full-rescan，不再 1 Hz 重建 | 3 | `planned` | — | [NR-074](work-items/NR-074-watcher-error-once-per-episode.md) |
+| NR-075 | IconStore 記憶體守衛：Compact remap 失敗降級、payload_end 上限 | 3 | `planned` | — | [NR-075](work-items/NR-075-icon-store-memory-guards.md) |
+| NR-076 | 背景 worker 補 §11 例外捕捉邊界 | 3 | `planned` | — | [NR-076](work-items/NR-076-worker-exception-boundary.md) |
+| NR-077 | WM_APP+8/9 改用 token registry，不再解參考未驗證的 lParam | 3 | `planned` | — | [NR-077](work-items/NR-077-message-payload-token-registry.md) |
+| NR-078 | Context Menu／Shift+F10 開啟選取列的項目選單 | 3 | `planned` | — | [NR-078](work-items/NR-078-keyboard-item-menu.md) |
+| NR-079 | 較新 schema 的 catalog.cache 不被 rebuild 覆寫 | 3 | `planned` | — | [NR-079](work-items/NR-079-catalog-cache-newer-schema-preserve.md) |
+| NR-080 | SettingsStore／UsageStore Load 損壞時不得洩漏部分狀態 | 3 | `planned` | — | [NR-080](work-items/NR-080-store-load-partial-state.md) |
 
 ## Dependency lanes
 
@@ -167,6 +176,21 @@ NR-070（store 不受信輸入）── 獨立；兩個 one-line 修補，僅手
 
 可平行處理的前提是依賴已完成且寫入的資料／訊息邊界穩定；不要為了平行而複製同一份邏輯。
 
+## 稽核修補 lane 3（NR-072～NR-080，2026-08-08 第四次全 repo 稽核產出）
+
+```
+NR-072（pins 較新 schema 覆寫）── 無依賴，最先做；使用者資料損失（HIGH）
+NR-073（rebuild 完成前每來源刷新）── 獨立；與 NR-079 都動 main.cpp:2343 一帶
+                                        （不同行），可平行；同 agent 建議依序避免改同一 handler
+NR-074（watcher 錯誤 1 Hz 迴圈）── 獨立
+NR-075（icon store 記憶體守衛）── 獨立
+NR-076（worker 例外邊界）── 獨立；與 NR-077 都動 icon_worker.cpp 送訊端（不同行）
+NR-077（訊息 token registry）── 獨立
+NR-078（鍵盤項目選單）── 獨立
+NR-079（catalog.cache 較新 schema）── 獨立
+NR-080（settings/usage 部分狀態）── 獨立；與 NR-072 同「非 Loaded 則空」契約主題
+```
+
 ## 已否決的方向 — 不要重開
 
 寫新 item 前先讀這節（[AGENTS.md](../AGENTS.md) §Work item authoring rules 要求）。以下方向都已有明確依據被否決；**要重開是允許的，但新 item 內必須寫出覆寫與新證據**，不要在此節之外默默開一個。此節只收「有依據的否決」，純粹的優先序取捨屬於下面的 §計畫決策紀錄。
@@ -180,6 +204,90 @@ NR-070（store 不受信輸入）── 獨立；兩個 one-line 修補，僅手
 | 把 FR-004a 的 program-like 判準套用到 FR-005 使用者自訂資料夾 | `docs/design-spec.md:354` | 明文「此判準**不套用於** FR-005 的使用者自訂資料夾」。該來源的把關者是使用者自己勾選的副檔名清單；二次過濾會無聲擋掉使用者手動加入的副檔名。 |
 
 ## 計畫決策紀錄
+
+- 2026-08-08（NR-072～NR-080 planned，第四次全 repo 稽核產出）：backlog 清空後對整個
+  repo 做了第四輪四軸稽核（正確性／穩健性、spec 對照、執行緒與生命週期、不受信輸入），
+  由三個平行子 agent 分別深讀 main.cpp 全檔（3,100 行）、catalog/settings/pins/usage/
+  storage、icons 子系統，主 Agent 逐一重讀原始碼驗證後收斂成 9 個 item。**排序依「先修
+  使用者資料損失、再修使用者看得到的中斷、再修資源與穩健性、再修 latent」**。逐項決策
+  與「為什麼不那樣做」：**NR-072**——`RefreshPins`（`main.cpp:1141-1143`）在 `Load()`
+  後無條件 `Reconcile`＋`Save`；`PinStore::Load` 對 `NewerSchema` 回傳時 `pins_` 已空
+  （`:27`），對 `Corrupt` 回傳時保留部分解析列。於是較新 build 寫的 `favorites.txt`
+  （schema=3）被空 `schema=2` 檔覆寫（§10.4「不覆寫原檔」直接違反，pins 是 30 天保留
+  契約的使用者資料），損壞檔的合法前綴 pin 被當新真相落盤、損壞列之後的 pin 從 live
+  store 消失（只剩 `.corrupt`）。此路徑在每次開面板（ShowPanel→RefreshPanelSnapshot）
+  與每次 rebuild 都跑。修法：host 只在 `Loaded`/`Missing` 才 Reconcile＋Save；
+  `PinStore::Load` 的 `Corrupt` 回傳前 `pins_.clear()`（兌現 `pin_store.h:24-25`
+  「非 Loaded 則空」契約）。**為什麼不那樣做**：不把守門塞進 `Save()`（Save 是純
+  序列化器，不知道 Load 結果）；不改 balloon 文案（修好後文案才為真）；不為
+  `RefreshPins` 加測試 seam。**NR-073**——`kRebuildDoneMessage` 對每份來源結果無條件
+  `RefreshPanelSnapshot()`＋`SaveCatalogCache()`，而 coordinator 只在整代完成才重算
+  merged（`catalog_refresh.h:52-54`）；前 1..n-1 份結果每次把 `selected_`/`first_visible_`
+  重置（rebuild 中瀏覽舊 snapshot 的選取被偷走 2~3 次）、並在 UI 執行緒重寫
+  favorites.txt/usage.tsv/多 MB catalog.cache。修法：兩者收進 `GenerationComplete`
+  區塊，`InvalidateRect` 留在外。**為什麼不那樣做**：不加 snapshot 深比較（完成時重算
+  一次正確且必要）；不改 coordinator。**NR-074**——`WatchLoop` 對持續性錯誤（root 被
+  拔、ACCESS_DENIED）每秒 `PostMessageW(full-rescan marker)`，UI 端繞過 debounce 每
+  秒開新 generation（`StartRebuild` 先 join 上輪）——恆定 ~1 Hz 重建忙碌迴圈，違反
+  NFR-002「事件驅動、不輪詢」。修法：錯誤連續期只報一次（`reported` 旗標，成功路徑
+  重置），Sleep 退避保留。**為什麼不那樣做**：不取消 watch（root 恢復要自動續監）；
+  不改 UI 端（無從得知錯誤持續）。**NR-075**——兩缺口同屬「IconStore 記憶體無界」：
+  (1) `Compact` 成功 replace 後 `MapFile()` 失敗（`:614-616`）留下 `Ready`＋null
+  view，`Put`（`:344` 只查 state）繼續收、`Flush`（`:364`）拒而不清 → `pending_`
+  再次無界增長（NR-068 守衛形狀的缺口，NR-050 交接區自指此邊緣但只堵 Flush 端）；
+  (2) `DecodeHeader` 的 `payload_end` 上界只有檔案大小，CRC 全對的 GB 級 `icons.cache`
+  被當 Ready，`Lookup` 單筆最多拷近 4 GB 進 vector。修法：`Compact` 失敗出口降級
+  `Disabled`＋`pending_.clear()`（「Ready ⟺ 活 view」成對，`Put`/`Flush` 守衛自動
+  完整）；`DecodeHeader` 加 pack 預算上界，32 MiB 常數單一來源放純值層
+  `icon_pack_format.h`、`icon_store.h::kMaxPackBytes` 引用它。**為什麼不那樣做**：
+  不在 `Put` 再堆一層 view 檢查（修根源而非症狀）；不換格式、不加列舉值。**NR-076**——
+  §11「Worker 發生例外→UI 不崩潰、捕捉邊界、記錄並丟棄」完全未實作：`IconWorker::Run`
+  與 `StartRebuild` lambda 都無 try/catch，`std::bad_alloc`（GB 級 Lookup 拷貝等）即
+  `std::terminate` 殺掉常駐 process。修法：兩處 `catch (...)`——icon worker 照常 post
+  空 bitmap（清 pending key、維持 fallback），rebuild 設 `result->failed=true` 走既有
+  `ApplySourceFailure`（保留舊結果）。**為什麼不那樣做**：不分類例外型別（都是丟棄）；
+  rebuild 枚舉器不加可拋 seam（`source_ok`/`failed` 已覆蓋）；icon worker 用 fake
+  provider 可測。**NR-077**——`kRebuildDoneMessage`/`kIconReadyMessage` 把 `lParam`
+  直接 reinterpret_cast 成堆積指標後解參考：任何同 integrity process 可 `PostMessage`
+  到我們 HWND（UIPI 只擋較高者）用 `lParam=0`/垃圾值當場 crash 常駐 tray 程式——整條
+  訊息路徑唯一不受信輸入 crash 向量。修法：UI 側 token registry（mutex 保護的
+  `map<token, unique_ptr>`），訊息只扛指標位址作 token，接收端查得到才用、查不到
+  `return 0`；`WM_DESTROY` 排空後 clear 兩 map。**為什麼不那樣做**：不驗 PID（要
+  跨 integrity 判斷成本與誤報）、不引遞增計數器（指標位址已唯一）、不記錄未知 token
+  （防日誌灌爆）。**NR-078**——§4.7 鍵盤表「Context Menu／Shift+F10 開啟項目選單」
+  未實作（grep 零 `VK_APPS`/`WM_CONTEXTMENU`），NFR-006「鍵盤可完成全部核心操作」
+  違反：Pin/Unpin/Remove from recent/Properties 只能滑鼠。修法：把 `WM_RBUTTONDOWN`
+  的項目分支抽成 `ShowItemMenu(window, cell, screen_pos)` helper，鍵盤路徑在
+  `SearchEditProc` 攔 `VK_APPS`／shift+F10 用 `SelectionIndex()` 呼叫。**為什麼不
+  那樣做**：不攔父視窗 `WM_CONTEXTMENU`（會壞掉搜尋框滑鼠右鍵的剪貼簿選單，§4.8/4.9）；
+  不新增選單結構/字串。**NR-079**——`LoadCatalogCache` 把 `NewerSchema` 與 `OlderSchema`
+  一起 `return false`，host 的 `SaveCatalogCache`（`:2343`）在首次 rebuild 就把較新
+  build 的 `catalog.cache`（schema=3）覆寫成 `schema=2`；§10.4 明文快取類檔案較新
+  schema「不覆寫原檔、停用該快取」。`icons.cache` 已正確（NR-035），catalog.cache 是
+  唯一漏網。修法：`LoadCatalogCache` 加 `bool* newer_schema` 出口，host 啟動時設
+  `g_catalog_cache_disable_writes`、`SaveCatalogCache` 守門 no-op 整段 run。
+  **為什麼不那樣做**：`OlderSchema` 維持 NR-047 的重建覆寫（合法可重建檔，非本 item）；
+  不顯示通知（快取類不通知）。**NR-080**——`SettingsStore::Load`/`UsageStore::Load`
+  對中段損壞檔洩漏部分狀態：有效前綴列先寫入 `out`/`records_`，損壞列才回 `Corrupt`，
+  違反兩檔 header 的「非 Loaded 則空」契約（`settings_store.h:49-50`、
+  `usage_store.h:21`）；host 直接採用（`main.cpp:2927-2942`）→「採預設值」balloon 與
+  實際 live 設定矛盾、partial usage 進 ranking。修法：`Corrupt` 回傳前 `out =
+  DefaultSettings()`／`records_.clear()`，與 NR-072 的 pin 契約一致。**未成 item 的
+  低嚴重度發現**（記錄備查）：(1) 關閉時 icon worker `Stop()` 的 `join()` 無限等待——
+  卡死的 Shell extension 可讓 §9.4「關閉不得無限卡住」失效，但 Shell 呼叫不可中斷、
+  沒有乾淨的 0.5~2 天修法（process 結束時 OS 會回收執行緒），先記限制不開 item；
+  (2) `FindFirstFileW` 對 >MAX_PATH 深路徑靜默回空（兩個枚舉器），頻率極低且 `\\?\`
+  前綴要一路改到 watcher 與 settings 驗證，超出 item 尺寸，有量測需求再開；(3)
+  `UsageScore` 未實作 §4.6 公式（lifetime total＋bonus，缺 7d×3 項）——刻意註解
+  的偏差，修正是 schema bump 屬產品決策，需使用者拍板，不逕自開 item；(4)
+  `SettingsEditor::Apply` 的回滾 swap 結果被丟棄（存檔失敗＋回滾也失敗的雙重邊緣，
+  主路徑 FR-002 register-new-first 正確）；(5) `PreserveCorrupt` 的
+  `MOVEFILE_REPLACE_EXISTING` 會覆寫已存在的 `.corrupt` 備份（診斷工件層級，非使用者
+  資料）；(6) 死碼 `g_last_hotkey_error` 與 `CatalogRefreshCoordinator::SourceEntries`。
+  第三輪的低嚴重度 trio（icon 驅逐只清記憶體、idle/final flush 傳空 pinned 清單、
+  grid footer Alt+1~4 vs 10 格）維持不變。全部 9 個 item 無依賴、皆 `planned`；
+  NR-073/NR-079 共用 `main.cpp:2343` 一帶、NR-076/NR-077 都動 `icon_worker.cpp`
+  送訊端——可平行，但同一 agent 分批時建議依序。未 commit。
 
 - 2026-08-07（NR-063～NR-070 ready，第三次全 repo 稽核產出）：backlog 清空後對整個 repo
   做了第三輪四軸稽核（正確性／穩健性、spec 對照、執行緒與生命週期、不受信輸入），
