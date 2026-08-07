@@ -1,6 +1,6 @@
 # NR-048 — The search test must actually assert in a Release build
 
-Phase 3 · Status `ready` · Depends on: —
+Phase 3 · Depends on: —
 
 - Source: `AGENTS.md` §Engineering rules（新非平凡邏輯需一個可執行測試）／§Validation（Release 建置指令）
 - Origin: 2026-08-06 repo audit, finding #1（最高優先）

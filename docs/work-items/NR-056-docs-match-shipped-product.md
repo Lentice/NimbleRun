@@ -1,6 +1,6 @@
 # NR-056 — Make the docs describe the product that actually ships
 
-Phase 3 · Status `ready` · Depends on: —
+Phase 3 · Depends on: —
 
 - Source: `AGENTS.md` §Work item authoring rules／§Validation／§Safety boundaries（行為變更時同步更新文件）
 - Origin: 2026-08-06 repo audit：spec-conformance findings #8/#9/#10/#11、test-and-docs findings #8/#9/#10

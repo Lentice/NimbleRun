@@ -1,6 +1,6 @@
 # NR-050 — A corrupt `icons.cache` header must not grow the file or crash the worker
 
-Phase 3 · Status `ready` · Depends on: —
+Phase 3 · Depends on: —
 
 - Source: `docs/design-spec.md` §10.2（持久化格式與寫入規則）／§NFR-001（資源預算）／§11（失效與復原）
 - Origin: 2026-08-06 repo audit, findings #4 與 #5

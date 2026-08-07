@@ -1,6 +1,6 @@
 # NR-052 — Esc must clear the visible search box, and a whitespace-only query must stay in the grid
 
-Phase 3 · Status `ready` · Depends on: —
+Phase 3 · Depends on: —
 
 - Source: `docs/design-spec.md` §4.7（鍵盤操作）／§4.3（版面切換）／§4.4（搜尋正規化）
 - Origin: 2026-08-06 repo audit, spec-conformance findings #1 與 #2

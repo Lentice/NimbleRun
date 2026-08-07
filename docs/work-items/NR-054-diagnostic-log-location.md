@@ -1,6 +1,6 @@
 # NR-054 — The diagnostic log belongs in `logs\`, is written from two threads, and has no way in
 
-Phase 3 · Status `ready` · Depends on: —
+Phase 3 · Depends on: —
 
 - Source: `docs/design-spec.md` §10.1（資料位置與格式）／§FR-014（診斷記錄）／§11（失效與復原）
 - Origin: 2026-08-06 repo audit, spec-conformance findings #6 與 #7 ＋ correctness finding #9

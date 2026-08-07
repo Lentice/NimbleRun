@@ -1,6 +1,6 @@
 # NR-049 — Catalog rebuild threads must not read `g_settings` or outlive the window
 
-Phase 3 · Status `ready` · Depends on: —
+Phase 3 · Depends on: —
 
 - Source: `docs/design-spec.md` §FR-008（背景重建）／§NFR-002（閒置資源）／§11（失效與復原）
 - Origin: 2026-08-06 repo audit, findings #2 與 #3（最高嚴重度：use-after-free）

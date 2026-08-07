@@ -36,7 +36,11 @@ Work items live in `docs/work-items/` and are tracked in `docs/work-items.md`.
 - Write each item to be self-contained, so a low-capability agent can pick it up and finish it without prior context or further questions.
 - Quote the binding constraints into the item itself: the relevant `docs/design-spec.md` clauses, the `docs/development.md` rules, and the applicable rules from this file. Do not rely on the agent finding them.
 - List the exact files to read and trace, the concrete scope (signatures, constants, call sites), the non-goals, the acceptance criteria, and the runnable Agent checks.
-- When an item overrides an earlier decision, state the override inside the new item. Never edit a completed item's document.
+- When an item overrides an earlier decision, state the override inside the new item. Never edit a completed item's document — that rule protects its scope, decisions and 交接區, which are the historical record. It does not protect tracker metadata that has since become false.
+- Status and dependencies live only in the Item 總覽 table of `docs/work-items.md`. An item document must not declare its own status: two copies drift, and in this repository twelve of them had already drifted to a state that told a cold reader the work was still waiting to be done.
+- Before writing a new item, read the "已否決的方向" section of `docs/work-items.md`. Reopening a rejected direction is allowed, but the new item must state the override and the new evidence in its own text.
+- Anything a later session needs must live in the repository, not in a scratchpad handoff. Candidate items and rejected directions go in `docs/work-items.md`; measured numbers go in `docs/performance-baseline.md` or the item's 交接區. A scratchpad is session-scoped and unversioned, so a fact left only there has to be re-derived — which is how the same conclusion ended up recorded in five consecutive handoffs.
+- Do not reserve item numbers in advance. Take the highest number in the Item 總覽 table and add one at the moment you write the file, and confirm `docs/work-items/` has no file with that number: another agent may be authoring items in this repository at the same time.
 
 ## Current baseline
 

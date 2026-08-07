@@ -1,6 +1,6 @@
 # NR-051 — One COM guard, balanced on `S_FALSE`, and no uninitialized Shell buffers
 
-Phase 3 · Status `ready` · Depends on: —
+Phase 3 · Depends on: —
 
 - Source: `docs/design-spec.md` §FR-004（`.lnk` 以 Shell API 解析）／§FR-006（封裝 App）／§NFR-002（閒置資源）
 - Origin: 2026-08-06 repo audit, findings #6 與 #7（正確性）＋ ponytail 稽核（重複程式碼）

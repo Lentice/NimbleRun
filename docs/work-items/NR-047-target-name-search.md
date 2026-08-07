@@ -1,6 +1,6 @@
 # NR-047 — Search also matches the shortcut's resolved target name
 
-Phase 3 · Status `ready` · Depends on: NR-038
+Phase 3 · Depends on: NR-038
 
 - Source: `docs/design-spec.md` §4.4（搜尋正規化）／§4.5（排名規則）／§FR-004（Start Menu 項目）／§FR-006（Store／封裝 App）／§10.1（資料位置與格式）
 

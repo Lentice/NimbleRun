@@ -1,6 +1,6 @@
 # NR-058 — A corrupt or too-new user-data file must reach the user and the log
 
-Phase 3 · Status `ready` · Depends on: NR-057（建議先落地，非硬相依）
+Phase 3 · Depends on: NR-057（建議先落地，非硬相依）
 
 - Source: `docs/design-spec.md` §10.4 Migration、§11 錯誤處理、§FR-014 診斷
 - Origin: 2026-08-07 repo audit（規格已定義但未實作的行為）

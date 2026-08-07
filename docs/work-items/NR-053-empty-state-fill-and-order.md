@@ -1,6 +1,6 @@
 # NR-053 — The empty state must order by usage score and fill the visible grid
 
-Phase 3 · Status `ready` · Depends on: —
+Phase 3 · Depends on: —
 
 - Source: `docs/design-spec.md` §4.2（空狀態內容與排序）／§4.6（使用分數）
 - Origin: 2026-08-06 repo audit, spec-conformance findings #3 與 #4

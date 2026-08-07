@@ -1,6 +1,6 @@
 # NR-046 — Drag pinned cells to reorder them in the grid
 
-Phase 3 · Status `done` · Depends on: —
+Phase 3 · Depends on: —
 
 - Source: `docs/design-spec.md` §4.2（空白查詢狀態）／§4.8（滑鼠操作）／§4.9（視窗外觀）／§FR-011（釘選與排序）／§10.2（持久化）
 

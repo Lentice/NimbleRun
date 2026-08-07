@@ -1,6 +1,6 @@
 # NR-055 — Collapse 22 copies of the same test target into one loop
 
-Phase 3 · Status `ready` · Depends on: —
+Phase 3 · Depends on: —
 
 - Source: `AGENTS.md` §Engineering rules（最小可行改動、避免樣板）／§Validation
 - Origin: 2026-08-06 ponytail audit（純刪除，無行為變更）

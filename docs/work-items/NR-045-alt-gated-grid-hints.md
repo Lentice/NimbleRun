@@ -1,6 +1,6 @@
 # NR-045 — Grid quick-select hints appear only while Alt is held
 
-Phase 3 · Status `done` · Depends on: —
+Phase 3 · Depends on: —
 
 ## Why
 

@@ -1,6 +1,6 @@
 # NR-059 — Render() paints the same icon fallback and empty state twice
 
-Phase 3 · Status `ready` · Depends on: —
+Phase 3 · Depends on: —
 
 - Source: `AGENTS.md` §Engineering rules（最小可行改動、先重用既有程式碼、
   避免樣板）

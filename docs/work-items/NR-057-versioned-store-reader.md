@@ -1,6 +1,6 @@
 # NR-057 — One versioned text-store reader, not four copies
 
-Phase 3 · Status `done` · Depends on: —
+Phase 3 · Depends on: —
 
 - Source: `AGENTS.md` §Engineering rules（最小可行改動、先重用既有程式碼、先用標準函式庫）
 - Origin: 2026-08-07 repo audit（重複程式碼；行為變更僅限一處明列的錯誤路徑）
