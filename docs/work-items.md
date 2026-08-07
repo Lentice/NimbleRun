@@ -114,7 +114,7 @@
 | NR-075 | IconStore 記憶體守衛：Compact remap 失敗降級、payload_end 上限 | 3 | `done` | — | [NR-075](work-items/NR-075-icon-store-memory-guards.md) |
 | NR-076 | 背景 worker 補 §11 例外捕捉邊界 | 3 | `done` | — | [NR-076](work-items/NR-076-worker-exception-boundary.md) |
 | NR-077 | WM_APP+8/9 改用 token registry，不再解參考未驗證的 lParam | 3 | `done` | — | [NR-077](work-items/NR-077-message-payload-token-registry.md) |
-| NR-078 | Context Menu／Shift+F10 開啟選取列的項目選單 | 3 | `planned` | — | [NR-078](work-items/NR-078-keyboard-item-menu.md) |
+| NR-078 | Context Menu／Shift+F10 開啟選取列的項目選單 | 3 | `done` | — | [NR-078](work-items/NR-078-keyboard-item-menu.md) |
 | NR-079 | 較新 schema 的 catalog.cache 不被 rebuild 覆寫 | 3 | `planned` | — | [NR-079](work-items/NR-079-catalog-cache-newer-schema-preserve.md) |
 | NR-080 | SettingsStore／UsageStore Load 損壞時不得洩漏部分狀態 | 3 | `planned` | — | [NR-080](work-items/NR-080-store-load-partial-state.md) |
 

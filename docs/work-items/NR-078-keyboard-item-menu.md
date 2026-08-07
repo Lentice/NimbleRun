@@ -174,3 +174,26 @@ git diff --name-only
 （實作者填寫：helper 的實際簽名與搬移範圍、鍵盤 screen_pos 推算方式（cell/row rect
 vs 退回 cursor）、`VK_F10` shift 判定、建置與 CTest 結果、sanity greps、手動驗收
 3/4/5/6 的實際觀察、偏差、未完成事項。）
+
+實作（2026-08-08）：
+
+- **helper 簽名**：`void ShowItemMenu(HWND window, int cell, POINT screen_pos);`
+  定義在 `SearchEditProc` 之前（main.cpp:2127）。內容＝原 `WM_RBUTTONDOWN` 的
+  `cell >= 0` 分支逐字搬移（`g_model`/`g_pins` null guard 在 helper 內、建選單、
+  `IsMissingPin` 縮排、`RecentStartIndex` 判斷、`TrackPopupMenu(..., screen_pos, ...)`
+  取代 `GetCursorPos`、`g_context_menu_active` 包覆、`DestroyMenu`、四個指令分派）。
+- **鍵盤推算**：新增 `void OpenKeyboardItemMenu(HWND window)`（緊鄰 ShowItemMenu）
+  負責 `SelectionIndex()` 有效性檢查與 screen_pos 推算——用 `LayoutForDpi`＋
+  `kGridLeftDip/kCellWidthDip/kCellHeightDip/kListTopDip/kRowHeightDip`（與
+  `CellAtPoint` 同一組幾何）算出 cell/row rect 左上角，clamp 到 client rect 後
+  `ClientToScreen`。**未退回 GetCursorPos**（推算成本低且可重複）。
+- **`VK_F10` shift 判定**：`case VK_F10:` 內 `(GetKeyState(VK_SHIFT) & 0x8000) != 0`
+  才開選單，非 shift 的 F10 `break` 交還 EDIT 預設。
+- **`VK_APPS`**：無條件 `OpenKeyboardItemMenu(...)`＋`return 0`（吞掉，EDIT 剪貼簿
+  選單永不出現）；無選取時 helper 內部 no-op。
+- **建置與 CTest**：Release build 無新增警告；`ctest` 23/23 全綠。
+- **sanity greps**：`VK_APPS` 1 處；`ShowItemMenu`＝定義 1（兼宣告）＋呼叫 2
+  （滑鼠 2893＋鍵盤 2262），另 1 處為 NR-078 註解提到該名；`git diff --name-only`＝
+  只有 main.cpp。
+- **手動驗收**：鍵盤開選單／滑鼠右鍵回歸為視覺驗證，本工作區未實跑。
+- **偏差**：無。未完成事項：無。
