@@ -1138,9 +1138,16 @@ void RefreshPins() {
             }
         }
     }
-    g_pins->Reconcile(g_refresh->Snapshot(),
-                      static_cast<std::int64_t>(std::time(nullptr)));
-    g_pins->Save();
+    // NR-072: a newer-schema file is another build's data -- never touch it
+    // (design-spec §10.4); a corrupt load must not let a partial parse become
+    // the live file. Only a Loaded (or Missing) store may be reconciled and
+    // persisted. This also stops an empty pins_ from clobbering favorites.txt.
+    if (result == nimblerun::PinLoadResult::Loaded ||
+        result == nimblerun::PinLoadResult::Missing) {
+        g_pins->Reconcile(g_refresh->Snapshot(),
+                          static_cast<std::int64_t>(std::time(nullptr)));
+        g_pins->Save();
+    }
     g_model->SetPins(g_pins->Records());
 }
 

@@ -39,6 +39,7 @@ PinLoadResult PinStore::Load() {
                 // are still valid and are upgraded on the next Save().
     default:  // Unreadable / Malformed
         PreserveCorrupt(directory_, kFileName);
+        pins_.clear();  // NR-072: honor "non-Loaded store is empty" (pin_store.h)
         return PinLoadResult::Corrupt;
     }
 
@@ -52,12 +53,14 @@ PinLoadResult PinStore::Load() {
         // lines have 3. Anything else is still corrupt.
         if (fields.size() != 2 && fields.size() != 3) {
             PreserveCorrupt(directory_, kFileName);
+            pins_.clear();  // NR-072: a partial parse must not become the live file
             return PinLoadResult::Corrupt;
         }
         PinRecord pin;
         pin.stable_id = UnescapeText(fields[0]);
         if (pin.stable_id.empty() || !ParseInt64(fields[1], pin.last_seen_utc)) {
             PreserveCorrupt(directory_, kFileName);
+            pins_.clear();  // NR-072: a partial parse must not become the live file
             return PinLoadResult::Corrupt;
         }
         if (fields.size() == 3) {

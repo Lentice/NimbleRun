@@ -267,6 +267,26 @@ void TestMalformedRow() {
     fs::remove_all(dir);
 }
 
+// NR-072: a corrupt row in the middle of an otherwise valid file must not let
+// the valid prefix leak into the live store -- the non-Loaded contract is
+// "store is empty" (pin_store.h). The prefix pins were already parsed before
+// the bad row, so Load must clear them before reporting Corrupt, or the next
+// RefreshPins Save() would write that partial parse as the new favorites.txt.
+void TestCorruptMidFileClearsPins() {
+    const std::wstring dir = MakeTempDir("midcorrupt");
+    const std::string content =
+        "schema=2\nvalid_one\t1000\tOne\nvalid_two\t2000\tTwo\nnot_a_valid_row\n";
+    WriteBytes(dir + L"\\favorites.txt", content);
+    PinStore store(dir);
+    Expect(store.Load() == PinLoadResult::Corrupt, "mid-file corrupt row reports Corrupt");
+    Expect(store.Records().empty(), "corrupt load leaves no partial pins in the store");
+    Expect(!fs::exists(dir + L"\\favorites.txt"), "corrupt file moved aside");
+    Expect(fs::exists(dir + L"\\favorites.txt.corrupt"), "corrupt file preserved");
+    Expect(ReadBytes(dir + L"\\favorites.txt.corrupt") == content,
+           "corrupt content preserved verbatim");
+    fs::remove_all(dir);
+}
+
 void TestNewerSchema() {
     const std::wstring dir = MakeTempDir("newer");
     const std::string content = "schema=99\npinned_app\t1000\n";
@@ -447,6 +467,7 @@ int wmain() {
     TestReconcile30DayExpiry();
     TestCorrupt();
     TestMalformedRow();
+    TestCorruptMidFileClearsPins();
     TestNewerSchema();
     TestLoadSchema1File();
     TestSaveRoundTripsDisplayName();
