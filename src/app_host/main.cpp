@@ -460,31 +460,59 @@ bool CreateDeviceResources(HWND window) {
 
     // NR-015: font sizes are DIPs; D2D/DWrite scale them with the render
     // target's DPI, so they are not re-scaled here.
-    const HRESULT title = g_write_factory->CreateTextFormat(
-        L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL,
-        DWRITE_FONT_STRETCH_NORMAL, nimblerun::layout::kTitleFontDip, L"en-US", &g_title_format);
-    const HRESULT text = g_write_factory->CreateTextFormat(
-        L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
-        DWRITE_FONT_STRETCH_NORMAL, nimblerun::layout::kTextFontDip, L"en-US", &g_text_format);
-    const HRESULT small = g_write_factory->CreateTextFormat(
-        L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
-        DWRITE_FONT_STRETCH_NORMAL, nimblerun::layout::kSmallFontDip, L"en-US", &g_small_format);
+    // NR-067: text formats are device-independent (they outlive the render
+    // target and must not be released by DiscardDeviceResources), so each is
+    // created once and guarded like g_dash_style. Without the guard, a theme
+    // switch or D2DERR_RECREATE_TARGET re-entered this function with the five
+    // globals still alive and overwrote them -- leaking five COM objects per
+    // device-resource recreation. The guard also makes a partial-failure retry
+    // create only the format that is still missing.
+    if (!g_title_format) {
+        const HRESULT title = g_write_factory->CreateTextFormat(
+            L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL,
+            DWRITE_FONT_STRETCH_NORMAL, nimblerun::layout::kTitleFontDip, L"en-US", &g_title_format);
+        if (FAILED(title)) {
+            return false;
+        }
+    }
+    if (!g_text_format) {
+        const HRESULT text = g_write_factory->CreateTextFormat(
+            L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+            DWRITE_FONT_STRETCH_NORMAL, nimblerun::layout::kTextFontDip, L"en-US", &g_text_format);
+        if (FAILED(text)) {
+            return false;
+        }
+    }
+    if (!g_small_format) {
+        const HRESULT small = g_write_factory->CreateTextFormat(
+            L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+            DWRITE_FONT_STRETCH_NORMAL, nimblerun::layout::kSmallFontDip, L"en-US", &g_small_format);
+        if (FAILED(small)) {
+            return false;
+        }
+    }
     // NR-029: grid cell names use the same face/size as list row names but are
     // centered in the cell; alignment is set below with the trimming.
-    const HRESULT grid_name = g_write_factory->CreateTextFormat(
-        L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
-        DWRITE_FONT_STRETCH_NORMAL, nimblerun::layout::kTextFontDip, L"en-US", &g_grid_name_format);
+    if (!g_grid_name_format) {
+        const HRESULT grid_name = g_write_factory->CreateTextFormat(
+            L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+            DWRITE_FONT_STRETCH_NORMAL, nimblerun::layout::kTextFontDip, L"en-US", &g_grid_name_format);
+        if (FAILED(grid_name)) {
+            return false;
+        }
+    }
     // NR-043: key-hint boxes get their own format. Semi-bold reads as a keycap
     // at 20 DIP and Segoe UI's digits are tabular, so single digits land in the
     // same place in every box; centered on both axes so the label no longer
     // depends on the kFooterTextInsetDip nudge. g_small_format cannot be reused
     // -- it is left-aligned on purpose for row subtitles and the path bar.
-    const HRESULT key = g_write_factory->CreateTextFormat(
-        L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL,
-        DWRITE_FONT_STRETCH_NORMAL, nimblerun::layout::kSmallFontDip, L"en-US", &g_key_format);
-    if (FAILED(title) || FAILED(text) || FAILED(small) || FAILED(grid_name) ||
-        FAILED(key)) {
-        return false;
+    if (!g_key_format) {
+        const HRESULT key = g_write_factory->CreateTextFormat(
+            L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL,
+            DWRITE_FONT_STRETCH_NORMAL, nimblerun::layout::kSmallFontDip, L"en-US", &g_key_format);
+        if (FAILED(key)) {
+            return false;
+        }
     }
 
     // NR-020: row name and source-path formats are single-line and truncate
