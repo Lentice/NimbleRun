@@ -337,7 +337,11 @@ std::vector<std::uint8_t> IconStore::Lookup(const std::wstring& stable_id, int v
 void IconStore::Put(const std::wstring& stable_id, int variant,
                     std::vector<std::uint8_t> payload,
                     std::uint64_t source_stamp, std::uint64_t now_utc) {
-    if (state_ == StoreState::Disabled || payload.empty()) {
+    // NR-068: only a Ready store accepts writes. Disabled and ReadOnly both
+    // reject (icon_store.h: "readable, writes rejected"), and Flush digests
+    // pending_ only when Ready -- accepting a Put in any other state would grow
+    // pending_ without bound. Fire-and-forget: the worker never needs to know.
+    if (state_ != StoreState::Ready || payload.empty()) {
         return;
     }
     std::uint64_t hash = 0;
@@ -489,6 +493,7 @@ bool IconStore::Flush(const std::vector<std::wstring>& pinned_ids, std::uint64_t
             if (FlushViewOfFile(view_ + offset, write.payload.size()) == FALSE) {
                 ScanIndex();
                 WriteLog(L"icon-store", L"flush-failed");
+                pending_.clear();  // NR-068: never digestible again -- reject and forget
                 state_ = StoreState::ReadOnly;
                 return false;
             }
@@ -501,6 +506,7 @@ bool IconStore::Flush(const std::vector<std::wstring>& pinned_ids, std::uint64_t
                             kIndexEntrySize) == FALSE) {
             ScanIndex();
             WriteLog(L"icon-store", L"flush-failed");
+            pending_.clear();  // NR-068: never digestible again -- reject and forget
             state_ = StoreState::ReadOnly;
             return false;
         }
@@ -517,6 +523,7 @@ bool IconStore::Flush(const std::vector<std::wstring>& pinned_ids, std::uint64_t
     if (FlushViewOfFile(view_ + other_slot * kHeaderSize, kHeaderSize) == FALSE) {
         ScanIndex();
         WriteLog(L"icon-store", L"flush-failed");
+        pending_.clear();  // NR-068: never digestible again -- reject and forget
         state_ = StoreState::ReadOnly;
         return false;
     }
