@@ -112,7 +112,7 @@
 | NR-073 | rebuild 只在整代完成時刷新面板並寫 catalog.cache | 3 | `done` | — | [NR-073](work-items/NR-073-rebuild-complete-refresh-once.md) |
 | NR-074 | 監看錯誤每段連續期只報一次 full-rescan，不再 1 Hz 重建 | 3 | `done` | — | [NR-074](work-items/NR-074-watcher-error-once-per-episode.md) |
 | NR-075 | IconStore 記憶體守衛：Compact remap 失敗降級、payload_end 上限 | 3 | `done` | — | [NR-075](work-items/NR-075-icon-store-memory-guards.md) |
-| NR-076 | 背景 worker 補 §11 例外捕捉邊界 | 3 | `planned` | — | [NR-076](work-items/NR-076-worker-exception-boundary.md) |
+| NR-076 | 背景 worker 補 §11 例外捕捉邊界 | 3 | `done` | — | [NR-076](work-items/NR-076-worker-exception-boundary.md) |
 | NR-077 | WM_APP+8/9 改用 token registry，不再解參考未驗證的 lParam | 3 | `planned` | — | [NR-077](work-items/NR-077-message-payload-token-registry.md) |
 | NR-078 | Context Menu／Shift+F10 開啟選取列的項目選單 | 3 | `planned` | — | [NR-078](work-items/NR-078-keyboard-item-menu.md) |
 | NR-079 | 較新 schema 的 catalog.cache 不被 rebuild 覆寫 | 3 | `planned` | — | [NR-079](work-items/NR-079-catalog-cache-newer-schema-preserve.md) |

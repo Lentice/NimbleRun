@@ -178,3 +178,31 @@ git diff --name-only
 （實作者填寫：try/catch 的實際範圍、catch 內診斷出口的取捨（`store_->WriteLog` vs
 其他）、rebuild catch 的 `g_diag` 用法、fake provider 拋例外的寫法與新 case 斷言、
 建置與 CTest 結果、sanity greps、偏差、未完成事項。）
+
+實作（2026-08-08）：
+
+- **Icon worker try/catch**：`Run()` 的 load 任務本體（`const IconRequest& request`
+  到 `if (!PostMessageW(...))` 之前）包進 `try`，`new IconResult` 與
+  `result->encoded_key` 留在 try 外（item 允許）；catch 內 `store_ != nullptr`
+  時 `store_->WriteLog(L"icon-worker", L"exception")`，之後 `result->bitmap = {}`
+  落到既有單一 post 點（`PostMessageW` 全檔僅 1 處）。`Flush` 任務分支不在 try
+  內（Flush 本身不拋、internal 已有降級）。
+- **診斷出口取捨**：`IconStore::WriteLog` 原為 private，`icon_worker.cpp` 無法呼叫；
+  依 item「照既有 `store_ ? store_->WriteLog :` 形狀」決定把宣告搬到 public 段
+  （`diagnostic_log.h:34` 本來就寫「from the icon worker (IconStore::WriteLog)」，
+  屬原設計意圖），worker 用 `store_->WriteLog` 而非自握 `DiagnosticLog*`。`store_ ==
+  nullptr` 時不寫（無可用的診斷出口）。**因此改動範圍比 item 預期多一個
+  `icon_store.h`**。
+- **rebuild lambda try/catch**：`StartRebuild` 的 worker lambda 把整個 `switch`
+  包進 try；catch 內 `result->failed = true`＋`if (g_diag) g_diag->Write(L"rebuild",
+  L"exception");`（`Write` 實際簽名是 2 參數，item 範例的 `, 0` 不存在，已校正）。
+  `PostMessageW` 留在 try 外維持既有擁有權語意。
+- **測試**：`icon_worker_test` 的 `FakeProvider` 加 `throw_on_load` 旗標（`Load` 開頭
+  `throw std::runtime_error`，新增 `<stdexcept>`）；新 case `TestThrowingProviderIsContained`
+  ——拋例外後 worker 存活、收到空 bitmap 結果（`encoded_key` 正常）、關閉旗標後
+  第二筆請求照常回傳真 bitmap。
+- **建置與 CTest**：Release build 無新增警告；`ctest` 23/23 全綠（含新 case）。
+- **sanity greps**：`catch (...)` 於 icon_worker.cpp:158 與 main.cpp:1288 各 1 處；
+  `PostMessageW` 於 icon_worker.cpp 僅 1 處（無雙重 post）。
+- **偏差**：`git diff` 多出 `src/icons/icon_store.h`（WriteLog 轉 public，理由如上）。
+  未完成事項：無。
