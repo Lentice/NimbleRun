@@ -99,6 +99,15 @@
 | NR-060 | Right-clicking the panel's empty area offers Refresh / Settings / About | 3 | `done` | NR-013, NR-018 | [NR-060](work-items/NR-060-panel-empty-area-context-menu.md) |
 | NR-061 | Empty state shows only pins and recents, no alphabetical filler | 3 | `done` | NR-053 | [NR-061](work-items/NR-061-empty-state-no-filler.md) |
 | NR-062 | A pin with no matching app shows as a removable missing tile | 3 | `done` | NR-061 | [NR-062](work-items/NR-062-missing-pin-placeholder.md) |
+| NR-063 | Source enumeration failure reaches the failure path (§FR-008) | 3 | `done` | — | [NR-063](work-items/NR-063-source-failure-reaches-refresh.md) |
+| NR-064 | Hit-testing selects only visible rows (footer / margins safe) | 3 | `done` | — | [NR-064](work-items/NR-064-hittest-visible-rows-only.md) |
+| NR-065 | File events during an in-flight rebuild are not dropped | 3 | `done` | — | [NR-065](work-items/NR-065-inflight-events-not-dropped.md) |
+| NR-066 | Mouse wheel accumulates sub-notch deltas | 3 | `done` | — | [NR-066](work-items/NR-066-wheel-delta-accumulator.md) |
+| NR-067 | Device-resource recreation does not leak text formats | 3 | `done` | — | [NR-067](work-items/NR-067-text-format-leak.md) |
+| NR-068 | IconStore rejects writes while not Ready (pending bounded) | 3 | `done` | — | [NR-068](work-items/NR-068-icon-store-readonly-pending.md) |
+| NR-069 | GetStartupStatus treats the Run value as untrusted input | 3 | `done` | — | [NR-069](work-items/NR-069-startup-regsz-robust.md) |
+| NR-070 | Store data files are untrusted input (ParseUint64 `-`, Reconcile overflow) | 3 | `done` | — | [NR-070](work-items/NR-070-store-files-untrusted.md) |
+| NR-071 | 常用區依最後啟動時間排序，最新在最前 | 3 | `done` | NR-061 | [NR-071](work-items/NR-071-recent-ordered-by-recency.md) |
 
 ## Dependency lanes
 
@@ -144,6 +153,16 @@ NR-052（Esc／空白查詢）── NR-053（空狀態排序與填充）  ← �
 NR-054（記錄檔位置／執行緒／入口）── 獨立
 NR-055（測試 CMake 樣板）── 獨立純刪除；若其他 item 要新增測試執行檔，先做它
 NR-056（文件對齊實況）── 獨立；與 NR-054 同動 design-spec 但條文不重疊
+
+稽核修補 lane 2（NR-063～NR-070，2026-08-07 第三次全 repo 稽核產出）：
+NR-063（來源失敗死碼）── 無依賴，最先做；§FR-008「單一來源失敗保留舊結果」目前是死碼
+NR-064（hit-test 越界）── 獨立；點 footer／邊緣空白會啟動看不見的 App，使用者可見的高嚴重度
+NR-065（掃描期間事件遺失）── 獨立；與 NR-063 都動 catalog refresh 週邊但不同函式，可平行
+NR-066（滾輪餘數）── 獨立
+NR-067（text format 洩漏）── 獨立
+NR-068（icon store pending 增長）── 獨立
+NR-069（startup REG_SZ）── 獨立；latent（目前無 production caller），接上 UI 前修掉
+NR-070（store 不受信輸入）── 獨立；兩個 one-line 修補，僅手改資料檔可達
 ```
 
 可平行處理的前提是依賴已完成且寫入的資料／訊息邊界穩定；不要為了平行而複製同一份邏輯。
@@ -157,10 +176,69 @@ NR-056（文件對齊實況）── 獨立；與 NR-054 同動 design-spec 但�
 | 以「搜尋太慢」為前提的 item：debounce、incremental narrowing、搜尋移到背景執行緒、結果筆數上限 | NR-047 交接區的兩條實測 | 5000 筆 catalog：既有 `L"e"` 查詢 **603 µs**，NR-047 最壞路徑（名稱全不命中＋每筆都有 alias）**204 µs**，ceiling 是 **50 ms**。差三個數量級，前提不成立。要重開需先提出新的量測。 |
 | 另立一套搜尋鍵抽象：`SearchKeys(entry)` 存取器或 `std::vector<std::wstring> search_keys` | NR-047 §How this stays maintainable | vector 會在熱掃描路徑上多一次 per-entry 堆積配置與一層內迴圈，換來的是目前不存在的擴充性。新增搜尋鍵請從既有的 `search_alias` 欄位與 `MatchRank::Alias` 層級接。 |
 | 中文拼音／注音／同義詞展開 | `docs/design-spec.md:180`（§4.4）、`:1046` | MVP 明文排除。這是**唯一真正通用**解決「不想打中文」的方案，但要重開屬於 spec 層級決策（需要對照資料與 §4.5 的新層級），**先問使用者是否把它移出 MVP 排除清單，不要逕自開 item**。 |
-| 用 Catalog 項目把空白狀態的格狀填滿（NR-053 的 §4.2 規則 3） | NR-061 的使用者決策（2026-08-07） | 實機上填出 40 格 `3D Vision 相...`／`AccessPort`／`AlertMail48` 這類從未開過的項目，把「我釘的或我用過的」這個唯一語意稀釋掉，且這些格子的右鍵「Remove from recent」按了毫無反應。空白狀態的內容一律只來自釘選清單與使用紀錄；沒有就顯示一行提示。**NR-053 依 `usage_score` 排序的那一半保留。** |
+| 用 Catalog 項目把空白狀態的格狀填滿（NR-053 的 §4.2 規則 3） | NR-061 的使用者決策（2026-08-07） | 實機上填出 40 格 `3D Vision 相...`／`AccessPort`／`AlertMail48` 這類從未開過的項目，把「我釘的或我用過的」這個唯一語意稀釋掉，且這些格子的右鍵「Remove from recent」按了毫無反應。空白狀態的內容一律只來自釘選清單與使用紀錄；沒有就顯示一行提示。**NR-053 依 `usage_score` 排序的那一半保留。**（2026-08-07 由 NR-071 覆寫：常用區改依最後啟動時間排序、最新在最前，`usage_score` 僅留給 §4.5 搜尋結果的次要排序。「不用其他 App 填充」這條不受影響，仍然有效。） |
 | 把 FR-004a 的 program-like 判準套用到 FR-005 使用者自訂資料夾 | `docs/design-spec.md:354` | 明文「此判準**不套用於** FR-005 的使用者自訂資料夾」。該來源的把關者是使用者自己勾選的副檔名清單；二次過濾會無聲擋掉使用者手動加入的副檔名。 |
 
 ## 計畫決策紀錄
+
+- 2026-08-07（NR-063～NR-070 ready，第三次全 repo 稽核產出）：backlog 清空後對整個 repo
+  做了第三輪四軸稽核（正確性／穩健性、spec 對照、執行緒與生命週期、不受信輸入），
+  由三個平行子 agent 分別深讀 main.cpp 全檔、catalog/settings/pins/usage/storage、
+  icons 子系統，主 Agent 逐一重讀原始碼驗證後收斂成 8 個 item。**排序依「先修使用者
+  看得到的、再修會漏資料的、再修硬體相容、再修資源與 latent」**。逐項決策與「為什麼
+  不那樣做」：**NR-063**——`ApplySourceFailure` 是死碼：`StartRebuild` worker 從不設
+  `result->failed`，三個枚舉器對來源級失敗只能回傳空清單（`start_menu_catalog.cpp:231-247`
+  COM 不可用即回空；`AppsFolderEnumerateResult` 只有子項目級 `failed_items`），所以
+  §FR-008「單一來源失敗時保留該來源舊結果」從未生效——一次性 COM 失敗會把該來源的
+  app 從面板抹掉，且空結果也記 `RecordAppsFolderSuccess`，把 10 分鐘 staleness 重試
+  壓掉；持續性失敗下受影響 pin 的 retention clock 不再刷新，30 天後被丟棄。修在枚舉器
+  邊界（各回報 `source_ok`，UserFolder 不改——「資料夾不存在→空」是正確語意），worker
+  保持薄轉接（`failed = !source_ok`），失敗不記成功。**為什麼不那樣做**：不做 worker 內
+  重試（回到輪詢，違反 event-driven）；coordinator 一字不改（merge/failure 語意已對，
+  `catalog_refresh_test` 的 `TestFailureKeepsOldSnapshot` 等已證明）；不加 UI 通知
+  （保留舊資料就是正確行為）。同區塊順手修 `PostMessageW` 失敗洩漏 `RebuildResult`
+  （照 `icon_worker.cpp:158-161`）與 `generation_complete` 名實不符（改名
+  `result_applied`、`OnRefreshComplete` 改在 `GenerationComplete` 時觸發）。**NR-064**——
+  `CellAtPoint` 命中範圍大於繪製範圍：無 `y >= footer_top` 下界（list 點 footer 算出
+  `first+8` 啟動第 9 筆未繪製結果；grid 算出 `first+24+col`），list 無右界，grid 左緣
+  因整數除法向零取整（-7/112=0）命中第 0 欄——點一下 footer／邊緣就啟動一個看不到的
+  App。修在 `CellAtPoint` 唯一入口補三個界限，Render 與所有呼叫端不改；不加測試
+  （吃 g_model＋HWND，NR-060 明載不為測試點發明抽象）。**NR-065**——`ApplySourceResult`
+  無條件清 `pending_[source]`：掃描途中抵達的事件（`last_event_ms_` 已更新、timer 重設
+  到 T1+500）在 T2 收尾時被清掉，T1+500 的 timer 看到 pending=false 不重建，變更永久
+  漏掉直到外部觸發。修法：`BeginGeneration` 快照各 source 的 `last_event_ms_`，
+  `ApplySourceResult/Failure` 只在時間戳未變時才清 pending——既有 timer 自然接住下一輪。
+  不做 worker 內合併（把「掃描開始後的事件」併進掃描中的結果是狀態機複雜化的開始）。
+  **NR-066**——`WM_MOUSEWHEEL` 每次 delta 獨立除以 WHEEL_DELTA、無累積器：精準觸控板
+  （每則 30–60 delta）整數除法恆為 0，面板完全無法捲動。加檔案範圍 `g_wheel_delta_carry`
+  （累加→取商→留餘），`lines` 與 `ScrollBy` 語意一字不改。**NR-067**——`CreateDeviceResources`
+  進入守衛要求 render target 與五支 text format 全非空，但 `DiscardDeviceResources` 只
+  釋放 target＋brushes，不釋放 formats（device-independent，本就不該釋放）；主題切換
+  （`:1329`）與 `D2DERR_RECREATE_TARGET`（`:1770`）後重進函式，五個 `CreateTextFormat`
+  無條件覆寫仍存活的全域指標——每次裝置重建洩漏 5 個 COM 物件。修法：五個呼叫各加
+  `if (!g_*_format)` 守衛（與 `g_dash_style`／`g_ellipsis_sign` 同形）；不改
+  `DiscardDeviceResources` 釋放清單。**NR-068**——`IconStore::Put` 只拒絕 `Disabled`，
+  但 `Flush` 只在 `Ready` 消化 `pending_`；`FlushViewOfFile` 失敗降級 `ReadOnly`
+  （`icon_store.cpp:492/504/520`）後，worker 每次 `Put` 都讓 `pending_` 無界增長（每筆
+  完整 PNG payload，持續故障可達數十 MB）。修法：`Put` 守衛改 `state_ != StoreState::Ready`，
+  三個失敗出口各 `pending_.clear()`；`ReadOnly` 契約（`icon_store.h:54`「writes
+  rejected」）從此與實作一致。不加測試 seam（OS 失敗路徑不可注入，NR-050 先例）。
+  **NR-069**——`GetStartupStatus` 的 REG_SZ buffer 配置 `size/2` 個 wchar：無 NUL 的
+  值（RegQueryValueExW 不保證帶終止字元、HKCU Run 任何同使用者 process 可寫）→
+  `find` 回 npos → `resize(npos)` 拋例外終止 process；奇數 byte 大小 → 1-byte 越界寫。
+  目前無 production caller 是 latent，接上 UI 即 high。修法：buffer `+1` 預填 NUL、
+  npos fallback 截斷到讀取長度；返回值不變、不加列舉值。**NR-070**——兩個手改資料檔
+  缺口：`ParseUint64`（`atomic_text_file.h:206-219`）接受 `-` 前綴（C 標準 `wcstoull`
+  無號回繞不設 ERANGE），`usage.tsv` 的 `-1` 被當合法載入、釘在 usage 排序頂端且
+  `Save` 寫回自我永續；`PinStore::Reconcile` 的 `now - last_seen_utc` 對手改的
+  `INT64_MIN` 是 signed overflow UB（usage_store 已用比較式防護、此處漏掉）。修法：
+  各一行——拒絕 `-` 前綴（走既有 corrupt 路徑）、改 `last_seen_utc >= now - retention`
+  比較式。**未成 item 的低嚴重度發現**（記錄備查）：icon 驅逐只清記憶體不落盤、
+  重啟後復活（自我收斂，compact 會物理清除，perf only）；idle/final flush 傳空 pinned
+  清單使 pin 豁免只對 HidePanel 那次有效（perf only）；grid 模式 footer 顯示
+  `Alt+1~4` 但實際綁定繪製 10 格（視覺不一致，LOW）。三者都未達 item 門檻，若日後
+  實測有影響再開。全 repo 其他類別（原子寫入、escaping round-trip、COM 平衡、
+  mmap 邊界、執行緒 handoff、診斷日誌消毒）複查為乾淨。未 commit。
 
 - 2026-08-07（NR-059 done）：`Render()` 515 行裡 grid 與 list 兩個分支的兩段逐字重複（「圖示或 fallback」與「空白狀態提示」）收斂成兩個檔案範圍 helper。逐字比對確認兩段**並非**完全相同：grid fallback 用 `grid_icon_needed_px`＋4 行 NR-032 註解＋`DrawText(tile, g_text_brush)` 單行，list 版用 `layout.tile_size`＋2 行 Fallback-tile 註解＋`DrawText` 換行版（`tile,`／`g_text_brush);`）；空白提示兩段只差 `kCellHeightDip` vs `kRowHeightDip` 與各自分支註解——差異即規格，只抽共用部分，其餘原樣。新增 `DrawIconOrFallback(const AppEntry&, const D2D1_RECT_F&, int, float, float)`（在 `DrawDecodedIcon` 之後，照 item 正文）與 `DrawEmptyStateHint(float row_height)`，兩者都吃 `g_render_target`／`g_icon_cache`／`g_text_brush`／`g_dim_brush`／`g_text_format` 五個檔案範圍變數（Decisions §1）；grid 呼叫點傳 `kCellHeightDip`、list 傳 `kRowHeightDip`。**drag ghost（`:1432-1452`）保留原樣**——它未命中時只畫 dim 方塊、不畫首字母也不重新請求（請求已由該格繪製發出），命中時 `DrawDecodedIcon(…, 0.6f)` 帶透明度，故不是 `DrawIconOrFallback` 呼叫點，上方加一行 NR-059 註解說明。**清尾隨空白只清 `Render()` 內**：list 分支 6 行只含 4 空格的縮排殘留整行刪除（item 範例 `:1404/:1430/:1443/:1462/:1493/:1512` 對應 `:1491/:1517/:1530/:1549/:1580/:1599`），全檔尾隨空白 0。**偏差**：Render() 從 515 降到 **449**（<450 達成，但並非 item 預期的約 450——因另刪了 ghost 上方原有空行與兩處 `rows.empty()` 分支註解）；`RequestVisibleIcon(` 計數 2（宣告＋`DrawIconOrFallback` 內各一，呼叫點只剩 1 處）；`kNoMatchingApps`／`kBuildingCatalog` 各 2（常數定義＋`DrawEmptyStateHint` 內）。呼叫次數未變：`Peek` 仍是 grid＋list＋ghost 各一次、`CreateBitmap` 只在 `DrawDecodedIcon`（命中路徑）內、`DrawText` 的 fallback/empty 各只剩一份但每繪製呼叫一次，冷熱快取路徑逐項比對與改動前相同（Performance §不變）。Release 建置無新增警告、`ctest` **23/23 全綠**。手動驗收為視覺比對（item 明文不加測試），未在本工作區實跑。未 commit。
 
