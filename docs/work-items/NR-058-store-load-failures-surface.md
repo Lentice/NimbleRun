@@ -292,6 +292,95 @@ Select-String -Path docs/design-spec.md -Pattern 'tray balloon'
 
 ## 交接區
 
-（實作者填寫：逐檔改動位置、balloon 送出點的選擇與「tray icon 已存在」的
-證明、日誌事件名、文案最終放置位置、五項手動驗收的實測結果、
-`ctest` 結果、上列 sanity greps 的實際輸出、任何必要偏差。）
+**逐檔改動位置**：
+
+- `src/diagnostics/load_notice.h`（新增，header-only）：`StoreLoadIssue` bitflags
+  （`None`/`Corrupt`/`TooNew`）＋ `StoreLoadNoticeText(unsigned)`。無
+  `<windows.h>`、無 HWND、無任何 Win32，可被單元測試直接呼叫。
+- `src/app_host/main.cpp`：
+  - 新增 include `diagnostics/load_notice.h`。
+  - `g_last_hotkey_error`（:149）旁新增檔案範圍變數：`g_store_load_issues`、
+    `g_pins_notified`、`g_main_window`、`g_tray_icon_active`。
+  - `RefreshPins()` 之前新增：`StoreLoadIssueFor<Result>` 與
+    `StoreLoadResultName<Result>`（模板 switch，逐一列舉、無 default，保留
+    `-Wswitch` 的「新增載入結果要下 UI 決定」編譯器提醒）、`LogStoreLoad`、
+    `ShowLoadIssueNotice` 前置宣告。
+   - `RefreshPins()`：`g_pins->Load()` 接住回傳值。`Missing` → 寫
+     `pins_load` 日誌、**不**設旗標、**不**送 balloon（決定 #5＋手動驗收 5；
+     修正後的偏差 #1）；`Corrupt`/`NewerSchema` → 寫 `pins_load` 日誌，
+     且只在 `!g_pins_notified` 時設定旗標並送 balloon（用一個 `bool`，
+     未蓋閘門類別）；`Loaded` 照舊不做事。
+  - `AddTrayIcon()`：改為 `g_tray_icon_active = Shell_NotifyIconW(NIM_ADD, &nid)`。
+  - `ShowHotkeyConflictNotice` 之後新增 `ShowLoadIssueNotice`（照同一
+    `NOTIFYICONDATAW` 的 `NIF_INFO` 填法，欄位與旗標逐一對齊）。
+  - `wWinMain`：`settings_store.Load`／`usage.Load` 接回傳值保留於區域變數；
+    視窗建立後設 `g_main_window = window`；`g_diag = &diag`（:2810）之後把
+    settings/usage 的非 `Loaded` 結果累積旗標並寫日誌（此點日誌已就緒，
+    不需 queue，也未調整任何既有初始化順序）；`AddTrayIcon` 之後、訊息迴圈
+    之前送出彙總 balloon，送出後 `g_store_load_issues = 0`。
+- `src/app_host/settings_dialog.h` / `.cpp`：`ShowSettingsDialog` 新增
+  `DiagnosticLog* diag` 參數（前置宣告 `class DiagnosticLog`）；`store.Load`
+  接回傳值、`switch` 逐一列舉，非 `Loaded` 只寫 `settings_load` 日誌、不通知。
+  呼叫端（`kSettingsMessage` 臂）補傳 `g_diag`。
+- `tests/unit/diagnostic_log_test.cpp`：新增 `TestStoreLoadNoticeText`
+  （無問題→空字串、僅 corrupt、僅 too-new、兩者皆有→兩句都在），沿用既有
+  `Expect` helper。未新增測試執行檔、未改 `CMakeLists.txt`
+  （`nimblerun_diagnostics` 的 PUBLIC include dir 已覆蓋 `src/`）。
+- `docs/design-spec.md`：§11 錯誤處理表「設定損壞」之後插入
+  「使用者資料由較新版本寫入」列（item 提供之原文）；§10.4 第一段末尾補
+  「顯示一次錯誤提示」實作為單一 tray balloon 的句子（item 提供之原文）。
+
+**balloon 送出點與「tray icon 已存在」的證明**：啟動送出點＝
+`AddTrayIcon(window)`（main.cpp:2908）之後、`GetMessageW` 迴圈之前。證明：
+同一個 `window` HWND 與 `kTrayIconId` uID 的 `Shell_NotifyIconW(NIM_ADD, &nid)`
+在上一行剛於 `AddTrayIcon` 內執行完畢，且 `g_tray_icon_active` 由 NIM_ADD
+的回傳值置真；此後的 `NIM_MODIFY`（balloon）以同 hWnd＋uID 定址同一圖示。
+既有的 `ShowHotkeyConflictNotice` 也在同一點呼叫、依同一假設。送出順序放在
+熱鍵衝突 notice **之後**：若兩者同時觸發，最後一則 NIM_MODIFY 的文字勝出，
+讓載入問題訊息不被覆蓋。pin 的首輪載入在啟動 `RefreshPanelSnapshot()`
+（main.cpp:2836，先於 AddTrayIcon）發生、當時 tray 尚未存在，故 `RefreshPins`
+以 `g_tray_icon_active` 判斷：tray 未就緒則併入 `g_store_load_issues` 由啟動
+送出點統一發送（手動驗收 2「usage＋favorites 同時太新 → 單一 balloon 涵蓋
+兩者」由此成立），tray 已就緒（執行中才發生 pin 損壞）則直接送。
+
+**日誌事件名**：`settings_load`、`usage_load`、`pins_load`；detail 一律
+`result=<列舉名>`（`Loaded`/`Missing`/`Corrupt`/`NewerSchema`）。只有檔名＋
+列舉名，無路徑、無內容（§FR-014）。
+
+**文案最終位置**：三個英文句子放在 `src/diagnostics/load_notice.h`
+（跟著純函式走），而非 `main.cpp` 的 `dialog_strings`。理由：純函式要產出
+文字、測試要斷言精確句子，放在 header 使 `StoreLoadNoticeText` 與其文案同源、
+測試不依賴 main.cpp；此字串只有 tray balloon 一個出口，不觸發「多個畫面共用
+需集中」的需求。兩句以單一空格串接。
+
+**ctest**：Release 建置無新增警告；`ctest --test-dir build --output-on-failure`
+**23/23 全綠**（首輪 `nimblerun_lifecycle_check` 曾因 NR-049 已知的冷啟動掃描
+卡 30 s 逾時一次，重跑即 3.8 s 通過，非本 item 所致）；`ctest --test-dir build
+-R nimblerun_diagnostic_log_test` 1/1 過。
+
+**sanity greps 實際輸出**：
+
+- `Select-String -Path src/app_host/main.cpp,src/app_host/settings_dialog.cpp -Pattern '^\s*(g_pins->|usage\.|settings_store\.|store\.)Load\('` → **無輸出**。
+- `Select-String -Path src/diagnostics/load_notice.h -Pattern 'windows\.h|HWND|NOTIFYICONDATA'` → **無輸出**（初版註解含字面 `HWND`，已改寫避開）。
+- `(Select-String -Path src/app_host/main.cpp -Pattern 'NIF_INFO').Count` → **2**（既有熱鍵 notice＋本 item；初版註解含字面 `NIF_INFO` 使計數為 3，已改寫）。
+- `Select-String -Path docs/design-spec.md -Pattern 'tray balloon'` → §10.4（:757）與 §11（:778，另有既有 :782）各命中。
+
+**偏差**：
+
+1. Scope §4 規定 pin `Loaded`/`Missing`「照舊，什麼都不做」，但手動驗收 5 寫
+   「第一次執行日誌有三行 Missing」——兩者矛盾。**已決議**：決定 #5 明文
+   「每一種非 `Loaded` 的結果都寫一行日誌，包含 `Missing`」，手動驗收 5 亦明列
+   三行，故 Scope §4 的「`Missing`：照舊，什麼都不做」**被決定 #5 與手動驗收 5
+   取代**，本次修正後 `RefreshPins` 的 `Missing` 分支寫
+   `pins_load`/`result=Missing`，仍不設旗標、不送 balloon；首次執行日誌即為
+   settings＋usage＋pins 三行 `Missing`，符合手動驗收 5。
+2. `ShowSettingsDialog` 增加 `DiagnosticLog* diag` 參數（含前置宣告與呼叫端
+   補參數）：Scope §4「只加日誌」需要日誌存取權，屬達成驗收所必需的最小
+   介面擴充。
+3. 新增 `g_main_window`、`g_tray_icon_active` 兩個檔案範圍變數：balloon 需要
+   HWND，而 pin 損壞可能在 tray 就緒前（啟動首輪）或後（執行中）偵測到，
+   需要「tray 是否已存在」的事實來源；`AddTrayIcon` 改為記錄 `NIM_ADD`
+   的回傳值。
+
+**未完成**：五項手動驗收屬人工操作（需啟動 GUI 並竄改
+`%LOCALAPPDATA%\NimbleRun` 的使用者檔），Agent 不執行。

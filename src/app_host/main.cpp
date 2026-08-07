@@ -18,6 +18,7 @@
 #include "catalog/start_menu_catalog.h"
 #include "catalog/user_folder_catalog.h"
 #include "diagnostics/diagnostic_log.h"
+#include "diagnostics/load_notice.h"
 #include "icons/icon_cache.h"
 #include "icons/icon_store.h"
 #include "icons/icon_worker.h"
@@ -147,6 +148,20 @@ nimblerun::GlobalHotkey g_hotkey;
 
 // Last hotkey registration failure code, kept for NR-017 diagnostics.
 DWORD g_last_hotkey_error = ERROR_SUCCESS;
+// NR-058: startup store-load failures, aggregated for a single tray balloon
+// (design-spec §10.4/§11). Cleared to None after the balloon is sent, so a
+// process notifies at most once.
+unsigned g_store_load_issues = 0;
+// NR-058: pins already notified this process. The panel reloads pins on every
+// show, so a corrupt favorites.txt must not balloon on each Alt+Space.
+bool g_pins_notified = false;
+// NR-058: the main window HWND (tray callback target), set in wWinMain once the
+// window exists; the only UI-thread owner of the tray notices.
+HWND g_main_window = nullptr;
+// NR-058: true once Shell_NotifyIconW(NIM_ADD) succeeded, so RefreshPins knows
+// whether a balloon can be shown now or must be deferred to the startup send
+// point (the first pin load runs before the tray icon exists).
+bool g_tray_icon_active = false;
 
 // Panel state (NR-010). The model is pure; the window translates input.
 nimblerun::PanelModel* g_model = nullptr;
@@ -910,6 +925,55 @@ void DrawDecodedIcon(const nimblerun::IconBitmap& icon,
     bitmap->Release();
 }
 
+// NR-058: single non-blocking tray balloon for a store-load failure; defined
+// next to ShowHotkeyConflictNotice below.
+void ShowLoadIssueNotice(HWND window, const std::wstring& text);
+
+// NR-058: maps one store load result to its notification bit. Loaded and
+// Missing never notify (first run with no files is normal). A switch over every
+// enumerator: adding a load result without a UI decision here trips the
+// compiler's -Wswitch reminder.
+template <typename Result>
+unsigned StoreLoadIssueFor(Result result) {
+    switch (result) {
+    case Result::Loaded:
+    case Result::Missing:
+        return 0;
+    case Result::Corrupt:
+        return static_cast<unsigned>(nimblerun::StoreLoadIssue::Corrupt);
+    case Result::NewerSchema:
+        return static_cast<unsigned>(nimblerun::StoreLoadIssue::TooNew);
+    }
+    return 0;
+}
+
+// NR-058: the one-word enum name for a diagnostic log line. Only the file name
+// and the result enum name are ever logged (design-spec §FR-014).
+template <typename Result>
+const wchar_t* StoreLoadResultName(Result result) {
+    switch (result) {
+    case Result::Loaded:
+        return L"Loaded";
+    case Result::Missing:
+        return L"Missing";
+    case Result::Corrupt:
+        return L"Corrupt";
+    case Result::NewerSchema:
+        return L"NewerSchema";
+    }
+    return L"?";
+}
+
+// NR-058: one diagnostic line per non-Loaded store load, shaped
+// "settings_load\tresult=Corrupt". g_diag always exists at the call sites
+// (settings/usage lines are written only after the log is created); the null
+// check keeps the pattern consistent with the other Write callers.
+void LogStoreLoad(const wchar_t* stage, const wchar_t* result_name) {
+    if (g_diag) {
+        g_diag->Write(stage, std::wstring(L"result=") + result_name);
+    }
+}
+
 // NR-018: reload pins from the store, reconcile them against the current
 // catalog snapshot (30-day retention, last_seen refresh; design-spec §FR-011),
 // persist any change, and mirror the ordered pin list into the panel model.
@@ -919,7 +983,30 @@ void RefreshPins() {
     if (!g_pins || !g_refresh || !g_model) {
         return;
     }
-    g_pins->Load();
+    const nimblerun::PinLoadResult result = g_pins->Load();
+    if (result == nimblerun::PinLoadResult::Missing) {
+        // First run: the file does not exist yet, which is normal. Still log
+        // one line (decision #5), but never set a flag or show a balloon.
+        LogStoreLoad(L"pins_load", StoreLoadResultName(result));
+    } else if (result == nimblerun::PinLoadResult::Corrupt ||
+               result == nimblerun::PinLoadResult::NewerSchema) {
+        LogStoreLoad(L"pins_load", StoreLoadResultName(result));
+        if (!g_pins_notified) {
+            g_pins_notified = true;
+            if (g_tray_icon_active && g_main_window) {
+                const std::wstring text = nimblerun::StoreLoadNoticeText(
+                    StoreLoadIssueFor(result));
+                if (!text.empty()) {
+                    ShowLoadIssueNotice(g_main_window, text);
+                }
+            } else {
+                // The first pin load runs before the tray icon exists (startup
+                // RefreshPanelSnapshot); the startup send point shows the
+                // balloon once the icon is in place.
+                g_store_load_issues |= StoreLoadIssueFor(result);
+            }
+        }
+    }
     g_pins->Reconcile(g_refresh->Snapshot(),
                       static_cast<std::int64_t>(std::time(nullptr)));
     g_pins->Save();
@@ -1765,7 +1852,9 @@ void AddTrayIcon(HWND window) {
     nid.hIcon = LoadIconW(GetModuleHandleW(nullptr),
                           MAKEINTRESOURCEW(IDI_NIMBLERUN));
     wcsncpy(nid.szTip, L"NimbleRun", sizeof(nid.szTip) / sizeof(nid.szTip[0]) - 1);
-    Shell_NotifyIconW(NIM_ADD, &nid);
+    // NR-058: the tray icon's existence is what later NIM_MODIFY balloons key
+    // off; record whether NIM_ADD actually landed.
+    g_tray_icon_active = Shell_NotifyIconW(NIM_ADD, &nid);
 }
 
 void RemoveTrayIcon(HWND window) {
@@ -1788,6 +1877,23 @@ void ShowHotkeyConflictNotice(HWND window) {
     wcsncpy(nid.szInfo,
         L"Alt+Space is already in use. Open Settings to choose another global hotkey.",
         sizeof(nid.szInfo) / sizeof(nid.szInfo[0]) - 1);
+    nid.dwInfoFlags = NIIF_NONE;
+    Shell_NotifyIconW(NIM_MODIFY, &nid);
+}
+
+// NR-058: single non-blocking balloon for startup store-load failures
+// (design-spec §10.4/§11). Same NOTIFYICONDATAW info-balloon filling as
+// ShowHotkeyConflictNotice. The caller clears the flags after sending, so a
+// process shows at most one such balloon.
+void ShowLoadIssueNotice(HWND window, const std::wstring& text) {
+    NOTIFYICONDATAW nid{};
+    nid.cbSize = sizeof(nid);
+    nid.hWnd = window;
+    nid.uID = kTrayIconId;
+    nid.uFlags = NIF_INFO;
+    wcsncpy(nid.szInfoTitle, L"NimbleRun", sizeof(nid.szInfoTitle) / sizeof(nid.szInfoTitle[0]) - 1);
+    wcsncpy(nid.szInfo, text.c_str(),
+            sizeof(nid.szInfo) / sizeof(nid.szInfo[0]) - 1);
     nid.dwInfoFlags = NIIF_NONE;
     Shell_NotifyIconW(NIM_MODIFY, &nid);
 }
@@ -2161,7 +2267,8 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
         // NR-011 restarts the watchers and rebuilds (roots/extensions changed).
         if (g_settings_store && g_usage) {
             const bool applied = nimblerun::ShowSettingsDialog(window, *g_settings_store,
-                                                       *g_usage, g_hotkey, g_log_directory);
+                                                       *g_usage, g_hotkey, g_log_directory,
+                                                       g_diag);
             // Reload so the live panel picks up hide-after-launch without
             // waiting for a restart (recent_count/theme apply on next launch).
             nimblerun::Settings reloaded;
@@ -2660,6 +2767,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         CloseHandle(mutex);
         return 1;
     }
+    g_main_window = window;
 
     // NR-044: let DWM round the panel's corners so it matches the Windows 11
     // flyouts and the panel's own 6 DIP search box (design-spec §4.9). The
@@ -2678,7 +2786,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     // only when every source in a generation has reported.
     nimblerun::Settings settings = nimblerun::DefaultSettings();
     nimblerun::SettingsStore settings_store(nimblerun::DefaultSettingsDir());
-    settings_store.Load(settings);
+    // NR-058: the result is kept until the diagnostic log exists; the flags and
+    // the log line are handled after g_diag is created below.
+    const nimblerun::SettingsLoadResult settings_result = settings_store.Load(settings);
     g_settings_store = &settings_store;
     g_settings = settings;
     g_hide_after_launch = settings.hide_after_launch;
@@ -2692,7 +2802,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     }
 
     nimblerun::UsageStore usage(nimblerun::DefaultSettingsDir());
-    usage.Load();
+    const nimblerun::UsageLoadResult usage_result = usage.Load();
     g_usage = &usage;
 
     // NR-054: design-spec §10.1 puts the log at logs\nimblerun.log, not beside
@@ -2702,6 +2812,20 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     g_log_directory = nimblerun::JoinPath(nimblerun::DefaultSettingsDir(), L"logs");
     nimblerun::DiagnosticLog diag(g_log_directory, L"nimblerun.log");
     g_diag = &diag;
+
+    // NR-058: settings/usage load failures surface now that the log exists (the
+    // log is created after those loads; the initialization order is unchanged).
+    // Every non-Loaded result gets one line -- Missing included, since "this
+    // file never existed" is exactly what triage wants to know. The balloon
+    // itself waits until the tray icon exists.
+    if (settings_result != nimblerun::SettingsLoadResult::Loaded) {
+        g_store_load_issues |= StoreLoadIssueFor(settings_result);
+        LogStoreLoad(L"settings_load", StoreLoadResultName(settings_result));
+    }
+    if (usage_result != nimblerun::UsageLoadResult::Loaded) {
+        g_store_load_issues |= StoreLoadIssueFor(usage_result);
+        LogStoreLoad(L"usage_load", StoreLoadResultName(usage_result));
+    }
 
     // NR-018: the pin store is reloaded and reconciled in RefreshPins(); only
     // the (non-owning) pointer is kept so the model and host share one store.
@@ -2793,6 +2917,18 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
                           L"error " + std::to_wstring(hotkey_result.error));
         }
         ShowHotkeyConflictNotice(window);
+    }
+    // NR-058: the tray icon is in place (AddTrayIcon above ran NIM_ADD on this
+    // HWND/uID), so any startup store-load failure -- settings, usage, or a pin
+    // issue detected by the startup RefreshPanelSnapshot -- surfaces now as one
+    // balloon. Sent after the hotkey notice so it is not the one clobbered if
+    // both fire. Cleared afterwards: a process notifies at most once.
+    if (g_store_load_issues != 0) {
+        const std::wstring text = nimblerun::StoreLoadNoticeText(g_store_load_issues);
+        if (!text.empty()) {
+            ShowLoadIssueNotice(window, text);
+        }
+        g_store_load_issues = 0;
     }
 
     // NR-011: kick off the background full rebuild now that the panel can serve

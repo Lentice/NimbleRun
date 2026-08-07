@@ -1,6 +1,7 @@
 #include "app_host/settings_dialog.h"
 
 #include "app_host/hotkey.h"
+#include "diagnostics/diagnostic_log.h"
 #include "resources/resource.h"
 #include "settings/settings_editor.h"
 #include "settings/settings_store.h"
@@ -362,9 +363,31 @@ INT_PTR CALLBACK SettingsDialogProc(HWND dialog, UINT message, WPARAM w_param, L
 } // namespace
 
 bool ShowSettingsDialog(HWND owner, SettingsStore& store, UsageStore& usage,
-                        GlobalHotkey& hotkey, const std::wstring& log_directory) {
+                        GlobalHotkey& hotkey, const std::wstring& log_directory,
+                        DiagnosticLog* diag) {
     Settings current = DefaultSettings();
-    store.Load(current);
+    // NR-058: the dialog's own re-read surfaces what it shows; only a log line,
+    // never a balloon. The switch keeps every load result accounted for.
+    const SettingsLoadResult load_result = store.Load(current);
+    switch (load_result) {
+    case SettingsLoadResult::Loaded:
+        break;
+    case SettingsLoadResult::Missing:
+        if (diag) {
+            diag->Write(L"settings_load", L"result=Missing");
+        }
+        break;
+    case SettingsLoadResult::Corrupt:
+        if (diag) {
+            diag->Write(L"settings_load", L"result=Corrupt");
+        }
+        break;
+    case SettingsLoadResult::NewerSchema:
+        if (diag) {
+            diag->Write(L"settings_load", L"result=NewerSchema");
+        }
+        break;
+    }
     SettingsEditor editor(current);
 
     DialogContext context;

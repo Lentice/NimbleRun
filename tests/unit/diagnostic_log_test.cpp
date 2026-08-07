@@ -1,4 +1,5 @@
 #include "diagnostics/diagnostic_log.h"
+#include "diagnostics/load_notice.h"
 #include "storage/atomic_text_file.h"
 
 #include <windows.h>
@@ -257,6 +258,43 @@ void TestConcurrentWritesNeverInterleave() {
     RemoveTreeBestEffort(root);
 }
 
+// NR-058: the notice text is the pure decision behind the balloon. None -> no
+// text; corrupt/too-new each have their sentence; both bits -> both sentences.
+void TestStoreLoadNoticeText() {
+    using nimblerun::StoreLoadIssue;
+    const unsigned corrupt = static_cast<unsigned>(StoreLoadIssue::Corrupt);
+    const unsigned too_new = static_cast<unsigned>(StoreLoadIssue::TooNew);
+
+    const std::wstring none = nimblerun::StoreLoadNoticeText(0);
+    Expect(none.empty(), "no issues -> empty text (nothing to notify)");
+
+    const std::wstring only_corrupt = nimblerun::StoreLoadNoticeText(corrupt);
+    Expect(only_corrupt.find(L"Some settings could not be read and were reset") !=
+               std::wstring::npos,
+           "corrupt-only notice mentions the reset settings");
+    Expect(only_corrupt.find(L".corrupt suffix") != std::wstring::npos,
+           "corrupt-only notice points at the .corrupt files");
+    Expect(only_corrupt.find(L"written by a newer version") == std::wstring::npos,
+           "corrupt-only notice does not mention a newer version");
+
+    const std::wstring only_too_new = nimblerun::StoreLoadNoticeText(too_new);
+    Expect(only_too_new.find(L"written by a newer version of NimbleRun") !=
+               std::wstring::npos,
+           "too-new-only notice mentions the newer version");
+    Expect(only_too_new.find(L"left unchanged") != std::wstring::npos,
+           "too-new-only notice says the originals were left unchanged");
+    Expect(only_too_new.find(L"Some settings could not be read") == std::wstring::npos,
+           "too-new-only notice does not mention reset settings");
+
+    const std::wstring both = nimblerun::StoreLoadNoticeText(corrupt | too_new);
+    Expect(both.find(L"Some settings could not be read and were reset") !=
+               std::wstring::npos,
+           "combined notice includes the corrupt sentence");
+    Expect(both.find(L"written by a newer version of NimbleRun") !=
+               std::wstring::npos,
+           "combined notice includes the too-new sentence");
+}
+
 } // namespace
 
 int wmain() {
@@ -266,6 +304,7 @@ int wmain() {
     TestWritesIntoLogsSubdirectory();
     TestRotationStaysInsideLogsSubdirectory();
     TestConcurrentWritesNeverInterleave();
+    TestStoreLoadNoticeText();
     std::printf("NR-017 diagnostic log check PASSED\n");
     return 0;
 }
