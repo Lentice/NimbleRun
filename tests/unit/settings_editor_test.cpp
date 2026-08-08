@@ -300,6 +300,22 @@ void TestHotkeyParseFormat() {
 
     Expect(ParseHotkey(L"Ctrl+Alt+Space+Extra", binding) == false, "extra token rejected");
     Expect(ParseHotkey(L"Win+R", binding) == false, "Windows-key rejected at parse");
+    Expect(ParseHotkey(L"Win+Tab", binding) == false, "Win+Tab rejected at parse (regression)");
+}
+
+// NR-086: shell-reserved combinations (task switching / Start menu) must be
+// rejected at parse time -- RegisterHotKey accepts them, so the registration
+// guard can never catch them (design-spec §4.1).
+void TestHotkeyRejectsShellReservedCombos() {
+    HotkeyBinding binding{};
+    Expect(ParseHotkey(L"Alt+Tab", binding) == false, "Alt+Tab rejected: would hijack window switching");
+    Expect(ParseHotkey(L"Alt+Esc", binding) == false, "Alt+Esc rejected: would hijack window cycling");
+    Expect(ParseHotkey(L"Ctrl+Esc", binding) == false, "Ctrl+Esc rejected: would hijack the Start menu");
+    Expect(ParseHotkey(L"Alt+Space", binding), "Alt+Space still parses");
+    Expect(ParseHotkey(L"Ctrl+Alt+Space", binding), "Ctrl+Alt+Space still parses");
+    Expect(ParseHotkey(L"Ctrl+Shift+Esc", binding), "Ctrl+Shift+Esc (Task Manager) still parses");
+    Expect(ParseHotkey(L"Shift+Alt+Tab", binding), "Shift+Alt+Tab variant still parses");
+    Expect(ParseHotkey(L"Alt+F4", binding), "Alt+F4 is an app-level convention, not blocked");
 }
 
 void TestResetRestoresDefaults() {
@@ -416,6 +432,7 @@ int wmain() {
     TestApplyHotkeyRejected();
     TestInvalidHotkeyRejectedWithoutPersisting();
     TestHotkeyParseFormat();
+    TestHotkeyRejectsShellReservedCombos();
     TestResetRestoresDefaults();
     TestClearUsageOnly();
     TestClearUsageFailureRestoresRecords();

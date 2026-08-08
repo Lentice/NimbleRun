@@ -230,6 +230,23 @@ bool ParseHotkey(std::wstring_view text, HotkeyBinding& out) {
         return false;
     }
 
+    // NR-086: shell-reserved combinations (task switching / Start menu).
+    // RegisterHotKey never fails on these -- Alt+Tab is implemented by the
+    // shell's own keyboard handling, not by the SAS reserved list -- so the
+    // "reject when registration fails" guard (design-spec §4.1) cannot catch
+    // them; letting Alt+Tab through would steal Windows' window switching
+    // from a resident tray process with no clean way back. Only these three
+    // shell combos are blocked: Ctrl+Alt+Del is rejected by the OS, Win
+    // combos are rejected above, Alt+F4 is an app-level convention rather
+    // than a shell reservation.
+    if ((modifiers & ~MOD_NOREPEAT) == MOD_ALT &&
+        (virtual_key == VK_TAB || virtual_key == VK_ESCAPE)) {
+        return false;
+    }
+    if ((modifiers & ~MOD_NOREPEAT) == MOD_CONTROL && virtual_key == VK_ESCAPE) {
+        return false;
+    }
+
     out.modifiers = modifiers | MOD_NOREPEAT;
     out.virtual_key = virtual_key;
     return true;
