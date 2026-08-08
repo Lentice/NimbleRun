@@ -621,7 +621,14 @@ int CellAtPoint(HWND window, int x, int y) {
         }
         const int col = (x - grid_left) / cell_width;
         const int row = (y - layout.list_top) / cell_height;
-        if (col < 0 || col >= columns || row < 0) {
+        // NR-082: when ClampWindowSize shortens the panel (small screen + high
+        // DPI), the last painted row ends before the footer, so the NR-064
+        // footer bound alone leaves a strip that maps to rows beyond the
+        // viewport -- and a click there launched an app in an unpainted cell
+        // (design-spec §4.8 "滑鼠命中僅限實際繪製的可見格／列"). ViewportRows()
+        // is the UpdateViewportRows-derived count of actually painted rows.
+        if (col < 0 || col >= columns || row < 0 ||
+            row >= g_model->ViewportRows()) {
             return -1;
         }
         const int index = g_model->FirstVisibleRow() + row * columns + col;
@@ -632,8 +639,14 @@ int CellAtPoint(HWND window, int x, int y) {
     if (x < layout.list_left || x >= layout.list_right) {
         return -1;
     }
-    const int index =
-        (y - layout.list_top) / layout.row_height + g_model->FirstVisibleRow();
+    // NR-082: same clamp-shrunk gap as the grid branch -- only rows the model
+    // actually paints may be hit; the row below the last painted one used to
+    // select and launch an invisible result.
+    const int row_index = (y - layout.list_top) / layout.row_height;
+    if (row_index >= g_model->ViewportRows()) {
+        return -1;
+    }
+    const int index = row_index + g_model->FirstVisibleRow();
     return index >= 0 && index < static_cast<int>(g_model->Rows().size()) ? index : -1;
 }
 
