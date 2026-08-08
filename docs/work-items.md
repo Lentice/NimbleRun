@@ -121,6 +121,7 @@
 | NR-082 | CellAtPoint 在面板高度被 clamp 時命中未繪製的列 | 3 | `done` | NR-064 | [NR-082](work-items/NR-082-hittest-clamped-panel.md) |
 | NR-083 | 建一次 stable_id 索引，取代熱鍵路徑上三次全 catalog 線性掃描 | 3 | `done` | — | [NR-083](work-items/NR-083-catalog-index-hotkey-path.md) |
 | NR-084 | 格狀翻頁永遠碰不到最後一頁的尾端項目 | 3 | `done` | — | [NR-084](work-items/NR-084-grid-tail-unreachable.md) |
+| NR-085 | 搜尋框持有焦點時，點擊面板外不會自動隱藏面板 | 3 | `done` | — | [NR-085](work-items/NR-085-outside-click-hide.md) |
 | NR-090 | AppsFolder 中途列舉失敗不得提交部分結果 | 2 | `done` | NR-006, NR-011, NR-063 | [NR-090](work-items/NR-090-appsfolder-mid-enumeration-failure.md) |
 
 ## Dependency lanes
