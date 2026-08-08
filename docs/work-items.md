@@ -117,6 +117,8 @@
 | NR-078 | Context Menu／Shift+F10 開啟選取列的項目選單 | 3 | `done` | — | [NR-078](work-items/NR-078-keyboard-item-menu.md) |
 | NR-079 | 較新 schema 的 catalog.cache 不被 rebuild 覆寫 | 3 | `done` | — | [NR-079](work-items/NR-079-catalog-cache-newer-schema-preserve.md) |
 | NR-080 | SettingsStore／UsageStore Load 損壞時不得洩漏部分狀態 | 3 | `done` | — | [NR-080](work-items/NR-080-store-load-partial-state.md) |
+| NR-081 | ShowPanel 的 on-demand AppsFolder refresh 不得取代進行中的 rebuild 世代 | 3 | `done` | NR-011, NR-063 | [NR-081](work-items/NR-081-appsfolder-on-demand-supersedes-rebuild.md) |
+| NR-082 | CellAtPoint 在面板高度被 clamp 時命中未繪製的列 | 3 | `ready` | NR-064 | [NR-082](work-items/NR-082-hittest-clamped-panel.md) |
 
 ## Dependency lanes
 
@@ -191,6 +193,16 @@ NR-079（catalog.cache 較新 schema）── 獨立
 NR-080（settings/usage 部分狀態）── 獨立；與 NR-072 同「非 Loaded 則空」契約主題
 ```
 
+## 稽核修補 lane 4（NR-081～NR-082，2026-08-08 第五次全 repo 稽核產出）
+
+```
+NR-081（on-demand AppsFolder 取代進行中 rebuild）── 無依賴，最先做；catalog 收縮
+        ＋ usage 資料損失（HIGH）；修 coordinator 的 ShouldRefreshAppsFolder 守門
+NR-082（CellAtPoint clamp 後命中未繪製列）── 獨立；覆寫 NR-064 Decisions §1
+        （新證據：面板高度被 clamp 時繪製範圍不再止於 footer）；修 CellAtPoint 加
+        viewport 下界，NR-064 其餘決策沿用
+```
+
 ## 已否決的方向 — 不要重開
 
 寫新 item 前先讀這節（[AGENTS.md](../AGENTS.md) §Work item authoring rules 要求）。以下方向都已有明確依據被否決；**要重開是允許的，但新 item 內必須寫出覆寫與新證據**，不要在此節之外默默開一個。此節只收「有依據的否決」，純粹的優先序取捨屬於下面的 §計畫決策紀錄。
@@ -204,6 +216,38 @@ NR-080（settings/usage 部分狀態）── 獨立；與 NR-072 同「非 Load
 | 把 FR-004a 的 program-like 判準套用到 FR-005 使用者自訂資料夾 | `docs/design-spec.md:354` | 明文「此判準**不套用於** FR-005 的使用者自訂資料夾」。該來源的把關者是使用者自己勾選的副檔名清單；二次過濾會無聲擋掉使用者手動加入的副檔名。 |
 
 ## 計畫決策紀錄
+
+- 2026-08-08（NR-081～NR-082 ready，第五次全 repo 稽核產出）：backlog 清空後對整個
+  repo 做第五輪稽核（正確性／穩健性、spec 對照），主 Agent 從頭到尾重讀
+  `main.cpp`（3,270 行）與全部模組，聚焦先前四輪未覆蓋的「世代取代時機」與
+  「clamp 後幾何」兩個邊角，收斂成 2 個 item。**NR-081（HIGH）**——`ShowPanel`
+  的 on-demand AppsFolder refresh（`main.cpp:1960-1963`）不檢查 `IsRebuildInProgress`，
+  而 `BeginGeneration` 的新世代會把進行中完整重建的 StartMenu／UserFolder 結果當
+  stale 丟棄（`catalog_refresh.cpp:90-92`）；`last_appsfolder_success_ms_` 初始 0
+  （`catalog_refresh.h:102`）使機器開機 >10 分鐘時**第一次** ShowPanel 就觸發——
+  首啟動競賽（按 Alt+Space 早於背景完整重建完成）或 Ctrl+R 後立刻按 Alt+Space，
+  都會讓 merged snapshot 收縮成只剩 Store App、`RefreshPanelSnapshot` 對空掉的
+  來源跑 `g_usage->Reconcile` **永久刪除 usage.tsv 紀錄**、`SaveCatalogCache` 把
+  收縮版寫進 cache，且無 watcher 事件可自癒。修在 coordinator 的
+  `ShouldRefreshAppsFolder` 加 `IsRebuildInProgress()` 守門（可測、單一出口、
+  ShowPanel 一字不改）。**為什麼不那樣做**：不改 ShowPanel guard（守門分散到呼叫端）；
+  不 baseline `last_appsfolder_success_ms_`（會壓掉「啟動重建的 AppsFolder 失敗→
+  下次 ShowPanel 重試」的 §FR-008 語意）；不讓 StartRebuild 合併進行中來源結果
+  （watcher 路徑的取代有 `pending_` 自癒，唯一該改的是「不該取代的時機」）。
+  **NR-082（MEDIUM）**——NR-064 只補 `y >= footer_top` 幾何上界，前提「grid 4 列／
+  list 8 列都止於 456 DIP」只在面板全高成立；`ClampWindowSize` 在小螢幕＋高 DPI
+  把面板夾短後，最後一列提早結束，`footer_top` 到 client 底邊的空白帶被
+  `CellAtPoint` 當有效 index，單擊啟動看不見的 App（§4.8 明令命中僅限實際繪製的
+  格／列）。修法：在 `CellAtPoint` 的 grid/list 分支各加
+  `row >= ViewportRows()` 下界，與既有三條幾何檢查並存——**覆寫** NR-064
+  Decisions §1「不寫第二套可見列數判斷」的決策（新證據：clamp 後繪製範圍不再
+  止於 footer），其餘 NR-064 決策（修在唯一入口、呼叫端不改、不加測試抽象）
+  沿用。**未成 item 的低嚴重度發現**（記錄備查）：高度被 clamp 時 footer 鍵位框
+  （462~482 DIP）落在 client（約 437 DIP）之外被裁掉，屬 `ClampWindowSize` 與
+  footer 幾何的版面設計決策，非 hit-test 範圍；`PrewarmEmptyStatePage` 不把 key
+  寫入 `g_pending_icon_keys` 使 prewarm 與 Render 可能重複 post 同一 key
+  （結果都進 LRU，無 reflow，僅多一次 Shell fetch）。兩者都未達 item 門檻。
+  兩個新 item 皆無依賴、皆 `ready`。未 commit。
 
 - 2026-08-08（NR-072～NR-080 planned，第四次全 repo 稽核產出）：backlog 清空後對整個
   repo 做了第四輪四軸稽核（正確性／穩健性、spec 對照、執行緒與生命週期、不受信輸入），
