@@ -93,14 +93,19 @@ void ProcessFile(const std::wstring& path, DWORD find_attributes, std::vector<Ap
     out.push_back(std::move(entry));
 }
 
-void ScanDirectory(const std::wstring& directory, bool recursive,
+// Returns false only when the walk started but did not finish cleanly
+// (NR-092): a mid-walk FindNextFileW failure, including a recursive child's,
+// poisons the whole source so the caller keeps the old entries. A missing or
+// unreadable directory is still a clean skip (NR-063 empty-walk success).
+bool ScanDirectory(const std::wstring& directory, bool recursive,
                    const std::vector<std::wstring>& extensions, std::vector<AppEntry>& out) {
     const std::wstring pattern = directory + L"\\*";
     WIN32_FIND_DATAW find_data{};
     const HANDLE find = FindFirstFileW(pattern.c_str(), &find_data);
     if (find == INVALID_HANDLE_VALUE) {
-        return;  // missing/unreadable directory: skip this subtree, keep others
+        return true;  // missing/unreadable directory: skip this subtree, keep others
     }
+    bool failed = false;
     do {
         const std::wstring name = find_data.cFileName;
         if (name == L"." || name == L"..") {
@@ -111,7 +116,9 @@ void ScanDirectory(const std::wstring& directory, bool recursive,
             if (recursive && (find_data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0) {
                 // ponytail: junctions/symlinks are not followed so a loop cannot
                 // recurse forever (design-spec §FR-005).
-                ScanDirectory(full, recursive, extensions, out);
+                if (!ScanDirectory(full, recursive, extensions, out)) {
+                    failed = true;  // NR-092: a child's failure must reach the caller
+                }
             }
             continue;
         }
@@ -120,13 +127,20 @@ void ScanDirectory(const std::wstring& directory, bool recursive,
         }
         ProcessFile(full, find_data.dwFileAttributes, out);
     } while (FindNextFileW(find, &find_data) != FALSE);
+    // NR-092: FALSE is a clean end only when it means the list ran out; any
+    // other error (I/O, access) means this directory was not fully read, so the
+    // collected prefix must not be committed as a complete source.
+    if (GetLastError() != ERROR_NO_MORE_FILES) {
+        failed = true;
+    }
     FindClose(find);
+    return !failed;
 }
 
 } // namespace
 
-std::vector<AppEntry> EnumerateUserFolderCatalog(const Settings& settings) {
-    std::vector<AppEntry> out;
+UserFolderEnumerateResult EnumerateUserFolderCatalog(const Settings& settings) {
+    UserFolderEnumerateResult result;
     std::vector<std::wstring> extensions = settings.catalog_extensions;
     if (extensions.empty()) {
         extensions = DefaultExtensions();  // full allowlist (design-spec §FR-005)
@@ -140,9 +154,11 @@ std::vector<AppEntry> EnumerateUserFolderCatalog(const Settings& settings) {
         }
         // ponytail: duplicate roots are scanned once each, so a root listed
         // twice yields duplicate entries; NR-007 dedups across sources.
-        ScanDirectory(root.path, root.recursive, extensions, out);
+        if (!ScanDirectory(root.path, root.recursive, extensions, result.entries)) {
+            result.source_ok = false;  // NR-092: mid-walk failure: keep old entries
+        }
     }
-    return out;
+    return result;
 }
 
 } // namespace nimblerun

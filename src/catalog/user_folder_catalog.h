@@ -8,6 +8,19 @@
 
 namespace nimblerun {
 
+// Result of one UserFolder enumeration pass. entries are plain copyable
+// AppEntry values with no Shell COM pointer retained. source_ok is false when
+// an open directory's walk failed mid-enumeration (a FindNextFileW error other
+// than the clean ERROR_NO_MORE_FILES end, including a recursive child's,
+// NR-092); the caller keeps the source's old entries in that case
+// (design-spec §FR-008). Missing, unreadable and non-local roots, bad
+// subdirectories and anomalous files are still clean skips that never clear
+// source_ok (NR-063).
+struct UserFolderEnumerateResult {
+    std::vector<AppEntry> entries;
+    bool source_ok = true;
+};
+
 // Enumerates launchable apps from every user-configured local folder in
 // `settings` (design-spec §FR-005). Each CatalogRoot's `recursive` flag
 // controls subfolder scanning; only files whose extension is in
@@ -17,9 +30,7 @@ namespace nimblerun {
 // without extension, source_path and launch_identity equal to the full file
 // path (Shell-launchable), and a stable id hashed from that path (§10.3).
 // .exe/.cmd/.bat must be readable regular files; .lnk/.appref-ms are kept for
-// Shell validation at launch time. A missing, unreadable or non-local root, a
-// bad subdirectory, or an anomalous file is skipped without aborting or
-// clearing the other roots' results.
-std::vector<AppEntry> EnumerateUserFolderCatalog(const Settings& settings);
+// Shell validation at launch time.
+UserFolderEnumerateResult EnumerateUserFolderCatalog(const Settings& settings);
 
 } // namespace nimblerun

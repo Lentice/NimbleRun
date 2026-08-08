@@ -128,6 +128,7 @@
 | NR-089 | 設定頁快速鍵改為唯讀顯示＋按鍵擷取小對話框 | 4 | `done` | NR-088 | [NR-089](work-items/NR-089-hotkey-capture-dialog.md) |
 | NR-090 | AppsFolder 中途列舉失敗不得提交部分結果 | 2 | `done` | NR-006, NR-011, NR-063 | [NR-090](work-items/NR-090-appsfolder-mid-enumeration-failure.md) |
 | NR-091 | Start Menu 中途列舉失敗不得提交部分結果 | 2 | `done` | NR-005, NR-011, NR-063 | [NR-091](work-items/NR-091-start-menu-mid-enumeration-failure.md) |
+| NR-092 | UserFolder 中途列舉失敗不得提交部分結果 | 2 | `done` | NR-011, NR-019, NR-063 | [NR-092](work-items/NR-092-user-folder-mid-enumeration-failure.md) |
 
 ## Dependency lanes
 

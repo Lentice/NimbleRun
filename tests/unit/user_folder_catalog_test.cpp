@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -65,6 +66,33 @@ void RemoveTreeBestEffort(const std::wstring& path) {
     }
 }
 
+// NR-092: the mid-walk failure path is an OS-level FindNextFileW error that a
+// unit test cannot inject without a fake filesystem layer, so the runnable
+// guard is a source-code sanity check pinning the clean-end/failure branch and
+// the worker handoff to the source failure route. Locates the repo root from
+// the test executable (built under <repo>/build/tests).
+std::wstring FindRepoRoot() {
+    wchar_t exe[MAX_PATH];
+    const DWORD length = GetModuleFileNameW(nullptr, exe, MAX_PATH);
+    std::wstring dir = length == 0 ? L"" : std::wstring(exe, length);
+    for (int depth = 0; depth < 8 && !dir.empty(); ++depth) {
+        if (fs::exists(fs::path(dir) / L"src" / L"catalog" / L"user_folder_catalog.cpp")) {
+            return dir;
+        }
+        dir = fs::path(dir).parent_path().wstring();
+    }
+    return {};
+}
+
+std::string ReadSourceFile(const std::wstring& root, const std::wstring& relative) {
+    std::ifstream in(fs::path(root) / relative, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+}
+
+void ExpectContains(const std::string& content, const char* marker, const char* message) {
+    Expect(content.find(marker) != std::string::npos, message);
+}
+
 const AppEntry* FindByName(const std::vector<AppEntry>& entries, const std::wstring& name) {
     for (const AppEntry& entry : entries) {
         if (entry.display_name == name) {
@@ -117,7 +145,9 @@ void TestMergeAndAllowlist() {
     settings.catalog_roots.push_back({root_b, false});
     settings.catalog_extensions = DefaultExtensions();
 
-    const std::vector<AppEntry> entries = EnumerateUserFolderCatalog(settings);
+    const nimblerun::UserFolderEnumerateResult result = EnumerateUserFolderCatalog(settings);
+    Expect(result.source_ok, "clean multi-root walk reports source_ok");
+    const std::vector<AppEntry>& entries = result.entries;
 
     for (const AppEntry& entry : entries) {
         Expect(entry.source == AppSource::UserFolder, "merged entries source");
@@ -143,7 +173,9 @@ void TestMergeAndAllowlist() {
     Expect(entries.size() == 8, "merged entry count");
 
     // Determinism: a second run keeps the same count and the same stable ids.
-    const std::vector<AppEntry> again = EnumerateUserFolderCatalog(settings);
+    const nimblerun::UserFolderEnumerateResult again_result = EnumerateUserFolderCatalog(settings);
+    Expect(again_result.source_ok, "clean re-walk reports source_ok");
+    const std::vector<AppEntry>& again = again_result.entries;
     Expect(again.size() == entries.size(), "re-enumeration count stable");
     const AppEntry* again_a = FindByName(again, L"AppA");
     Expect(again_a != nullptr && again_a->stable_id == a->stable_id,
@@ -162,7 +194,7 @@ void TestRecursiveFlag() {
     Settings flat;
     flat.catalog_roots.push_back({root, false});
     flat.catalog_extensions = DefaultExtensions();
-    const std::vector<AppEntry> flat_entries = EnumerateUserFolderCatalog(flat);
+    const std::vector<AppEntry> flat_entries = EnumerateUserFolderCatalog(flat).entries;
     Expect(FindByName(flat_entries, L"Top") != nullptr, "flat lists first level");
     Expect(FindByName(flat_entries, L"Deep") == nullptr, "flat excludes subfolder");
     Expect(FindByName(flat_entries, L"Deeper") == nullptr, "flat excludes nested subfolder");
@@ -171,7 +203,7 @@ void TestRecursiveFlag() {
     Settings deep;
     deep.catalog_roots.push_back({root, true});
     deep.catalog_extensions = DefaultExtensions();
-    const std::vector<AppEntry> deep_entries = EnumerateUserFolderCatalog(deep);
+    const std::vector<AppEntry> deep_entries = EnumerateUserFolderCatalog(deep).entries;
     Expect(FindByName(deep_entries, L"Top") != nullptr, "recursive lists first level");
     Expect(FindByName(deep_entries, L"Deep") != nullptr, "recursive lists subfolder");
     Expect(FindByName(deep_entries, L"Deeper") != nullptr, "recursive lists nested subfolder");
@@ -193,7 +225,7 @@ void TestCaseInsensitiveExtensionsAndUnicode() {
     // Mixed-case allowlist: the enumerator matches case-insensitively.
     settings.catalog_extensions = {L".EXE", L".cmd"};
 
-    const std::vector<AppEntry> entries = EnumerateUserFolderCatalog(settings);
+    const std::vector<AppEntry> entries = EnumerateUserFolderCatalog(settings).entries;
 
     const AppEntry* calc = FindByName(entries, L"計算機");
     Expect(calc != nullptr, "unicode stem with upper-case extension listed");
@@ -236,11 +268,13 @@ void TestDuplicateRootsAndErrorIsolation() {
     settings.catalog_roots.push_back({L"\\\\server\\share", true});    // UNC rejected defensively
     settings.catalog_extensions = DefaultExtensions();
 
-    const std::vector<AppEntry> entries = EnumerateUserFolderCatalog(settings);
+    const nimblerun::UserFolderEnumerateResult result = EnumerateUserFolderCatalog(settings);
 
     CloseHandle(locked);
 
     // One bad root never clears the other roots' results.
+    Expect(result.source_ok, "missing/unreadable/non-local roots are clean skips (NR-063)");
+    const std::vector<AppEntry>& entries = result.entries;
     Expect(!entries.empty(), "other roots survive a failed root");
     Expect(CountByName(entries, L"AppA") == 2, "duplicate root scanned once each");
     Expect(CountByName(entries, L"Locked") == 0, "anomalous unreadable file skipped");
@@ -251,6 +285,19 @@ void TestDuplicateRootsAndErrorIsolation() {
     RemoveTreeBestEffort(base);
 }
 
+void TestSourceSanityCheck() {
+    const std::wstring root = FindRepoRoot();
+    Expect(!root.empty(), "repo root located from the test executable");
+    const std::string catalog = ReadSourceFile(root, L"src\\catalog\\user_folder_catalog.cpp");
+    const std::string main_src = ReadSourceFile(root, L"src\\app_host\\main.cpp");
+    ExpectContains(catalog, "ERROR_NO_MORE_FILES", "clean-end check present in the walk");
+    ExpectContains(catalog, "source_ok = false", "mid-walk failure sets source_ok false");
+    ExpectContains(main_src, "EnumerateUserFolderCatalog", "worker calls the enumerator");
+    ExpectContains(main_src, "result->failed = !res.source_ok",
+                   "worker forwards source_ok to failed");
+    ExpectContains(main_src, "ApplySourceFailure", "failed results reach the failure route");
+}
+
 } // namespace
 
 int wmain() {
@@ -258,6 +305,7 @@ int wmain() {
     TestRecursiveFlag();
     TestCaseInsensitiveExtensionsAndUnicode();
     TestDuplicateRootsAndErrorIsolation();
+    TestSourceSanityCheck();
     std::printf("NR-019 user folder catalog check PASSED\n");
     return 0;
 }

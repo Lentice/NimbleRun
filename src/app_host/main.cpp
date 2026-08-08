@@ -1321,10 +1321,15 @@ void StartRebuild(HWND window, std::vector<nimblerun::CatalogSource> sources) {
                         result->entries = std::vector<nimblerun::AppEntry>{};
                     }
                     break;
-                case nimblerun::CatalogSource::UserFolder:
-                    result->entries =
-                        nimblerun::EnumerateUserFolderCatalog(settings_snapshot);
+                case nimblerun::CatalogSource::UserFolder: {
+                    // NR-092: the enumerator reports source-level failure when an
+                    // open directory's walk fails mid-enumeration; the worker just
+                    // forwards it so the coordinator keeps the old entries.
+                    const auto res = nimblerun::EnumerateUserFolderCatalog(settings_snapshot);
+                    result->failed = !res.source_ok;
+                    result->entries = std::move(res.entries);
                     break;
+                }
                 }
             } catch (...) {
                 // NR-076: an allocation/enumeration exception must not terminate
