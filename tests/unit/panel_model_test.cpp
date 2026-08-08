@@ -2,10 +2,12 @@
 #include "search/search_engine.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 using nimblerun::AppEntry;
@@ -981,6 +983,43 @@ void TestPresentPinIsNotMissing() {
     Expect(!PanelModel::IsMissingPin(model.Rows()[0]), "a resolved pin is never reported as missing");
 }
 
+// NR-083: the host hands the model a stable_id -> catalog index so pin
+// resolution is a hash lookup instead of a full catalog scan. The indexed path
+// must produce exactly the same rows as the linear scan -- present pins
+// resolved from the catalog, absent pins as placeholders -- and clearing the
+// hint with nullptr falls back to the scan.
+void TestCatalogIndexResolvesPinsLikeScan() {
+    const std::vector<AppEntry> catalog = {
+        Entry(L"p2", L"Present"), Entry(L"other", L"Other")};
+    std::unordered_map<std::wstring_view, std::size_t> index;
+    for (std::size_t i = 0; i < catalog.size(); ++i) {
+        index.emplace(catalog[i].stable_id, i);
+    }
+    PanelModel model(&catalog, {});
+    model.SetPins({Pin(L"p1", L"Gone"), Pin(L"p2")});
+    const auto scan_rows = model.Rows();
+
+    model.SetCatalogIndex(&index);
+    model.SetPins({Pin(L"p1", L"Gone"), Pin(L"p2")});
+    Expect(model.Rows().size() == scan_rows.size(),
+           "indexed path yields the same row count as the scan");
+    Expect(model.Rows()[0].stable_id == scan_rows[0].stable_id,
+           "indexed path keeps pin order for a missing pin");
+    Expect(PanelModel::IsMissingPin(model.Rows()[0]),
+           "indexed path still synthesizes the missing pin placeholder");
+    Expect(model.Rows()[1].stable_id == scan_rows[1].stable_id,
+           "indexed path resolves a present pin to the same entry");
+    Expect(model.Rows()[1].display_name == scan_rows[1].display_name,
+           "indexed path copies the catalog entry like the scan");
+
+    model.SetCatalogIndex(nullptr);
+    model.SetPins({Pin(L"p1", L"Gone"), Pin(L"p2")});
+    Expect(model.Rows().size() == scan_rows.size(),
+           "clearing the index falls back to the linear scan");
+    Expect(model.Rows()[0].stable_id == scan_rows[0].stable_id,
+           "fallback path keeps the missing pin placeholder");
+}
+
 } // namespace
 
 int wmain() {
@@ -1048,6 +1087,7 @@ int wmain() {
     TestMissingPinKeepsOrder();
     TestMissingPinNotInSearch();
     TestPresentPinIsNotMissing();
-    std::printf("NR-010/NR-020/NR-021/NR-024/NR-029/NR-037/NR-040/NR-053/NR-061/NR-062 panel model check PASSED\n");
+    TestCatalogIndexResolvesPinsLikeScan();
+    std::printf("NR-010/NR-020/NR-021/NR-024/NR-029/NR-037/NR-040/NR-053/NR-061/NR-062/NR-083 panel model check PASSED\n");
     return 0;
 }
