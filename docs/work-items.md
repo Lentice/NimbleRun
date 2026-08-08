@@ -130,6 +130,7 @@
 | NR-091 | Start Menu 中途列舉失敗不得提交部分結果 | 2 | `done` | NR-005, NR-011, NR-063 | [NR-091](work-items/NR-091-start-menu-mid-enumeration-failure.md) |
 | NR-092 | UserFolder 中途列舉失敗不得提交部分結果 | 2 | `done` | NR-011, NR-019, NR-063 | [NR-092](work-items/NR-092-user-folder-mid-enumeration-failure.md) |
 | NR-093 | 快速鍵擷取要分別追蹤左右修飾鍵的放開狀態 | 4 | `done` | NR-089 | [NR-093](work-items/NR-093-hotkey-physical-modifier-tracking.md) |
+| NR-094 | 統一 MVP UI 語言規格，消除 English／雙語衝突 | 0 | `done` | — | [NR-094](work-items/NR-094-ui-language-source-of-truth.md) |
 
 ## Dependency lanes
 
@@ -222,6 +223,19 @@ NR-090（AppsFolder `Next()` 中途失敗被當成正常結束）── 依賴 N
         enumerator 的 `S_FALSE`／failure 分流，避免部分結果覆蓋舊 snapshot
 ```
 
+## 稽核修補 lane 6（NR-091～NR-094，2026-08-08 第八次全 repo 稽核產出）
+
+```
+NR-091（Start Menu `FindNextFileW` 中途失敗被當成正常結束）── 依賴 NR-005、NR-011、NR-063（皆 done）；HIGH；
+        只補 Win32 directory enumerator 的 clean-end／failure 分流，避免部分結果覆蓋舊 snapshot
+NR-092（UserFolder `FindNextFileW` 中途失敗沒有 source status）── 依賴 NR-011、NR-019、NR-063（皆 done）；HIGH；
+        沿用「缺失設定 root 先略過」的既有決策，只補已開啟目錄的中途失敗不得提交部分結果
+NR-093（HotkeyCaptureState 以 category bit 取代 physical modifier state）── 依賴 NR-089；MEDIUM；
+        兩個同類左右修飾鍵同時按住時，放開其中一個不得提前完成擷取
+NR-094（design-spec NFR-006 寫雙語，AGENTS／development 寫 English-only）── 無依賴；MEDIUM；
+        先釘定 MVP 唯一語言政策，再讓後續 UI／字串工作有單一依據
+```
+
 ## 已否決的方向 — 不要重開
 
 寫新 item 前先讀這節（[AGENTS.md](../AGENTS.md) §Work item authoring rules 要求）。以下方向都已有明確依據被否決；**要重開是允許的，但新 item 內必須寫出覆寫與新證據**，不要在此節之外默默開一個。此節只收「有依據的否決」，純粹的優先序取捨屬於下面的 §計畫決策紀錄。
@@ -235,6 +249,91 @@ NR-090（AppsFolder `Next()` 中途失敗被當成正常結束）── 依賴 N
 | 把 FR-004a 的 program-like 判準套用到 FR-005 使用者自訂資料夾 | `docs/design-spec.md:354` | 明文「此判準**不套用於** FR-005 的使用者自訂資料夾」。該來源的把關者是使用者自己勾選的副檔名清單；二次過濾會無聲擋掉使用者手動加入的副檔名。 |
 
 ## 計畫決策紀錄
+
+- 2026-08-09（NR-094，MVP application UI 語言決策）：產品決策——**MVP application UI 一律為英文（English-only）**。規格 `docs/design-spec.md` §NFR-006 原本寫「MVP UI 至少提供英文與繁體中文」，與 `AGENTS.md` §Language rules、`docs/development.md` §UI language 的「All user-visible NimbleRun UI text is English」矛盾；現有 `src/app_host/main.cpp` 的 `list_strings`／`footer_strings`／`dialog_strings`／`context_menu_strings`、`src/settings/settings_editor.cpp` 字串表與 `src/resources/` 皆為英文，且無 locale selector、翻譯資源或本地化測試。故 NFR-006 改寫為 English-only MVP 政策並保留「字串集中管理」規則；後續 UI item 一律以 §NFR-006 為唯一 authority，`docs/development.md` §UI language 與 `AGENTS.md` §Language rules 文字不變，三者不再互相矛盾。雙語未被否決，但屬規格層級決策：若產品需要繁體中文等第二語言，須另開實作 item 先定義 locale 來源、預設／fallback、字串資產位置與驗收語言範圍。本決策不新增任何翻譯、locale 機制、資源檔或 runtime dependency。未 commit。
+
+- 2026-08-08（NR-091～NR-094，第八次全 repo 稽核產出）：在 NR-090 修正
+  AppsFolder `IEnumShellItems::Next()` 後，重新沿著三個 catalog source 的
+  「enumerator → worker → `CatalogRefreshCoordinator` → `RefreshPanelSnapshot`」
+  流程追蹤 Win32 目錄列舉。發現 Start Menu 的 `EnumerateDirectoryRecursive()` 與
+  UserFolder 的 `ScanDirectory()` 都把 `FindNextFileW == FALSE` 直接視為正常結束，
+  沒有檢查 `GetLastError() == ERROR_NO_MORE_FILES`；前者的 `source_ok` 只看 Known
+  Folder path 是否解析，後者根本回傳 `std::vector<AppEntry>`、worker 也永遠標記成功。
+  兩條路徑都可能以部分 entries 取代舊 source snapshot，違反 §FR-008 的完整替換
+  契約，因此分成 NR-091／NR-092，不把兩種 source 的 root 語意硬抽成共用型別。
+  **NR-092 不重開 NR-063 的既有決策**：設定中的缺失 root 仍先略過；新證據只針對
+  已成功開啟目錄後的 `FindNextFileW` 中途錯誤，該次 UserFolder source 應回報失敗
+  而非提交 partial snapshot。
+  另發現 NR-089 的純狀態機以 `MOD_CONTROL` 等 category bit 保存 held state；
+  `LControl down → RControl down → E down → LControl up` 會清掉整個 bit，於
+  `RControl` 仍按住時提前完成擷取，故開 NR-093。最後，`design-spec.md` NFR-006
+  的「英文與繁體中文」與 `AGENTS.md`／`docs/development.md` 的 English-only
+  規則互相矛盾，開 NR-094 先解決文件 authority；在此之前不推導任何本地化實作。
+
+- 2026-08-08（NR-088～NR-089 planned，使用者需求討論產出）：使用者要求設定頁
+  快速鍵欄位從自由輸入文字改成「按鍵擷取」UI（唯讀顯示＋Change 按鈕開小
+  對話框，按鍵即時偵測、放開順序不拘、衝突只警告不阻擋），並要求擷取邏輯
+  支援 Win 鍵。**覆寫** `docs/design-spec.md:135`（§4.1）與 `:296-302`
+  （§FR-002）「Windows 鍵…註冊失敗一律拒絕」對 Win 鍵組合的適用性（新證據：
+  使用者明確要求可設定含 Win 鍵的快捷鍵，衝突與否由使用者自行判斷）——NR-086
+  的 shell-reserved 靜態拒絕清單（`Alt+Tab`／`Alt+Esc`／`Ctrl+Esc`）**不**
+  一併覆寫，維持硬拒絕。拆成兩個 item：**NR-088**（後端，`ParseHotkey` 放行
+  Win token＋新增 `TryRegisterHotkey` 唯讀探測函式，無 UI 改動）→
+  **NR-089**（UI，唯讀欄位＋按鍵擷取對話框，依賴 NR-088；技術上需要在對話框
+  生命週期內安裝／移除低階鍵盤 hook 才能可靠攔截 Alt/Win 等系統鍵，已用
+  GitHub 上 Wox／Flow Launcher 的既有 issue 交叉確認為業界共通做法，非本專案
+  自創）。用 grilling 技巧逐輪確認：修飾鍵判定時機（主鍵按下當下仍按住，非
+  按過即算）、不允許純修飾鍵組合、Esc 單獨按下＝取消對話框、衝突偵測雙軌
+  （靜態清單＋即時試註冊探測）、小對話框沿用既有 native Win32 dialog resource
+  做法。兩個 item 皆未開始實作。
+- 2026-08-08（NR-084～NR-086 ready，第六次全 repo 稽核產出）：backlog 清空後對
+  整個 repo 做第六輪稽核（正確性／spec 對照＋**使用者操作情境流程追蹤**），主
+  Agent 從頭重讀 `main.cpp`（3,283 行）與全部模組後，再以「顯示→輸入→點擊／
+  鍵盤→啟動→隱藏→設定→關閉」等使用者流程逐條追蹤訊息流，收斂成 3 個 item。
+  **NR-085（HIGH，最常見的關閉手勢失效）**——§4.8「點擊面板外，面板自動隱藏」
+  的唯一機制是 `WindowProc` 的 `WM_KILLFOCUS`（`main.cpp:2920-2928`），但
+  `WM_KILLFOCUS` 只送給失去鍵盤焦點的那個視窗，而 `ShowPanel` 把焦點放在搜尋
+  EDIT（`main.cpp:1979`），面板本身從未持焦——「顯示後直接點別處」與「輸入後
+  點別處」兩個高頻路徑上，焦點從 EDIT 移走、面板收到的是 `WM_ACTIVATE(WA_INACTIVE)`
+  而 `WindowProc` 沒有 `WM_ACTIVATE` 分支，面板賴在 TOPMOST 不關。修法：新增
+  `case WM_ACTIVATE`（`WA_INACTIVE` 且既有的 `g_context_menu_active`／
+  `g_dialog_active` 兩旗標皆 false → `HidePanel`），既有 `WM_KILLFOCUS` 保留
+  互補（面板自持焦的 `Alt+Tab` 路徑）。**為什麼不那樣做**：不改 EDIT subclass
+  的 `WM_KILLFOCUS`（需複製 modal 旗標判斷，且 EDIT 不知道 app 層 modal 狀態）；
+  不加單元測試（訊息層行為，依 NR-060 先例以 sanity grep＋手動驗收覆蓋）。
+  **NR-084（MEDIUM，釘選/常用 App 從空白狀態消失）**——`ClampFirstVisible`
+  （`panel_model.cpp:122-131`）「夾 `[0, RowCount-page]` 再向下取整到 columns
+  倍數」在總數不是一頁（24）整數倍時把尾端項目永久擋在視窗外：50 筆 → 上界
+  26 → 取整 24 → 可見最遠 `[24,48)`，第 49、50 筆不可達，`PgDn` 停在 24 再也
+  翻不動；鍵盤 `SelectRow(49)` 後選取落在未繪製格上、`Enter` 仍啟動看不見的
+  App。**覆寫** NR-029 引入並被 `TestGridFirstVisibleAlignedToColumns`（
+  `panel_model_test.cpp:541`，50 筆 → 24）鎖定的「尾端取整」決策（新證據：
+  §4.2「翻頁」的前提是全部項目可達）。修法：上界改
+  `max(0, (ceil(count/columns) - viewport_rows) * columns)`，允許最後一頁的
+  最後一列部分填入，spec §4.2「不得出現半列」改寫為「起點對齊整列；最後一頁
+  內容可不足一頁」。**為什麼不那樣做**：不改版面常數（頁面高度永遠完整）；
+  不改 `ScrollBy`/`EnsureSelectionVisible`（上界修正後其公式自動正確）。
+  **NR-086（MEDIUM，spec §4.1 違反）**——`ParseHotkey`（`settings_editor.cpp:
+  177-236`）只拒絕格式錯誤與 `Win` 組合，`Alt+Tab`／`Alt+Esc`／`Ctrl+Esc`
+  通過解析後 `RegisterHotKey` 對它們照樣成功（shell 用自己鍵盤處理實作
+  `Alt+Tab`，不在 SAS 保留清單），設定頁一存就把 Windows 工作切換／開始
+  功能表劫持掉。「註冊失敗一律拒絕」的防線攔不到 OS 層不失敗的組合，攔截點
+  在解析端。修法：`ParseHotkey` 組出組合後對這三組回 false（走既有
+  `HotkeyRejectedNotice`），`hotkey.cpp` 一字不改。**為什麼不那樣做**：不擴充
+  保留清單（`Alt+F4` 是應用層慣例、`Ctrl+Alt+Del` 由 OS 拒絕、`Win` 已在解析端
+  拒絕）；不加新設定/文案。**未成 item 的低嚴重度發現**（記錄備查）：(1)
+  啟動時 `RefreshPanelSnapshot` 對「cache 載入的 snapshot」先跑
+  `g_usage->Reconcile`，若 on-disk cache 比 usage 舊（cache 寫入失敗被
+  `SaveCatalogCache` 忽略回傳值、或重建中斷）會在首輪完整 rebuild 前刪掉
+  其實仍存在於 catalog 的 usage 紀錄——鏈路罕見（需 cache 落盤失敗＋該期間
+  有 launch），spec §4.2 也允許對 snapshot 對帳，未達 item 門檻；(2)
+  `PrewarmEmptyStatePage` 不把 key 寫入 `g_pending_icon_keys`，prewarm 與
+  Render 可能重複 post 同一 key（結果都進 LRU，僅多一次 Shell fetch，NR-037
+  交接區已載）。(3) 並行 agent 同時撰寫 item 造成編號碰撞：我方原取 NR-083
+  與對方 `NR-083-catalog-index-hotkey-path.md`（熱鍵路徑 catalog 索引，
+  效能類，內容零重疊）相撞，依 AGENTS.md「確認 docs/work-items/ 無該編號檔」
+  規則重編為 NR-084～NR-086，對方 item 未動。全部 3 個 item 無依賴、皆
+  `ready`。未 commit。
 
 - 2026-08-08（NR-081～NR-082 ready，第五次全 repo 稽核產出）：backlog 清空後對整個
   repo 做第五輪稽核（正確性／穩健性、spec 對照），主 Agent 從頭到尾重讀

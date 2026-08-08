@@ -546,7 +546,9 @@ MVP 設定：
 - 選取狀態不可只靠顏色表示。
 - 尊重系統高對比、文字縮放、DPI 與動畫設定。
 - 內部字串使用 UTF-16；檔案交換格式使用 UTF-8。
-- MVP UI 至少提供英文與繁體中文，若時程不足，程式碼仍須集中管理字串，不可散落硬編碼。
+- MVP application UI 一律為英文（English-only），與 `docs/development.md` §UI language 及 `AGENTS.md` §Language rules 一致；所有使用者可見 UI 文字集中管理，不可散落硬編碼。
+- 對話語言與 application UI 語言無關：本文件及開發／測試文件可使用繁體中文，但不構成任何雙語 UI 承諾。
+- 若日後決定加入繁體中文等第二語言，屬規格層級決策，須另開實作 item：先定義 locale 來源、預設／fallback、字串資產位置與驗收語言範圍，再實作翻譯；在此之前不預設任何 locale／fallback 機制。
 
 ### NFR-007 相容性
 
