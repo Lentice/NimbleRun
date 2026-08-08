@@ -125,7 +125,7 @@ bool LoadCatalogCache(const std::wstring& directory, std::vector<AppEntry>& out,
             continue;
         }
         const std::vector<std::wstring_view> fields = SplitFields(lines[i]);
-        if (fields.size() != kFieldCount) {
+        if (fields.size() < kFieldCount) {
             PreserveCorrupt(directory, kFileName);
             out.clear();
             return false;

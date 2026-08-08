@@ -50,8 +50,9 @@ PinLoadResult PinStore::Load() {
         }
         const std::vector<std::wstring_view> fields = SplitFields(line);
         // NR-062: schema=1 lines have 2 fields (no display_name); schema=2
-        // lines have 3. Anything else is still corrupt.
-        if (fields.size() != 2 && fields.size() != 3) {
+        // lines have 3. NR-087: anything with at least 2 fields loads -- a
+        // same-schema file with a future trailing field is read, not quarantined.
+        if (fields.size() < 2) {
             PreserveCorrupt(directory_, kFileName);
             pins_.clear();  // NR-072: a partial parse must not become the live file
             return PinLoadResult::Corrupt;
@@ -63,7 +64,7 @@ PinLoadResult PinStore::Load() {
             pins_.clear();  // NR-072: a partial parse must not become the live file
             return PinLoadResult::Corrupt;
         }
-        if (fields.size() == 3) {
+        if (fields.size() >= 3) {
             pin.display_name = UnescapeText(fields[2]);
         }
         // Line order is pin order, so a duplicated stable id keeps its first

@@ -46,7 +46,7 @@ UsageLoadResult UsageStore::Load() {
             continue;
         }
         const std::vector<std::wstring_view> fields = SplitFields(line);
-        if (fields.size() != 3) {
+        if (fields.size() < 3) {
             PreserveCorrupt(directory_, kFileName);
             records_.clear();  // NR-080: a partial parse must not leak into ranking
             return UsageLoadResult::Corrupt;

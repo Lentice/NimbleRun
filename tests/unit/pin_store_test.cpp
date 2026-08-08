@@ -319,6 +319,26 @@ void TestLoadSchema1File() {
     fs::remove_all(dir);
 }
 
+// NR-087: a same-schema file with an unknown trailing column (a future field
+// written by a newer build that forgot the schema bump) loads like a 3-field
+// file instead of quarantining the whole user file as corrupt.
+void TestLoadTrailingFieldsIgnored() {
+    const std::wstring dir = MakeTempDir("trailing");
+    const std::string content =
+        "schema=2\npinned_app\t1000\tPinned App\tfuture_flag\nother_app\t2000\t\tfuture_flag\n";
+    WriteBytes(dir + L"\\favorites.txt", content);
+    PinStore store(dir);
+    Expect(store.Load() == PinLoadResult::Loaded,
+           "a 4-field line loads, trailing fields are ignored");
+    Expect(SameIds(store.OrderedPins(), {L"pinned_app", L"other_app"}),
+           "both pins loaded from 4-field lines");
+    Expect(store.Records()[0].display_name == L"Pinned App",
+           "the third field is still the display name");
+    Expect(!fs::exists(dir + L"\\favorites.txt.corrupt"),
+           "trailing fields never quarantine the file");
+    fs::remove_all(dir);
+}
+
 // Pin()'s display_name round-trips through Save()/Load().
 void TestSaveRoundTripsDisplayName() {
     const std::wstring dir = MakeTempDir("displayname");
@@ -470,6 +490,7 @@ int wmain() {
     TestCorruptMidFileClearsPins();
     TestNewerSchema();
     TestLoadSchema1File();
+    TestLoadTrailingFieldsIgnored();
     TestSaveRoundTripsDisplayName();
     TestSaveWritesSchema2();
     TestAtomicWriteFailure();
