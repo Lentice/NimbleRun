@@ -124,6 +124,7 @@
 | NR-085 | 搜尋框持有焦點時，點擊面板外不會自動隱藏面板 | 3 | `done` | — | [NR-085](work-items/NR-085-outside-click-hide.md) |
 | NR-086 | 熱鍵解析接受 shell 保留組合（Alt+Tab／Alt+Esc／Ctrl+Esc） | 3 | `done` | — | [NR-086](work-items/NR-086-shell-reserved-hotkey.md) |
 | NR-087 | usage.tsv／catalog.cache 容許新增未預期的尾端欄位，而非整檔隔離 | 3 | `done` | — | [NR-087](work-items/NR-087-tsv-tolerate-trailing-fields.md) |
+| NR-088 | ParseHotkey 允許 Win 修飾鍵（降級為警告）＋新增唯讀衝突探測函式 | 4 | `done` | — | [NR-088](work-items/NR-088-hotkey-win-modifier-and-probe.md) |
 | NR-090 | AppsFolder 中途列舉失敗不得提交部分結果 | 2 | `done` | NR-006, NR-011, NR-063 | [NR-090](work-items/NR-090-appsfolder-mid-enumeration-failure.md) |
 
 ## Dependency lanes
