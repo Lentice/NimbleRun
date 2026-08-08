@@ -119,6 +119,7 @@
 | NR-080 | SettingsStore／UsageStore Load 損壞時不得洩漏部分狀態 | 3 | `done` | — | [NR-080](work-items/NR-080-store-load-partial-state.md) |
 | NR-081 | ShowPanel 的 on-demand AppsFolder refresh 不得取代進行中的 rebuild 世代 | 3 | `done` | NR-011, NR-063 | [NR-081](work-items/NR-081-appsfolder-on-demand-supersedes-rebuild.md) |
 | NR-082 | CellAtPoint 在面板高度被 clamp 時命中未繪製的列 | 3 | `done` | NR-064 | [NR-082](work-items/NR-082-hittest-clamped-panel.md) |
+| NR-090 | AppsFolder 中途列舉失敗不得提交部分結果 | 2 | `done` | NR-006, NR-011, NR-063 | [NR-090](work-items/NR-090-appsfolder-mid-enumeration-failure.md) |
 
 ## Dependency lanes
 
@@ -201,6 +202,14 @@ NR-081（on-demand AppsFolder 取代進行中 rebuild）── 無依賴，最�
 NR-082（CellAtPoint clamp 後命中未繪製列）── 獨立；覆寫 NR-064 Decisions §1
         （新證據：面板高度被 clamp 時繪製範圍不再止於 footer）；修 CellAtPoint 加
         viewport 下界，NR-064 其餘決策沿用
+```
+
+## 稽核修補 lane 5（NR-090，2026-08-08 第七次全 repo 稽核產出）
+
+```
+NR-090（AppsFolder `Next()` 中途失敗被當成正常結束）── 依賴 NR-006、NR-011、NR-063（皆 done）；HIGH；
+        `source_ok` 既有 failure path 已由 NR-063 建立，本 item 只補 Shell
+        enumerator 的 `S_FALSE`／failure 分流，避免部分結果覆蓋舊 snapshot
 ```
 
 ## 已否決的方向 — 不要重開

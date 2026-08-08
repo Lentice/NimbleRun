@@ -150,8 +150,18 @@ AppsFolderEnumerateResult EnumerateAppsFolderCatalog() {
     for (;;) {
         IShellItem* child = nullptr;
         const HRESULT next = enumerator->Next(1, &child, nullptr);
-        if (next != S_OK) {
-            break;  // S_FALSE (end of list) or error: stop this walk
+        if (next == S_FALSE) {
+            if (child != nullptr) {
+                child->Release();
+            }
+            break;  // clean end of list
+        }
+        if (next != S_OK || child == nullptr) {
+            if (child != nullptr) {
+                child->Release();
+            }
+            result.source_ok = false;  // enumerator failure: keep old entries
+            break;
         }
 
         wchar_t* raw_name = nullptr;
