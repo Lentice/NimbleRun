@@ -182,7 +182,8 @@ void TestFixtureEnumeration() {
     }
 
     std::vector<AppEntry> entries;
-    EnumerateProgramsDirectory(root, AppSource::UserStartMenu, entries);
+    Expect(EnumerateProgramsDirectory(root, AppSource::UserStartMenu, entries),
+           "clean fixture walk ends without failure");
 
     const AppEntry* notepad = FindByName(entries, L"Notepad");
     Expect(notepad != nullptr, "notepad entry present");
@@ -235,7 +236,8 @@ void TestFixtureEnumeration() {
     // Determinism: a second run produces the same stable ids.
     {
         std::vector<AppEntry> second;
-        EnumerateProgramsDirectory(root, AppSource::UserStartMenu, second);
+        Expect(EnumerateProgramsDirectory(root, AppSource::UserStartMenu, second),
+               "clean fixture re-walk ends without failure");
         Expect(second.size() == entries.size(), "re-enumeration count stable");
         const AppEntry* again = FindByName(second, L"Notepad");
         Expect(again != nullptr && again->stable_id == notepad->stable_id,
@@ -253,7 +255,11 @@ void TestFixtureEnumeration() {
 void TestMissingDirectory() {
     const std::wstring root = MakeTempDir("missing");
     std::vector<AppEntry> entries;
-    EnumerateProgramsDirectory(root + L"\\does-not-exist", AppSource::UserStartMenu, entries);
+    // NR-063: a root that cannot be opened is a clean empty walk, not a
+    // mid-walk failure (NR-091 leaves that boundary untouched).
+    Expect(EnumerateProgramsDirectory(root + L"\\does-not-exist",
+                                      AppSource::UserStartMenu, entries),
+           "missing root is a clean empty walk");
     Expect(entries.empty(), "missing root yields no entries");
     RemoveTreeBestEffort(root);
 }
@@ -261,7 +267,8 @@ void TestKnownFoldersSmoke() {
     // SHGetKnownFolderPath(FOLDERID_Programs) on a dev machine resolves to the
     // real user Start Menu; acceptable as a smoke test of the wiring only.
     // NR-063: the struct contract is pinned here too -- a live enumeration is a
-    // source-ok success regardless of entry count.
+    // source-ok success regardless of entry count. NR-091: a walk that reaches a
+    // clean ERROR_NO_MORE_FILES end must stay source_ok.
     const nimblerun::StartMenuEnumerateResult result = EnumerateStartMenuCatalog();
     Expect(result.source_ok, "live enumeration reports source_ok");
     const std::vector<AppEntry>& entries = result.entries;

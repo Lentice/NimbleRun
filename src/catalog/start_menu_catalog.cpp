@@ -186,14 +186,19 @@ void ProcessFile(const std::wstring& path, AppSource source, std::vector<AppEntr
     out.push_back(std::move(entry));
 }
 
-void EnumerateDirectoryRecursive(const std::wstring& directory, AppSource source,
+// Returns false only when the walk started but did not finish cleanly
+// (NR-091): a mid-walk FindNextFileW failure, including a recursive child's,
+// poisons the whole source so the caller keeps the old entries. A missing or
+// unreadable directory is still a clean skip (NR-063 empty-walk success).
+bool EnumerateDirectoryRecursive(const std::wstring& directory, AppSource source,
                                  std::vector<AppEntry>& out) {
     const std::wstring pattern = directory + L"\\*";
     WIN32_FIND_DATAW find_data{};
     const HANDLE find = FindFirstFileW(pattern.c_str(), &find_data);
     if (find == INVALID_HANDLE_VALUE) {
-        return;  // missing/unreadable directory: skip this subtree, keep others
+        return true;  // missing/unreadable directory: skip this subtree, keep others
     }
+    bool failed = false;
     do {
         const std::wstring name = find_data.cFileName;
         if (name == L"." || name == L"..") {
@@ -204,7 +209,9 @@ void EnumerateDirectoryRecursive(const std::wstring& directory, AppSource source
             if ((find_data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0) {
                 // ponytail: junctions/symlinks are not followed so a loop cannot
                 // recurse forever; reparse-point app dirs are not a real source.
-                EnumerateDirectoryRecursive(full, source, out);
+                if (!EnumerateDirectoryRecursive(full, source, out)) {
+                    failed = true;  // NR-091: a child's failure must reach the caller
+                }
             }
             continue;
         }
@@ -213,7 +220,14 @@ void EnumerateDirectoryRecursive(const std::wstring& directory, AppSource source
         }
         ProcessFile(full, source, out);
     } while (FindNextFileW(find, &find_data) != FALSE);
+    // NR-091: FALSE is a clean end only when it means the list ran out; any
+    // other error (I/O, access) means this directory was not fully read, so the
+    // collected prefix must not be committed as a complete source.
+    if (GetLastError() != ERROR_NO_MORE_FILES) {
+        failed = true;
+    }
     FindClose(find);
+    return !failed;
 }
 
 std::wstring KnownFolderPath(REFKNOWNFOLDERID folder) {
@@ -237,12 +251,14 @@ StartMenuEnumerateResult EnumerateStartMenuCatalog() {
     }
 
     const std::wstring user_root = KnownFolderPath(FOLDERID_Programs);
-    if (!user_root.empty()) {
-        EnumerateProgramsDirectory(user_root, AppSource::UserStartMenu, result.entries);
+    if (!user_root.empty() &&
+        !EnumerateProgramsDirectory(user_root, AppSource::UserStartMenu, result.entries)) {
+        result.source_ok = false;  // NR-091: mid-walk failure: keep old entries
     }
     const std::wstring common_root = KnownFolderPath(FOLDERID_CommonPrograms);
-    if (!common_root.empty()) {
-        EnumerateProgramsDirectory(common_root, AppSource::CommonStartMenu, result.entries);
+    if (!common_root.empty() &&
+        !EnumerateProgramsDirectory(common_root, AppSource::CommonStartMenu, result.entries)) {
+        result.source_ok = false;  // NR-091: mid-walk failure: keep old entries
     }
     // NR-063: at least one known folder resolved (even to an empty walk) is a
     // success; only when both fail is this a source-level failure. A user who
@@ -254,13 +270,13 @@ StartMenuEnumerateResult EnumerateStartMenuCatalog() {
     return result;
 }
 
-void EnumerateProgramsDirectory(const std::wstring& root, AppSource source,
+bool EnumerateProgramsDirectory(const std::wstring& root, AppSource source,
                                 std::vector<AppEntry>& out) {
     ComGuard com;
     if (!com.Usable()) {
-        return;
+        return false;  // source-level failure (design-spec §FR-008)
     }
-    EnumerateDirectoryRecursive(root, source, out);
+    return EnumerateDirectoryRecursive(root, source, out);
 }
 
 } // namespace nimblerun
