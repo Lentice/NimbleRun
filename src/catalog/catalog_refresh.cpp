@@ -59,6 +59,17 @@ std::vector<CatalogSource> CatalogRefreshCoordinator::DueSources(std::int64_t no
 }
 
 bool CatalogRefreshCoordinator::ShouldRefreshAppsFolder(std::int64_t now_ms) const {
+    // NR-081: never recommend an on-demand AppsFolder refresh while a rebuild
+    // cycle is running. BeginGeneration supersedes the in-flight generation, so
+    // a ShowPanel-triggered {AppsFolder} cycle would drop the running full
+    // rebuild's StartMenu/UserFolder results as stale (the merged snapshot
+    // collapses to packaged apps and the usage reconcile in RefreshPanelSnapshot
+    // wipes the dropped apps' records). The staleness check re-applies on the
+    // next panel show once the cycle completes (design-spec §FR-008 "下次使用者
+    // 叫出時再試"); a failed startup AppsFolder enumeration still retries then.
+    if (IsRebuildInProgress()) {
+        return false;
+    }
     return now_ms - last_appsfolder_success_ms_ >= kAppsFolderStaleMs;
 }
 

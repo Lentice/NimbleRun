@@ -237,6 +237,32 @@ void TestAppsFolderStaleness() {
            "AppsFolder older than 10 minutes is refreshed on demand");
 }
 
+// NR-081: the on-demand rule must not fire while a rebuild cycle is running --
+// BeginGeneration supersedes the in-flight generation, so a ShowPanel-triggered
+// {AppsFolder} cycle would drop the running full rebuild's StartMenu/UserFolder
+// results as stale. Once the cycle completes, the staleness check applies again.
+void TestAppsFolderStalenessSkipsRunningRebuild() {
+    CatalogRefreshCoordinator c;
+    c.RecordAppsFolderSuccess(0);
+    const std::int64_t stale = CatalogRefreshCoordinator::kAppsFolderStaleMs + 1;
+    Expect(c.ShouldRefreshAppsFolder(stale),
+           "no running rebuild: a stale AppsFolder is due for an on-demand refresh");
+
+    const std::uint64_t gen = c.BeginGeneration(
+        {CatalogSource::StartMenu, CatalogSource::AppsFolder});
+    Expect(c.IsRebuildInProgress(), "an open generation is a rebuild in progress");
+    Expect(!c.ShouldRefreshAppsFolder(stale),
+           "a running rebuild suppresses the on-demand AppsFolder refresh");
+
+    c.ApplySourceResult(gen, CatalogSource::StartMenu,
+                        {Entry(L"start", AppSource::UserStartMenu)});
+    c.ApplySourceResult(gen, CatalogSource::AppsFolder,
+                        {Entry(L"apps", AppSource::AppsFolder)});
+    Expect(!c.IsRebuildInProgress(), "the completed cycle is no longer in progress");
+    Expect(c.ShouldRefreshAppsFolder(stale),
+           "after the cycle completes the staleness check applies again");
+}
+
 // Snapshot is recomputed deterministically and atomic per swap: the caller sees
 // either the old or the new merged list, never a partial build.
 void TestSnapshotIsAtomicAndDeterministic() {
@@ -550,6 +576,7 @@ int wmain() {
     TestFailureKeepsOldSnapshot();
     TestSingleSourceFailureIsolation();
     TestAppsFolderStaleness();
+    TestAppsFolderStalenessSkipsRunningRebuild();
     TestSnapshotIsAtomicAndDeterministic();
     TestNoPartialSnapshotBeforeAllSourcesReport();
     TestSnapshotFillsNormalizedName();
