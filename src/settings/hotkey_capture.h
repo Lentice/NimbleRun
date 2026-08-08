@@ -14,6 +14,9 @@ namespace nimblerun {
 // dialog renders the result. The capture completes only after the main key
 // went down while at least one modifier was held AND every related modifier
 // has since been released, in any order (NR-089 decisions 1-3).
+// NR-093: the held state records each physical modifier key (left and right
+// variants separately), so releasing one side of a same-category pair never
+// completes the capture early; the public binding still aggregates to MOD_*.
 class HotkeyCaptureState {
 public:
     // One captured key event, valid only when captured (or invalid_press).
@@ -38,18 +41,21 @@ public:
 
     // True while at least one modifier key is held (used by the dialog to
     // distinguish a plain Esc cancel from a modifier+Esc combo).
-    bool AnyModifiersDown() const { return held_modifiers_ != 0; }
+    bool AnyModifiersDown() const { return ModifiersHeld() != 0; }
 
     // True while a capture sequence is in progress: a modifier is held or a
     // main key has been pressed. While false, the dialog passes navigation
     // keys (Tab/Enter/Space/arrows) through to its normal button handling.
-    bool Capturing() const { return held_modifiers_ != 0 || candidate_.has_value(); }
+    bool Capturing() const { return ModifiersHeld() != 0 || candidate_.has_value(); }
 
     // Starts a fresh capture sequence.
     void Reset();
 
 private:
-    UINT held_modifiers_ = 0;
+    // The MOD_* aggregate derived from the held physical keys (NR-093).
+    UINT ModifiersHeld() const;
+
+    UINT held_keys_ = 0;  // one bit per physical modifier vk_code
     std::optional<HotkeyBinding> candidate_;
 };
 

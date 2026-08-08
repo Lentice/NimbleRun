@@ -129,6 +129,41 @@ void TestShellReservedComboRejectedByParse() {
            "the shell-reserved combo is rejected at parse, not confirmable");
 }
 
+void TestSameCategoryLeftRightDoesNotCompleteEarly() {
+    // NR-093: LControl down -> RControl down -> E down -> LControl up must not
+    // complete (RControl is still held); only RControl up completes Ctrl+E.
+    HotkeyCaptureState state;
+    HotkeyCaptureState::Event event = state.OnKey(VK_LCONTROL, true);
+    event = state.OnKey(VK_RCONTROL, true);
+    event = state.OnKey(L'E', true);
+    event = state.OnKey(VK_LCONTROL, false);
+    Expect(!event.captured,
+           "releasing one Ctrl side while the other is held does not complete");
+    event = state.OnKey(VK_RCONTROL, false);
+    Expect(event.captured, "releasing the last Ctrl side completes the capture");
+    Expect(FormatHotkey(event.binding) == L"Ctrl+E",
+           "Ctrl+E is captured once both sides are up");
+}
+
+void TestRepeatedKeyDownAndRightAltVariant() {
+    // NR-093 decision 2: a repeated key-down must not add a phantom hold. Right
+    // Alt with E, a repeat of the left Alt (idempotent), then left up (capture
+    // must not complete) and right up (completes Alt+E).
+    HotkeyCaptureState state;
+    HotkeyCaptureState::Event event = state.OnKey(VK_LMENU, true);
+    event = state.OnKey(VK_RMENU, true);
+    event = state.OnKey(L'E', true);
+    event = state.OnKey(VK_LMENU, true);  // key-repeat down event
+    Expect(state.Preview() == L"Alt+E", "preview stays Alt+E after a repeat down");
+    event = state.OnKey(VK_LMENU, false);
+    Expect(!event.captured,
+           "left Alt release while right Alt is still held does not complete");
+    event = state.OnKey(VK_RMENU, false);
+    Expect(event.captured, "last Alt release completes Alt+E");
+    Expect(FormatHotkey(event.binding) == L"Alt+E",
+           "no phantom modifier leaks into the captured binding");
+}
+
 } // namespace
 
 int wmain() {
@@ -138,6 +173,8 @@ int wmain() {
     TestMainKeyWithoutModifiersIsInvalid();
     TestWinKeyCaptures();
     TestShellReservedComboRejectedByParse();
-    std::printf("NR-089 hotkey capture state check PASSED\n");
+    TestSameCategoryLeftRightDoesNotCompleteEarly();
+    TestRepeatedKeyDownAndRightAltVariant();
+    std::printf("NR-089/NR-093 hotkey capture state check PASSED\n");
     return 0;
 }
