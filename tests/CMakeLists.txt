@@ -34,12 +34,14 @@ set(NIMBLERUN_TESTS
     # matches the CTest name regex.
     "nimblerun_pinning_test|unit/pin_store_test.cpp|nimblerun_pins nimblerun_panel_model"
     "nimblerun_diagnostic_log_test|unit/diagnostic_log_test.cpp|nimblerun_diagnostics"
+    # NR-089. Named nimblerun_hotkey_capture_test so `ctest -R capture` matches.
+    "nimblerun_hotkey_capture_test|unit/hotkey_capture_test.cpp|nimblerun_settings"
 )
 
 # The exception block below must stay in its original registration position so
 # ctest test numbers do not shift; the loop is split around it.
 list(SUBLIST NIMBLERUN_TESTS 0 10 NIMBLERUN_TESTS_HEAD)
-list(SUBLIST NIMBLERUN_TESTS 10 11 NIMBLERUN_TESTS_TAIL)
+list(SUBLIST NIMBLERUN_TESTS 10 12 NIMBLERUN_TESTS_TAIL)
 
 foreach(entry IN LISTS NIMBLERUN_TESTS_HEAD)
     string(REPLACE "|" ";" parts "${entry}")

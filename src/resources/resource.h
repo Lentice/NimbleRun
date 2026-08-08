@@ -4,6 +4,7 @@
 // Control and dialog resource ids shared between the .rc template and the
 // settings dialog code (NR-013). IDOK/IDCANCEL come from windows.h/winres.h.
 #define IDD_SETTINGS 100
+#define IDD_HOTKEY_CAPTURE 102
 #define IDI_NIMBLERUN 101
 
 #define IDC_STATUS 2000
@@ -34,6 +35,10 @@
 #define IDC_INCLUDE_WINDOWS_APPS 2025
 #define IDC_FOLDERS_LABEL 2026
 #define IDC_OPEN_LOG_FOLDER 2027
+#define IDC_HOTKEY_CHANGE 2028
+#define IDC_CAPTURE_PROMPT 2029
+#define IDC_CAPTURE_DISPLAY 2030
+#define IDC_CAPTURE_STATUS 2031
 
 #ifndef IDOK
 #define IDOK 1

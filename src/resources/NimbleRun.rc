@@ -42,7 +42,8 @@ FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
     GROUPBOX        "Global hotkey", IDC_HOTKEY_GROUP, 8, 6, 304, 46
     LTEXT           "Shortcut:", IDC_HOTKEY_LABEL, 16, 18, 44, 10
-    EDITTEXT        IDC_HOTKEY_EDIT, 64, 16, 120, 13, ES_AUTOHSCROLL
+    EDITTEXT        IDC_HOTKEY_EDIT, 64, 16, 120, 13, ES_AUTOHSCROLL | ES_READONLY
+    PUSHBUTTON      "Change", IDC_HOTKEY_CHANGE, 188, 15, 50, 14
     LTEXT           "Alt+Space, Ctrl+Alt+Space, ...", IDC_HOTKEY_HINT, 64, 34, 240, 10
 
     GROUPBOX        "Launcher", IDC_LAUNCHER_GROUP, 8, 58, 304, 100
@@ -74,4 +75,16 @@ BEGIN
     DEFPUSHBUTTON   "OK", IDOK, 262, 348, 50, 14
 
     LTEXT           "", IDC_STATUS, 8, 366, 304, 10
+END
+
+IDD_HOTKEY_CAPTURE DIALOGEX 0, 0, 240, 108
+STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Change Hotkey"
+FONT 8, "MS Shell Dlg", 400, 0, 0x1
+BEGIN
+    LTEXT           "Press the key combination:", IDC_CAPTURE_PROMPT, 12, 10, 216, 10
+    LTEXT           "", IDC_CAPTURE_DISPLAY, 12, 28, 216, 16
+    LTEXT           "", IDC_CAPTURE_STATUS, 12, 50, 216, 22
+    PUSHBUTTON      "Confirm", IDOK, 128, 84, 50, 14
+    PUSHBUTTON      "Cancel", IDCANCEL, 182, 84, 50, 14
 END

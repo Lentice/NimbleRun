@@ -90,6 +90,7 @@ target_link_libraries(nimblerun_catalog
 add_library(nimblerun_settings STATIC
     src/settings/settings_store.cpp
     src/settings/settings_editor.cpp
+    src/settings/hotkey_capture.cpp
     src/settings/startup_option.cpp
 )
 

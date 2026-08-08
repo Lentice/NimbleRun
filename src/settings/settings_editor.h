@@ -49,6 +49,12 @@ enum class SettingsString {
     ResetDoneNotice,
     StartupFailedNotice,
     OpenLogFolderFailedNotice,
+    // NR-089: hotkey capture dialog (read-only hotkey field + Change button).
+    ChangeButton,
+    CaptureDialogTitle,
+    CapturePrompt,
+    CaptureInvalidNotice,
+    CaptureConflictNotice,
 };
 
 std::wstring_view SettingsStringText(SettingsString key);

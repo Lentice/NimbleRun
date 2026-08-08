@@ -3,6 +3,7 @@
 #include "app_host/hotkey.h"
 #include "diagnostics/diagnostic_log.h"
 #include "resources/resource.h"
+#include "settings/hotkey_capture.h"
 #include "settings/settings_editor.h"
 #include "settings/settings_store.h"
 #include "settings/startup_option.h"
@@ -15,6 +16,7 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -37,6 +39,9 @@ struct DialogContext {
     // NR-054: the per-user log directory (design-spec §10.1), opened by the
     // "Open log folder" button.
     std::wstring log_directory;
+    // NR-089: the read-only hotkey field's bold display font; created in
+    // WM_INITDIALOG, deleted in WM_DESTROY (never leaks across dialog opens).
+    HFONT hotkey_font = nullptr;
 };
 
 DialogContext g_dialog;
@@ -51,6 +56,176 @@ void SetStatus(HWND dialog, SettingsString key) {
 
 void SetControlText(HWND dialog, int id, SettingsString key) {
     SetDlgItemTextW(dialog, id, StringText(key).c_str());
+}
+
+// NR-089: state for the modal hotkey capture dialog. Heap-allocated for the
+// dialog's lifetime and freed in its WM_DESTROY. The low-level keyboard hook
+// reaches it through g_capture_dialog: the dialog is modal, so the hook
+// callback and the dialog proc run on the same thread and never concurrently.
+struct CaptureContext {
+    SettingsEditor* editor = nullptr;
+    HotkeyCaptureState state;
+    bool confirmable = false;                // a parseable combo has been captured
+    std::optional<HotkeyBinding> candidate;  // the captured combo, when any
+};
+
+HWND g_capture_dialog = nullptr;
+HHOOK g_capture_hook = nullptr;
+
+// NR-089: WH_KEYBOARD_LL callback for the capture dialog. Runs on the dialog's
+// thread (the modal loop pumps it). Only installed while the capture dialog is
+// open, so background operation keeps using RegisterHotKey alone (design-spec
+// §FR-002 clarification). Swallows the Windows key so the Start menu can never
+// pop during capture, and a plain Esc cancels the dialog.
+LRESULT CALLBACK CaptureKeyboardProc(int n_code, WPARAM w_param, LPARAM l_param) {
+    const bool is_down = w_param == WM_KEYDOWN || w_param == WM_SYSKEYDOWN;
+    const bool is_up = w_param == WM_KEYUP || w_param == WM_SYSKEYUP;
+    if (n_code < 0 || !g_capture_dialog || (!is_down && !is_up)) {
+        return CallNextHookEx(nullptr, n_code, w_param, l_param);
+    }
+    auto* context = reinterpret_cast<CaptureContext*>(
+        GetWindowLongPtrW(g_capture_dialog, GWLP_USERDATA));
+    if (context == nullptr) {
+        return CallNextHookEx(nullptr, n_code, w_param, l_param);
+    }
+
+    const auto* kb = reinterpret_cast<const KBDLLHOOKSTRUCT*>(l_param);
+    const UINT vk = kb->vkCode;
+    const bool is_win = vk == VK_LWIN || vk == VK_RWIN;
+
+    // NR-089 decision 7: a plain Esc (no capture in progress) cancels the
+    // dialog like Cancel; modifier+Esc falls through and becomes a combo that
+    // ParseHotkey's shell-reserved list rejects as invalid input.
+    if (is_down && vk == VK_ESCAPE && !context->state.Capturing()) {
+        PostMessageW(g_capture_dialog, WM_COMMAND, IDCANCEL, 0);
+        return 1;
+    }
+
+    // While nothing is being captured, let dialog navigation through so the
+    // Confirm/Cancel buttons stay keyboard-reachable; every other key is
+    // capture input (a bare main key is the invalid-input case).
+    if (!context->state.Capturing() && !is_win) {
+        if (vk == VK_TAB || vk == VK_RETURN || vk == VK_SPACE || vk == VK_UP ||
+            vk == VK_DOWN || vk == VK_LEFT || vk == VK_RIGHT) {
+            return CallNextHookEx(nullptr, n_code, w_param, l_param);
+        }
+    }
+
+    const HotkeyCaptureState::Event event = context->state.OnKey(vk, is_down);
+    if (event.invalid_press) {
+        context->state.Reset();
+        context->confirmable = false;
+        context->candidate.reset();
+        SetDlgItemTextW(g_capture_dialog, IDC_CAPTURE_DISPLAY, L"");
+        SetDlgItemTextW(g_capture_dialog, IDC_CAPTURE_STATUS,
+                        StringText(SettingsString::CaptureInvalidNotice).c_str());
+        EnableWindow(GetDlgItem(g_capture_dialog, IDOK), FALSE);
+    } else if (event.captured) {
+        // NR-089 decisions 4/5: the combo must round-trip through ParseHotkey
+        // (the NR-086 shell-reserved list and keys FormatHotkey cannot name
+        // make it invalid input that cannot be confirmed); a registration
+        // conflict is only a warning and stays confirmable.
+        const std::wstring text = FormatHotkey(event.binding);
+        HotkeyBinding parsed{};
+        const bool parseable = ParseHotkey(text, parsed);
+        context->confirmable = parseable;
+        context->candidate = event.binding;
+        const std::wstring notice =
+            !parseable
+                ? StringText(SettingsString::CaptureInvalidNotice)
+                : (TryRegisterHotkey(g_capture_dialog, event.binding).success
+                       ? std::wstring{}
+                       : StringText(SettingsString::CaptureConflictNotice));
+        SetDlgItemTextW(g_capture_dialog, IDC_CAPTURE_DISPLAY, text.c_str());
+        SetDlgItemTextW(g_capture_dialog, IDC_CAPTURE_STATUS, notice.c_str());
+        EnableWindow(GetDlgItem(g_capture_dialog, IDOK), parseable ? TRUE : FALSE);
+    } else {
+        const std::wstring preview = context->state.Preview();
+        if (!preview.empty()) {
+            SetDlgItemTextW(g_capture_dialog, IDC_CAPTURE_DISPLAY, preview.c_str());
+        }
+    }
+
+    if (is_win) {
+        return 1;  // swallow so the Start menu never opens mid-capture
+    }
+    return CallNextHookEx(nullptr, n_code, w_param, l_param);
+}
+
+INT_PTR CALLBACK HotkeyCaptureDialogProc(HWND dialog, UINT message, WPARAM w_param, LPARAM l_param) {
+    switch (message) {
+    case WM_INITDIALOG: {
+        SetWindowTextW(dialog, StringText(SettingsString::CaptureDialogTitle).c_str());
+        SetDlgItemTextW(dialog, IDC_CAPTURE_PROMPT,
+                        StringText(SettingsString::CapturePrompt).c_str());
+        SetDlgItemTextW(dialog, IDOK, StringText(SettingsString::OkButton).c_str());
+        SetDlgItemTextW(dialog, IDCANCEL, StringText(SettingsString::CancelButton).c_str());
+        auto* context = new CaptureContext;
+        context->editor = reinterpret_cast<SettingsEditor*>(l_param);
+        SetWindowLongPtrW(dialog, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(context));
+        g_capture_dialog = dialog;
+        EnableWindow(GetDlgItem(dialog, IDOK), FALSE);
+        g_capture_hook = SetWindowsHookExW(WH_KEYBOARD_LL, CaptureKeyboardProc,
+                                           GetModuleHandleW(nullptr), 0);
+        return TRUE;
+    }
+
+    case WM_COMMAND:
+        switch (LOWORD(w_param)) {
+        case IDOK: {
+            auto* context = reinterpret_cast<CaptureContext*>(
+                GetWindowLongPtrW(dialog, GWLP_USERDATA));
+            if (context && context->confirmable && context->candidate) {
+                // NR-089 decision 9: writing the working copy here; the main
+                // dialog's own OK performs the real Apply/Swap/persist.
+                if (!context->editor->SetHotkey(FormatHotkey(*context->candidate))) {
+                    // Unreachable: capture verified ParseHotkey. Stay open
+                    // rather than silently dropping the user's choice.
+                    SetDlgItemTextW(dialog, IDC_CAPTURE_STATUS,
+                        StringText(SettingsString::CaptureInvalidNotice).c_str());
+                    return TRUE;
+                }
+            }
+            EndDialog(dialog, IDOK);
+            return TRUE;
+        }
+
+        case IDCANCEL:
+            EndDialog(dialog, IDCANCEL);
+            return TRUE;
+        }
+        break;
+
+    case WM_CLOSE:
+        EndDialog(dialog, IDCANCEL);
+        return TRUE;
+
+    case WM_DESTROY:
+        // NR-089: every exit path funnels into EndDialog, so WM_DESTROY is the
+        // single place the hook and context are torn down -- no early return
+        // can leak the hook.
+        if (g_capture_hook) {
+            UnhookWindowsHookEx(g_capture_hook);
+            g_capture_hook = nullptr;
+        }
+        g_capture_dialog = nullptr;
+        if (auto* context = reinterpret_cast<CaptureContext*>(
+                GetWindowLongPtrW(dialog, GWLP_USERDATA))) {
+            delete context;
+            SetWindowLongPtrW(dialog, GWLP_USERDATA, 0);
+        }
+        return TRUE;
+    }
+    return FALSE;
+}
+
+// Opens the capture dialog; returns true when the user confirmed a new combo
+// (already written into the editor's working copy).
+bool ShowHotkeyCaptureDialog(HWND owner, SettingsEditor& editor) {
+    return DialogBoxParamW(GetModuleHandleW(nullptr),
+                           MAKEINTRESOURCEW(IDD_HOTKEY_CAPTURE), owner,
+                           HotkeyCaptureDialogProc,
+                           reinterpret_cast<LPARAM>(&editor)) == IDOK;
 }
 
 // All user-visible labels come from the centralized string table.
@@ -147,6 +322,34 @@ INT_PTR CALLBACK SettingsDialogProc(HWND dialog, UINT message, WPARAM w_param, L
         InitLabels(dialog);
         Populate(dialog, g_dialog.editor->Working());
         SetDlgItemTextW(dialog, IDC_STATUS, L"");
+        // NR-089: the hotkey field is a read-only display now; give it a
+        // slightly larger, bold font so it reads as a value rather than an
+        // input box. The font lives exactly as long as this dialog (deleted
+        // in WM_DESTROY).
+        {
+            const HFONT dialog_font = reinterpret_cast<HFONT>(
+                SendMessageW(dialog, WM_GETFONT, 0, 0));
+            LOGFONTW lf{};
+            if (dialog_font) {
+                GetObjectW(dialog_font, sizeof(lf), &lf);
+            }
+            if (lf.lfHeight < 0) {
+                lf.lfHeight -= 2;
+            } else {
+                lf.lfHeight += 2;
+            }
+            lf.lfWeight = FW_BOLD;
+            g_dialog.hotkey_font = CreateFontIndirectW(&lf);
+            SendMessageW(GetDlgItem(dialog, IDC_HOTKEY_EDIT), WM_SETFONT,
+                         reinterpret_cast<WPARAM>(g_dialog.hotkey_font), TRUE);
+        }
+        return TRUE;
+
+    case WM_DESTROY:
+        if (g_dialog.hotkey_font) {
+            DeleteObject(g_dialog.hotkey_font);
+            g_dialog.hotkey_font = nullptr;
+        }
         return TRUE;
 
     case WM_CLOSE:
@@ -212,6 +415,16 @@ INT_PTR CALLBACK SettingsDialogProc(HWND dialog, UINT message, WPARAM w_param, L
 
         case IDCANCEL:
             EndDialog(dialog, IDCANCEL);
+            return TRUE;
+
+        case IDC_HOTKEY_CHANGE:
+            // NR-089: the capture dialog writes the new combo into the working
+            // copy; the field is refreshed whether the user confirmed or
+            // cancelled. The real Apply/Swap/persist still happens on the main
+            // dialog's OK.
+            if (ShowHotkeyCaptureDialog(dialog, *g_dialog.editor)) {
+                Populate(dialog, g_dialog.editor->Working());
+            }
             return TRUE;
 
         case IDC_HIDE_AFTER_LAUNCH:

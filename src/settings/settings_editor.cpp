@@ -172,6 +172,18 @@ std::wstring_view SettingsStringText(SettingsString key) {
         return L"Could not update the startup entry. The previous values were kept.";
     case SettingsString::OpenLogFolderFailedNotice:
         return L"Could not open the log folder.";
+    case SettingsString::ChangeButton:
+        return L"Change";
+    case SettingsString::CaptureDialogTitle:
+        return L"Change Hotkey";
+    case SettingsString::CapturePrompt:
+        return L"Press the key combination, then release it:";
+    case SettingsString::CaptureInvalidNotice:
+        return L"That combination is not usable. Press at least one modifier "
+               L"key together with a regular key.";
+    case SettingsString::CaptureConflictNotice:
+        return L"That combination is already in use or reserved by Windows. "
+               L"You can still confirm it.";
     }
     return L"";
 }
