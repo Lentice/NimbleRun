@@ -20,6 +20,18 @@ bool SameBinding(const HotkeyBinding& left, const HotkeyBinding& right) {
 
 } // namespace
 
+HotkeyResult TryRegisterHotkey(HWND window, const HotkeyBinding& binding) {
+    // NR-088: probe under a scratch id, then release it again so the combo is
+    // left exactly as it was found. Registering the combo the app already
+    // holds fails with ERROR_HOTKEY_ALREADY_REGISTERED, which is the truthful
+    // answer to "can this be registered right now?".
+    const HotkeyResult result = RegisterBinding(window, kCaptureProbeHotkeyId, binding);
+    if (result.success) {
+        UnregisterHotKey(window, kCaptureProbeHotkeyId);
+    }
+    return result;
+}
+
 HotkeyResult GlobalHotkey::Initialize(HWND window, const HotkeyBinding& binding) {
     window_ = window;
     active_id_ = kGlobalHotkeyId;

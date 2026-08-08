@@ -168,6 +168,16 @@ void TestDirtyTrackingAndPersist() {
     Expect(loaded.include_windows_apps == false, "round-trip include_windows_apps");
     Expect(loaded.theme == Theme::Dark, "round-trip theme");
     Expect(loaded.hotkey == L"Ctrl+Shift+P", "round-trip hotkey is canonical");
+
+    // NR-088: a Win-key combo goes through the same edit -> swap -> persist ->
+    // reload path and comes back canonically (needed by NR-089's capture
+    // dialog, which must save/restore Win combos correctly).
+    Expect(editor.SetHotkey(L"Ctrl+Win+E") == true, "set a Win-key hotkey");
+    Expect(editor.Apply(store, swapper).ok, "apply the Win-key hotkey");
+    Expect(swapper.calls->size() == 2, "the Win-key hotkey was swapped in");
+    Settings reloaded;
+    Expect(store.Load(reloaded) == nimblerun::SettingsLoadResult::Loaded, "reload after Win-key save");
+    Expect(reloaded.hotkey == L"Ctrl+Win+E", "Win-key hotkey round-trips canonically");
     fs::remove_all(dir);
 }
 
@@ -265,7 +275,6 @@ void TestInvalidHotkeyRejectedWithoutPersisting() {
 
     SettingsEditor editor(initial);
     Expect(editor.SetHotkey(L"") == false, "empty combo rejected");
-    Expect(editor.SetHotkey(L"Win+R") == false, "Windows-key combo rejected");
     Expect(editor.SetHotkey(L"Space") == false, "no-modifier combo rejected");
     Expect(editor.SetHotkey(L"Alt") == false, "modifier-only rejected");
     Expect(!editor.Dirty(), "rejected combos never mark the editor dirty");
@@ -299,8 +308,12 @@ void TestHotkeyParseFormat() {
     Expect(FormatHotkey(binding) == L"Shift+F13", "F-key formatting");
 
     Expect(ParseHotkey(L"Ctrl+Alt+Space+Extra", binding) == false, "extra token rejected");
-    Expect(ParseHotkey(L"Win+R", binding) == false, "Windows-key rejected at parse");
-    Expect(ParseHotkey(L"Win+Tab", binding) == false, "Win+Tab rejected at parse (regression)");
+    // NR-088: Win-key combos parse now (they warn on conflict, they are not a
+    // syntax rejection); covered in detail by TestHotkeyParseAcceptsWinModifier.
+    Expect(ParseHotkey(L"Win+R", binding), "Win+R parses after the NR-088 relaxation");
+    // NR-088: Win combos parse now; Win+Tab is a warnable conflict, not a
+    // syntax rejection (covered by TestHotkeyParseAcceptsWinModifier).
+    Expect(ParseHotkey(L"Win+Tab", binding), "Win+Tab parses after the NR-088 relaxation");
 }
 
 // NR-086: shell-reserved combinations (task switching / Start menu) must be
@@ -316,6 +329,30 @@ void TestHotkeyRejectsShellReservedCombos() {
     Expect(ParseHotkey(L"Ctrl+Shift+Esc", binding), "Ctrl+Shift+Esc (Task Manager) still parses");
     Expect(ParseHotkey(L"Shift+Alt+Tab", binding), "Shift+Alt+Tab variant still parses");
     Expect(ParseHotkey(L"Alt+F4", binding), "Alt+F4 is an app-level convention, not blocked");
+}
+
+// NR-088: Win-key combos are no longer a syntax-level rejection; they parse to
+// MOD_WIN and format back out. The NR-086 shell-reserved list stays hard.
+void TestHotkeyParseAcceptsWinModifier() {
+    HotkeyBinding binding{};
+    Expect(ParseHotkey(L"Win+E", binding), "Win+E parses");
+    Expect((binding.modifiers & MOD_WIN) != 0, "Win+E carries MOD_WIN");
+    Expect(binding.virtual_key == L'E', "Win+E virtual key is E");
+    Expect(FormatHotkey(binding) == L"Win+E", "Win+E formats back");
+
+    Expect(ParseHotkey(L"Ctrl+Win+E", binding), "Ctrl+Win+E parses");
+    Expect((binding.modifiers & MOD_WIN) != 0 && (binding.modifiers & MOD_CONTROL) != 0,
+           "Ctrl+Win+E carries both modifiers");
+    Expect(FormatHotkey(binding) == L"Ctrl+Win+E", "Ctrl+Win+E formats back");
+
+    Expect(ParseHotkey(L"Ctrl+Alt+Win+E", binding), "Ctrl+Alt+Win+E parses");
+    Expect(FormatHotkey(binding) == L"Ctrl+Alt+Win+E",
+           "multi-modifier Win combo formats back in canonical order");
+
+    // NR-086 regression: relaxing Win must not relax the shell-reserved list.
+    Expect(ParseHotkey(L"Alt+Tab", binding) == false, "Alt+Tab still hard-rejected");
+    Expect(ParseHotkey(L"Alt+Esc", binding) == false, "Alt+Esc still hard-rejected");
+    Expect(ParseHotkey(L"Ctrl+Esc", binding) == false, "Ctrl+Esc still hard-rejected");
 }
 
 void TestResetRestoresDefaults() {
@@ -433,6 +470,7 @@ int wmain() {
     TestInvalidHotkeyRejectedWithoutPersisting();
     TestHotkeyParseFormat();
     TestHotkeyRejectsShellReservedCombos();
+    TestHotkeyParseAcceptsWinModifier();
     TestResetRestoresDefaults();
     TestClearUsageOnly();
     TestClearUsageFailureRestoresRecords();

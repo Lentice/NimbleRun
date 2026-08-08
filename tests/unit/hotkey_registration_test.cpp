@@ -136,6 +136,27 @@ int wmain() {
         Expect(IsComboFree(RareB(), 108), "RareB released after shutdown");
     }
 
+    Section("TryRegisterHotkey probe is side-effect free (NR-088)");
+    {
+        // A free combo probes as registerable and is left free afterwards: a
+        // second direct registration must also succeed, proving the probe
+        // unregistered its scratch id.
+        const auto probe = nimblerun::TryRegisterHotkey(nullptr, RareA());
+        Expect(probe.success, "a free combo probes as registerable");
+        Expect(probe.error == ERROR_SUCCESS, "probe success carries ERROR_SUCCESS");
+        Expect(IsComboFree(RareA(), 111), "the probe released its scratch registration");
+
+        // A held combo probes as a conflict without disturbing the holder.
+        Expect(RegisterHotKey(nullptr, 112, RareB().modifiers, RareB().virtual_key) != 0,
+               "test setup: RareB held");
+        const auto blocked = nimblerun::TryRegisterHotkey(nullptr, RareB());
+        Expect(!blocked.success, "a held combo probes as a conflict");
+        Expect(blocked.error == ERROR_HOTKEY_ALREADY_REGISTERED,
+               "conflict probe records ERROR_HOTKEY_ALREADY_REGISTERED");
+        Expect(!IsComboFree(RareB(), 113), "the holder was not disturbed by the probe");
+        UnregisterHotKey(nullptr, 112);
+    }
+
     Section("default Alt+Space");
     {
         // Alt+Space may be owned by another launcher on this machine. Both

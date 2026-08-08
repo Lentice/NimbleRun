@@ -109,7 +109,9 @@ std::wstring_view SettingsStringText(SettingsString key) {
     case SettingsString::HotkeyLabel:
         return L"Shortcut:";
     case SettingsString::HotkeyHint:
-        return L"Alt+Space, Ctrl+Alt+Space, ... Windows-key combos are rejected.";
+        // NR-088: Win-key combos are allowed now (they warn on conflict), so
+        // the old "rejected" claim is gone from the hint.
+        return L"Alt+Space, Ctrl+Alt+Space, Ctrl+Win+E, ...";
     case SettingsString::LauncherGroup:
         return L"Launcher";
     case SettingsString::RecentCountLabel:
@@ -199,7 +201,13 @@ bool ParseHotkey(std::wstring_view text, HotkeyBinding& out) {
             modifiers |= MOD_SHIFT;
         } else if (AreEqualCaseInsensitive(token, L"Win") ||
                    AreEqualCaseInsensitive(token, L"Windows")) {
-            return false;  // Windows-key combos are reserved (design-spec §4.1)
+            // NR-088: Windows-key combos are no longer a syntax-level
+            // rejection. They parse to MOD_WIN; conflicts (including Win-key
+            // combos) surface as a warning the user may accept or dismiss
+            // (design-spec §4.1, overridden for Win keys by the 2026-08-08
+            // user decision; the NR-086 shell-reserved list below is not
+            // relaxed by this).
+            modifiers |= MOD_WIN;
         } else {
             return false;
         }
@@ -268,6 +276,9 @@ std::wstring FormatHotkey(const HotkeyBinding& binding) {
     }
     if (binding.modifiers & MOD_SHIFT) {
         add(L"Shift");
+    }
+    if (binding.modifiers & MOD_WIN) {
+        add(L"Win");
     }
     const std::wstring key = KeyName(binding.virtual_key);
     if (!key.empty()) {
