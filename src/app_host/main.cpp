@@ -2941,6 +2941,20 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
             HidePanel(window);
         }
         return 0;
+    case WM_ACTIVATE:
+        // NR-085: ShowPanel puts focus on the search EDIT (SetFocus on the
+        // child), so the panel itself never holds keyboard focus and the
+        // WM_KILLFOCUS path above only fires for the EDIT -- which does not
+        // tell its parent. "Click outside to hide" (design-spec §4.8) was
+        // therefore dead on the two most common paths: show-then-click and
+        // type-then-click. WM_ACTIVATE(WA_INACTIVE) is the single fact that
+        // the panel was deactivated and covers every outside click while the
+        // EDIT has focus; the same two modal flags as WM_KILLFOCUS exempt the
+        // context menu and the launch-failure dialog.
+        if (w_param == WA_INACTIVE && !g_context_menu_active && !g_dialog_active) {
+            HidePanel(window);
+        }
+        return 0;
     case WM_PAINT:
         Render(window);
         return 0;
