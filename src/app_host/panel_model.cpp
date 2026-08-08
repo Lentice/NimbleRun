@@ -137,11 +137,17 @@ void PanelModel::SetGridColumns(int columns) {
 void PanelModel::ClampFirstVisible() {
     const int count = static_cast<int>(rows_.size());
     const int columns = Columns();
-    // One page holds ViewportRows() * Columns() items (NR-029); the window is
-    // clamped to the list ends and then floored down to a whole-row boundary so
-    // the grid never shows a partial row (design-spec §4.2/§4.9).
+    // NR-084: the upper bound must cover the LAST item, not "RowCount - page
+    // floored down". The old formula made the tail of a non-multiple count
+    // unreachable: 50 items with a 24-cell page clamped to 24, so items 49/50
+    // could never be scrolled into view (and keyboard selection could land on
+    // an unpainted cell). ceil(count/columns) is the last row's number; one
+    // viewport of rows below it is the largest aligned start that still covers
+    // every item, and the final row may be partially filled (design-spec
+    // §4.2: the START aligns to whole rows, the content may end short).
+    const int row_count = (count + columns - 1) / columns;
     first_visible_ = std::clamp(first_visible_, 0,
-                                std::max(0, count - viewport_rows_ * columns));
+        std::max(0, (row_count - viewport_rows_) * columns));
     first_visible_ -= first_visible_ % columns;
 }
 

@@ -538,9 +538,52 @@ void TestGridFirstVisibleAlignedToColumns() {
     Expect(model.FirstVisibleRow() == 6 && model.FirstVisibleRow() % 6 == 0,
            "one-row scroll stays aligned to whole grid rows");
     model.ScrollBy(100);  // past the tail; 50 is not a multiple of 6
-    Expect(model.FirstVisibleRow() == 24, "tail window clamps to RowCount - page");
+    // NR-084: the tail page start is the largest aligned position that still
+    // covers the last item (ceil(50/6)=9 rows, minus the 4-row viewport -> 30),
+    // not RowCount - page floored down (24, which hid items 49 and 50).
+    Expect(model.FirstVisibleRow() == 30,
+           "tail page start covers the last partial row");
     Expect(model.FirstVisibleRow() % 6 == 0,
            "tail window is floored to a whole grid row");
+}
+
+// NR-084: the tail of a non-page-multiple count must be reachable by paging
+// and by keyboard selection.
+void TestGridTailItemsReachable() {
+    const std::vector<AppEntry> catalog = CatalogOf(50);
+    PanelModel model(&catalog, catalog);
+    model.SetGridColumns(6);
+    model.SetViewportRows(4);
+    model.ScrollBy(4);  // first page
+    Expect(model.FirstVisibleRow() == 24, "first PgDn lands on page two");
+    model.ScrollBy(4);  // second page -> tail
+    Expect(model.FirstVisibleRow() == 30, "second PgDn reaches the tail page");
+    Expect(model.RowForVisibleSlot(18) == 48,
+           "item 49 is inside the tail viewport");
+    Expect(model.RowForVisibleSlot(19) == 49,
+           "the last item (50) is inside the tail viewport");
+    PanelModel keyboard(&catalog, catalog);
+    keyboard.SetGridColumns(6);
+    keyboard.SetViewportRows(4);
+    keyboard.SelectRow(49);
+    Expect(keyboard.SelectionIndex() == 49, "selection is item 50");
+    Expect(keyboard.FirstVisibleRow() == 30,
+           "keyboard selection of the last item scrolls to the tail page");
+    Expect(keyboard.RowForVisibleSlot(19) == 49,
+           "the selected last item is actually painted");
+}
+
+// NR-084: 25 items (25 % 24 == 1) reach item 25 on the second page.
+void TestGridPageNotMultipleStillReachesAll() {
+    const std::vector<AppEntry> catalog = CatalogOf(25);
+    PanelModel model(&catalog, catalog);
+    model.SetGridColumns(6);
+    model.SetViewportRows(4);
+    model.ScrollBy(4);
+    Expect(model.FirstVisibleRow() == 6, "one partial row starts page two");
+    Expect(model.RowForVisibleSlot(0) == 6, "page two starts at item 7");
+    Expect(model.RowForVisibleSlot(18) == 24,
+           "the last item (25) is inside the tail viewport");
 }
 
 void TestGridMoveSelectionRows() {
@@ -975,6 +1018,8 @@ int wmain() {
     TestRowForVisibleSlotIsConst();
     TestGridColumnsClampAndQuerySwitch();
     TestGridFirstVisibleAlignedToColumns();
+    TestGridTailItemsReachable();
+    TestGridPageNotMultipleStillReachesAll();
     TestGridMoveSelectionRows();
     TestGridScrollByPages();
     TestGridFewerThanPageNoScroll();
