@@ -118,7 +118,7 @@
 | NR-079 | 較新 schema 的 catalog.cache 不被 rebuild 覆寫 | 3 | `done` | — | [NR-079](work-items/NR-079-catalog-cache-newer-schema-preserve.md) |
 | NR-080 | SettingsStore／UsageStore Load 損壞時不得洩漏部分狀態 | 3 | `done` | — | [NR-080](work-items/NR-080-store-load-partial-state.md) |
 | NR-081 | ShowPanel 的 on-demand AppsFolder refresh 不得取代進行中的 rebuild 世代 | 3 | `done` | NR-011, NR-063 | [NR-081](work-items/NR-081-appsfolder-on-demand-supersedes-rebuild.md) |
-| NR-082 | CellAtPoint 在面板高度被 clamp 時命中未繪製的列 | 3 | `ready` | NR-064 | [NR-082](work-items/NR-082-hittest-clamped-panel.md) |
+| NR-082 | CellAtPoint 在面板高度被 clamp 時命中未繪製的列 | 3 | `done` | NR-064 | [NR-082](work-items/NR-082-hittest-clamped-panel.md) |
 
 ## Dependency lanes
 
