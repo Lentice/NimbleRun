@@ -18,6 +18,11 @@ void PanelModel::SetCatalog(const std::vector<AppEntry>* catalog) {
     RefreshRows();
 }
 
+void PanelModel::SetCatalogIndex(
+    const std::unordered_map<std::wstring_view, std::size_t>* index) {
+    catalog_index_ = index;
+}
+
 void PanelModel::SetRecent(std::vector<AppEntry> recent) {
     recent_ = std::move(recent);
     RefreshRows();
@@ -56,11 +61,21 @@ void PanelModel::RefreshRows() {
         if (catalog_ != nullptr) {
             for (const PinRecord& pin : pins_) {
                 bool found = false;
-                for (const AppEntry& entry : *catalog_) {
-                    if (entry.stable_id == pin.stable_id) {
-                        rows_.push_back(entry);
+                if (catalog_index_ != nullptr) {
+                    // NR-083: hash lookup instead of a full catalog scan; a
+                    // miss takes the same placeholder path as a scan miss.
+                    const auto hit = catalog_index_->find(pin.stable_id);
+                    if (hit != catalog_index_->end()) {
+                        rows_.push_back((*catalog_)[hit->second]);
                         found = true;
-                        break;
+                    }
+                } else {
+                    for (const AppEntry& entry : *catalog_) {
+                        if (entry.stable_id == pin.stable_id) {
+                            rows_.push_back(entry);
+                            found = true;
+                            break;
+                        }
                     }
                 }
                 if (!found) {

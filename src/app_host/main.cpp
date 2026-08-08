@@ -1213,6 +1213,20 @@ void RefreshPanelSnapshot() {
     if (!g_model || !g_refresh || !g_usage) {
         return;
     }
+    // NR-083: one stable_id -> snapshot index, built once for this refresh so
+    // the recent-list resolution and the panel model's pin resolution do not
+    // each linear-scan the whole catalog (O(recent_count x catalog) and
+    // O(pin_count x catalog) on the ShowPanel hot path). The keys are views
+    // into the current snapshot vector, which RebuildMerged replaces wholesale
+    // on the next completed generation, so the index lives only for the
+    // duration of this function: set before the first RefreshRows trigger
+    // (RefreshPins -> SetPins), cleared after SetRecent.
+    std::unordered_map<std::wstring_view, std::size_t> snapshot_index;
+    snapshot_index.reserve(g_refresh->Snapshot().size());
+    for (std::size_t i = 0; i < g_refresh->Snapshot().size(); ++i) {
+        snapshot_index.emplace(g_refresh->Snapshot()[i].stable_id, i);
+    }
+    g_model->SetCatalogIndex(&snapshot_index);
     // Pins are loaded first because they feed the is_pinned stamp.
     RefreshPins();
     // NR-061: drops usage records for apps no longer in the catalog before
@@ -1228,16 +1242,17 @@ void RefreshPanelSnapshot() {
     std::vector<nimblerun::AppEntry> recent_entries;
     recent_entries.reserve(recent_records.size());
     for (const nimblerun::UsageRecord& record : recent_records) {
-        for (const nimblerun::AppEntry& entry : g_refresh->Snapshot()) {
-            if (entry.stable_id == record.stable_id) {
-                recent_entries.push_back(entry);
-                break;
-            }
+        const auto found = snapshot_index.find(record.stable_id);
+        if (found != snapshot_index.end()) {
+            recent_entries.push_back(g_refresh->Snapshot()[found->second]);
         }
     }
     // SetRecent is last, so its RefreshRows is the one that decides the visible
     // rows; RefreshPins above already handed the pin list to the model.
     g_model->SetRecent(std::move(recent_entries));
+    // NR-083: the index views die with this function's snapshot reference;
+    // drop the hint so no later RefreshRows dereferences it.
+    g_model->SetCatalogIndex(nullptr);
 }
 
 // NR-049: waits for every in-flight rebuild thread. The rebuild threads read

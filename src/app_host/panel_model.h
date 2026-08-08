@@ -6,6 +6,8 @@
 
 #include <cstddef>
 #include <string>
+#include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace nimblerun {
@@ -31,6 +33,14 @@ public:
 
     // Points the model at a new snapshot and refreshes the current view.
     void SetCatalog(const std::vector<AppEntry>* catalog);
+
+    // NR-083: optional stable_id -> catalog index the host builds once per
+    // refresh, so pin resolution in RefreshRows is a hash lookup instead of a
+    // full catalog scan. The map's keys are views into the host's snapshot
+    // vector and the host guarantees the hint is only set while that snapshot
+    // is current; the model never owns or outlives it. nullptr clears the
+    // hint (pin resolution falls back to the linear scan).
+    void SetCatalogIndex(const std::unordered_map<std::wstring_view, std::size_t>* index);
 
     // Replaces the recent list (used when usage changes or a snapshot swaps).
     void SetRecent(std::vector<AppEntry> recent);
@@ -150,6 +160,7 @@ private:
     void EnsureSelectionVisible();
 
     const std::vector<AppEntry>* catalog_ = nullptr;
+    const std::unordered_map<std::wstring_view, std::size_t>* catalog_index_ = nullptr;
     std::vector<AppEntry> recent_;
     std::vector<PinRecord> pins_;
     std::vector<AppEntry> rows_;
