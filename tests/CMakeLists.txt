@@ -171,3 +171,23 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
 endif()
 
 add_test(NAME nimblerun_catalog_watcher_test COMMAND nimblerun_catalog_watcher_test)
+
+# NR-117: header-only seam for the GetMessageW dispatch decision; compiled
+# into the test directly (it lives in the app_host module, not a library).
+add_executable(nimblerun_message_loop_test
+    unit/message_loop_test.cpp
+)
+target_include_directories(nimblerun_message_loop_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src
+)
+target_link_libraries(nimblerun_message_loop_test PRIVATE user32 kernel32)
+target_compile_definitions(nimblerun_message_loop_test
+    PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX WINVER=0x0A00 _WIN32_WINNT=0x0A00
+)
+if(MSVC OR CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
+    target_compile_options(nimblerun_message_loop_test PRIVATE /W4 /permissive- /EHsc)
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    target_compile_options(nimblerun_message_loop_test PRIVATE -Wall -Wextra -Wpedantic)
+    target_link_options(nimblerun_message_loop_test PRIVATE -municode -static)
+endif()
+add_test(NAME nimblerun_message_loop_test COMMAND nimblerun_message_loop_test)

@@ -113,3 +113,29 @@ git diff --name-only
 
 實作者需記錄三種 `GetMessageW` return value 的測試／decision、error path 的 exit／diagnostic 行為、
 event wait 與 WM_QUIT lifecycle、Release build／CTest／lifecycle 結果，以及未能安全注入的 OS-only queue error path。
+
+實作（2026-08-09，single clean worker）：
+
+- **return-value decision**：`src/app_host/message_loop.h` 新增 inline 純函式
+  `nimblerun::ShouldDispatchMessage(int) { return get_message_result > 0; }`（NR-117 註解說明
+  GetMessageW 的 >0／0／-1 三態）；`main.cpp` 的 message loop 改為：
+  `const int get_result = GetMessageW(&message, nullptr, 0, 0);`，`-1` 時經 `g_diag->Write(L"ui-loop",
+  L"getmessage-error")` 記錄，`!ShouldDispatchMessage(get_result)`（0 或 -1）break，
+  只有 `> 0` 才 `TranslateMessage`／`DispatchMessageW`。未定義 MSG 不再被 dispatch。
+- **error path 行為**：-1 走與 WM_QUIT 相同的 shutdown path（break → loop 結束 → 既有 teardown）；
+  `message` 為 `MSG{}`（zero-init），`return message.wParam` 回傳 0。依 non-goal 未新增 -1 專用
+  exit code／product state。OS-level -1 無法安全注入，故以純函式 decision＋diagnostic 記錄覆蓋，
+  未用假 OS queue 宣稱覆蓋。
+- **event wait／WM_QUIT lifecycle**：NR-115 的 `MsgWaitForMultipleObjectsEx` wait、
+  `WAIT_OBJECT_0` drain/reset/InvalidateRect 分支、`WM_DESTROY`／worker join／event close、
+  `PostQuitMessage` shutdown 皆未改動。
+- **focused test**：`tests/unit/message_loop_test.cpp`（新）以 `fprintf`＋`exit(1)` 風格斷言
+  `ShouldDispatchMessage(-1)==false`、`(0)==false`、`(1)==true`、`(2)==true`；header-only，
+  直接 include `app_host/message_loop.h`。CTest 名稱 `nimblerun_message_loop_test`，以 verbatim
+  block 註冊於 `tests/CMakeLists.txt` 末尾（catalog_watcher_test 之後），既有 CTest 編號未位移。
+  `docs/testing.md:11` 測試數 25→26（新增測試的必要後果）。
+- **build／CTest**：Release x64（LLVM-MinGW＋Ninja）無新增 warning；focused 3/3 綠
+  （lifecycle、catalog_refresh、message_loop，lifecycle 以真實 exe 跑修正後 loop）；完整 CTest
+  **26/26** 綠。
+- **未涵蓋**：真實 `GetMessageW == -1`（OS queue error）無法安全注入；以純 decision 測試＋
+  diagnostic 路徑覆蓋（ticket 允許的最小 seam）。commit：`<controller fills after commit>`

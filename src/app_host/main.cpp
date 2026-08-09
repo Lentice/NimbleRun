@@ -7,6 +7,7 @@
 
 #include "app_host/catalog_watcher.h"
 #include "app_host/hotkey.h"
+#include "app_host/message_loop.h"
 #include "app_host/panel_model.h"
 #include "app_host/settings_dialog.h"
 #include "catalog/app_filter.h"
@@ -3804,8 +3805,15 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
             }
             continue;
         }
-        if (!GetMessageW(&message, nullptr, 0, 0)) {
-            break;  // WM_QUIT
+        const int get_result = GetMessageW(&message, nullptr, 0, 0);
+        if (get_result == -1 && g_diag) {
+            // NR-117: a message retrieval error (GetMessageW == -1) has no MSG to
+            // dispatch; record it and shut down like the WM_QUIT path instead of
+            // dispatching an undefined MSG.
+            g_diag->Write(L"ui-loop", L"getmessage-error");
+        }
+        if (!nimblerun::ShouldDispatchMessage(get_result)) {
+            break;  // 0 = WM_QUIT, -1 = retrieval error; neither has a dispatchable MSG
         }
         TranslateMessage(&message);
         DispatchMessageW(&message);
