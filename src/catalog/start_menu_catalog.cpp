@@ -147,6 +147,11 @@ void ProcessFile(const std::wstring& path, AppSource source, std::vector<AppEntr
         if (!link.target.empty() && !IsProgramLikeTarget(link.target)) {
             return;
         }
+    } else if (!IsProgramLikeTarget(path)) {
+        // NR-102: a direct .exe / .appref-ms passes the same shared program-like
+        // filter (FR-004a) as a shortcut target, so a bare uninstaller
+        // executable physically inside the Programs folder is excluded too.
+        return;
     }
 
     AppEntry entry;

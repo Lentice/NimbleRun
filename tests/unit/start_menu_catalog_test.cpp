@@ -173,6 +173,11 @@ void TestFixtureEnumeration() {
     WriteBytes(root + L"\\ClickOnce.appref-ms", "application reference");
     // A bare .exe physically inside the Programs directory is accepted.
     WriteBytes(root + L"\\Portable.exe", "dummy");
+    // NR-102: direct uninstaller executables (real Inno Setup uninstaller and a
+    // generic one) physically inside the Programs folder must be excluded by the
+    // shared program-like filter, like the shortcut-target uninstaller case.
+    WriteBytes(root + L"\\unins000.exe", "dummy");
+    WriteBytes(root + L"\\uninstaller.exe", "dummy");
     // Non-app extensions are ignored.
     WriteBytes(root + L"\\readme.txt", "ignore me");
 
@@ -231,6 +236,8 @@ void TestFixtureEnumeration() {
     Expect(FindByName(entries, L"Broken") == nullptr, "corrupt shortcut skipped");
     Expect(FindByName(entries, L"Homepage") == nullptr, "website shortcut excluded");
     Expect(FindByName(entries, L"Uninstall Helper") == nullptr, "uninstaller shortcut excluded");
+    Expect(FindByName(entries, L"unins000") == nullptr, "direct uninstaller exe excluded");
+    Expect(FindByName(entries, L"uninstaller") == nullptr, "direct uninstaller exe excluded");
     Expect(FindByName(entries, L"readme") == nullptr, "non-app extension ignored");
 
     Expect(entries.size() == 8, "expected entry count");
