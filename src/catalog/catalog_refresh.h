@@ -63,6 +63,8 @@ public:
     // entries, other sources' results still apply (design-spec §FR-008).
     bool ApplySourceFailure(std::uint64_t generation, CatalogSource source);
 
+    // Records a successful AppsFolder enumeration: the staleness clock restarts
+    // from `now_ms` and the "never succeeded" state is cleared (NR-095).
     void RecordAppsFolderSuccess(std::int64_t now_ms);
 
     // Current atomic merged snapshot (deduplicated across sources).
@@ -99,7 +101,11 @@ private:
     std::vector<CatalogSource> active_sources_;
     std::unordered_map<CatalogSource, bool> received_;
     std::uint64_t generation_ = 0;
+    // NR-095: timestamp of the last successful AppsFolder enumeration, or 0 when
+    // it happened at monotonic time 0. The flag is what distinguishes "never
+    // succeeded" from a genuine success at t=0.
     std::int64_t last_appsfolder_success_ms_ = 0;
+    bool appsfolder_has_success_ = false;
     std::vector<AppEntry> merged_;
 };
 

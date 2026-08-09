@@ -131,6 +131,16 @@
 | NR-092 | UserFolder 中途列舉失敗不得提交部分結果 | 2 | `done` | NR-011, NR-019, NR-063 | [NR-092](work-items/NR-092-user-folder-mid-enumeration-failure.md) |
 | NR-093 | 快速鍵擷取要分別追蹤左右修飾鍵的放開狀態 | 4 | `done` | NR-089 | [NR-093](work-items/NR-093-hotkey-physical-modifier-tracking.md) |
 | NR-094 | 統一 MVP UI 語言規格，消除 English／雙語衝突 | 0 | `done` | — | [NR-094](work-items/NR-094-ui-language-source-of-truth.md) |
+| NR-095 | AppsFolder 從未成功列舉時，下一次顯示面板應立即重試 | 2 | `done` | NR-006, NR-011, NR-063, NR-081 | [NR-095](work-items/NR-095-appsfolder-first-success-retry.md) |
+| NR-096 | NewerSchema 載入後，所有 user-data Save 路徑仍須保護原檔 | 1 | `ready` | NR-004, NR-009, NR-013, NR-018, NR-058, NR-072, NR-080 | [NR-096](work-items/NR-096-newer-schema-write-guard.md) |
+| NR-097 | 補完 worker setup／handoff 的例外邊界，不讓背景例外終止 process | 3 | `ready` | NR-076, NR-077 | [NR-097](work-items/NR-097-worker-setup-exception-boundary.md) |
+| NR-098 | Catalog rebuild 在關閉與新世代前必須具備可控取消路徑 | 3 | `ready` | NR-049, NR-063, NR-090, NR-091, NR-092 | [NR-098](work-items/NR-098-rebuild-shutdown-cancellation.md) |
+| NR-099 | Icon worker queue 要有上限，並可取消過期工作 | 3 | `ready` | NR-032, NR-036, NR-037 | [NR-099](work-items/NR-099-icon-queue-bound-and-stop.md) |
+| NR-100 | Rebuild result delivery 失敗時，不得讓 generation 永久卡住 | 3 | `ready` | NR-063, NR-073, NR-077 | [NR-100](work-items/NR-100-rebuild-completion-handoff.md) |
+| NR-101 | Directory watcher 的 PostMessage 失敗不得遺失 catalog 變更 | 2 | `ready` | NR-011, NR-063, NR-065, NR-074 | [NR-101](work-items/NR-101-watcher-notification-delivery.md) |
+| NR-102 | Start Menu 的直接檔案也必須通過 program-like／uninstaller filter | 2 | `ready` | NR-005, NR-028 | [NR-102](work-items/NR-102-start-menu-direct-program-filter.md) |
+| NR-103 | PMv2 面板初次定位改用 per-window DPI API | 3 | `ready` | NR-015 | [NR-103](work-items/NR-103-pm-dpi-query.md) |
+| NR-104 | Testing guide 與 release evidence 必須反映目前 24 項 CTest | 5 | `ready` | NR-017, NR-056, NR-089 | [NR-104](work-items/NR-104-release-evidence-test-count.md) |
 
 ## Dependency lanes
 
@@ -236,6 +246,29 @@ NR-094（design-spec NFR-006 寫雙語，AGENTS／development 寫 English-only�
         先釘定 MVP 唯一語言政策，再讓後續 UI／字串工作有單一依據
 ```
 
+## 稽核修補 lane 7（NR-095～NR-104，2026-08-09 第九次全 repo 稽核產出）
+
+```
+NR-095（AppsFolder 從未成功時的首次重試）── 依賴 NR-006、NR-011、NR-063、NR-081（皆 done）；HIGH；
+        覆寫 NR-081 Decisions §3 的 no-success 表示法，不改 running-generation guard
+NR-096（settings／pins／usage 的 NewerSchema write guard）── 依賴 NR-004、NR-009、NR-013、NR-018、NR-058、NR-072、NR-080（皆 done）；HIGH；
+        修在三個 store 的 Save 入口，避免只保護 RefreshPins 而漏掉 runtime mutation
+NR-097（worker setup／handoff exception boundary）── 依賴 NR-076、NR-077（皆 done）；HIGH；
+        補 NR-076 已完成 task-body catch 之外的配置、thread 建立與 registry 例外
+NR-098（catalog rebuild cancellation）── 依賴 NR-049、NR-063、NR-090、NR-091、NR-092（皆 done）；HIGH；
+        解決 join 可等待不可控 Shell／directory scan 的 shutdown 缺口
+NR-099（icon queue upper bound／stale cancellation）── 依賴 NR-032、NR-036、NR-037（皆 done）；MEDIUM；
+        補 §9.2 明文要求，不新增 thread 或 timer
+NR-100（rebuild completion post failure）── 依賴 NR-063、NR-073、NR-077（皆 done）；HIGH；
+        NR-063 已修 payload leak，本 item 補 source completion 不得永久 pending
+NR-101（watcher notification post failure）── 依賴 NR-011、NR-063、NR-065、NR-074（皆 done）；MEDIUM；
+        保留 dirty／full-rescan intent，不重開 NR-074 的 error episode backoff
+NR-102（Start Menu direct file shared filter）── 依賴 NR-005、NR-028（皆 done）；MEDIUM；
+        只重用 IsProgramLikeTarget，不把規則套到 FR-005 user folders
+NR-103（PMv2 initial DPI query）── 依賴 NR-015（done）；MEDIUM；修初次 ShowPanel 的 API mismatch
+NR-104（CTest／release evidence count drift）── 依賴 NR-017、NR-056、NR-089（皆 done）；MEDIUM；純測試／文件，不改產品 code
+```
+
 ## 已否決的方向 — 不要重開
 
 寫新 item 前先讀這節（[AGENTS.md](../AGENTS.md) §Work item authoring rules 要求）。以下方向都已有明確依據被否決；**要重開是允許的，但新 item 內必須寫出覆寫與新證據**，不要在此節之外默默開一個。此節只收「有依據的否決」，純粹的優先序取捨屬於下面的 §計畫決策紀錄。
@@ -249,6 +282,14 @@ NR-094（design-spec NFR-006 寫雙語，AGENTS／development 寫 English-only�
 | 把 FR-004a 的 program-like 判準套用到 FR-005 使用者自訂資料夾 | `docs/design-spec.md:354` | 明文「此判準**不套用於** FR-005 的使用者自訂資料夾」。該來源的把關者是使用者自己勾選的副檔名清單；二次過濾會無聲擋掉使用者手動加入的副檔名。 |
 
 ## 計畫決策紀錄
+
+- 2026-08-09（NR-095，首次 AppsFolder 失敗重試）：**覆寫 NR-081 Decisions §3 的
+  no-success 表示方式**。NR-081 正確保留了 running-generation guard，也正確要求
+  failed AppsFolder 不更新成功時間；但目前 `last_appsfolder_success_ms_ = 0` 同時表示
+  「從未成功」與「在 monotonic t=0 成功」。`GetTickCount64()` 讓啟動後 10 分鐘內的首次
+  failure 在下一次 ShowPanel 不會重試，與 §FR-008 的「下一次叫出時再試」決策不符。NR-095
+  只新增可區分 no-success／success timestamp 的純 coordinator state；不 baseline 啟動
+  時間、不加 timer／輪詢、不改 NR-081 的 generation guard 與失敗保留舊結果語意。
 
 - 2026-08-09（NR-094，MVP application UI 語言決策）：產品決策——**MVP application UI 一律為英文（English-only）**。規格 `docs/design-spec.md` §NFR-006 原本寫「MVP UI 至少提供英文與繁體中文」，與 `AGENTS.md` §Language rules、`docs/development.md` §UI language 的「All user-visible NimbleRun UI text is English」矛盾；現有 `src/app_host/main.cpp` 的 `list_strings`／`footer_strings`／`dialog_strings`／`context_menu_strings`、`src/settings/settings_editor.cpp` 字串表與 `src/resources/` 皆為英文，且無 locale selector、翻譯資源或本地化測試。故 NFR-006 改寫為 English-only MVP 政策並保留「字串集中管理」規則；後續 UI item 一律以 §NFR-006 為唯一 authority，`docs/development.md` §UI language 與 `AGENTS.md` §Language rules 文字不變，三者不再互相矛盾。雙語未被否決，但屬規格層級決策：若產品需要繁體中文等第二語言，須另開實作 item 先定義 locale 來源、預設／fallback、字串資產位置與驗收語言範圍。本決策不新增任何翻譯、locale 機制、資源檔或 runtime dependency。未 commit。
 

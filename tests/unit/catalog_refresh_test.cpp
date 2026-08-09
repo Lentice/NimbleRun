@@ -237,6 +237,25 @@ void TestAppsFolderStaleness() {
            "AppsFolder older than 10 minutes is refreshed on demand");
 }
 
+// NR-095: no successful AppsFolder enumeration yet is not "succeeded at
+// monotonic t=0" -- the very first scan failed at low uptime, so the next panel
+// show must retry immediately instead of waiting out the 10-minute clock.
+void TestAppsFolderNeverSucceededIsDueAtLowUptime() {
+    CatalogRefreshCoordinator c;
+    Expect(c.ShouldRefreshAppsFolder(1000),
+           "a never-succeeded AppsFolder is due at low uptime");
+}
+
+// NR-095: a failed AppsFolder-only generation must not clear the never-succeeded
+// state. After the failure the next panel show still retries.
+void TestAppsFolderFailureKeepsDue() {
+    CatalogRefreshCoordinator c;
+    const std::uint64_t gen = c.BeginGeneration({CatalogSource::AppsFolder});
+    c.ApplySourceFailure(gen, CatalogSource::AppsFolder);
+    Expect(c.ShouldRefreshAppsFolder(1000),
+           "a failed AppsFolder generation keeps the source due at low uptime");
+}
+
 // NR-081: the on-demand rule must not fire while a rebuild cycle is running --
 // BeginGeneration supersedes the in-flight generation, so a ShowPanel-triggered
 // {AppsFolder} cycle would drop the running full rebuild's StartMenu/UserFolder
@@ -576,6 +595,8 @@ int wmain() {
     TestFailureKeepsOldSnapshot();
     TestSingleSourceFailureIsolation();
     TestAppsFolderStaleness();
+    TestAppsFolderNeverSucceededIsDueAtLowUptime();
+    TestAppsFolderFailureKeepsDue();
     TestAppsFolderStalenessSkipsRunningRebuild();
     TestSnapshotIsAtomicAndDeterministic();
     TestNoPartialSnapshotBeforeAllSourcesReport();

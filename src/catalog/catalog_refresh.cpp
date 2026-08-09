@@ -70,6 +70,12 @@ bool CatalogRefreshCoordinator::ShouldRefreshAppsFolder(std::int64_t now_ms) con
     if (IsRebuildInProgress()) {
         return false;
     }
+    // NR-095: never succeeded is not "succeeded at monotonic t=0" -- a first
+    // enumeration failure must retry on the next panel show instead of waiting
+    // out the 10-minute clock.
+    if (!appsfolder_has_success_) {
+        return true;
+    }
     return now_ms - last_appsfolder_success_ms_ >= kAppsFolderStaleMs;
 }
 
@@ -141,6 +147,7 @@ bool CatalogRefreshCoordinator::ApplySourceFailure(std::uint64_t generation,
 
 void CatalogRefreshCoordinator::RecordAppsFolderSuccess(std::int64_t now_ms) {
     last_appsfolder_success_ms_ = now_ms;
+    appsfolder_has_success_ = true;
 }
 
 const std::vector<AppEntry>& CatalogRefreshCoordinator::SourceEntries(
