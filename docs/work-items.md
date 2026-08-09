@@ -140,7 +140,15 @@
 | NR-101 | Directory watcher 的 PostMessage 失敗不得遺失 catalog 變更 | 2 | `done` | NR-011, NR-063, NR-065, NR-074 | [NR-101](work-items/NR-101-watcher-notification-delivery.md) |
 | NR-102 | Start Menu 的直接檔案也必須通過 program-like／uninstaller filter | 2 | `done` | NR-005, NR-028 | [NR-102](work-items/NR-102-start-menu-direct-program-filter.md) |
 | NR-103 | PMv2 面板初次定位改用 per-window DPI API | 3 | `done` | NR-015 | [NR-103](work-items/NR-103-pm-dpi-query.md) |
-| NR-104 | Testing guide 與 release evidence 必須反映目前 24 項 CTest | 5 | `done` | NR-017, NR-056, NR-089 | [NR-104](work-items/NR-104-release-evidence-test-count.md) |
+| NR-104 | Testing guide 與 release evidence test count | 5 | `done` | NR-017, NR-056, NR-089 | [NR-104](work-items/NR-104-release-evidence-test-count.md) |
+| NR-105 | Directory watcher 保留通知不可因無後續事件而永久沉默 | 2 | `planned` | NR-101 | [NR-105](work-items/NR-105-watcher-pending-notification-liveness.md) |
+| NR-106 | Rebuild setup／handoff failure 必須完成 generation | 3 | `planned` | NR-097, NR-100 | [NR-106](work-items/NR-106-rebuild-setup-completion.md) |
+| NR-107 | Per-user data root 不得 fallback 到空／相對路徑 | 1 | `planned` | NR-004, NR-054, NR-096 | [NR-107](work-items/NR-107-safe-user-data-root.md) |
+| NR-108 | IconStore write path 必須遵守 whole-pack byte budget | 3 | `planned` | NR-035, NR-050, NR-075 | [NR-108](work-items/NR-108-icon-store-whole-pack-budget.md) |
+| NR-109 | Icon worker 的 store lifecycle／flush 不能逃出例外邊界 | 3 | `planned` | NR-097, NR-099 | [NR-109](work-items/NR-109-icon-worker-store-exception-boundary.md) |
+| NR-110 | Single-instance wake-up 不得有 HWND 建立前競態 | 1 | `planned` | NR-002 | [NR-110](work-items/NR-110-single-instance-startup-race.md) |
+| NR-111 | Owner-drawn App rows 必須提供真正的 Windows accessibility tree | 3 | `planned` | NR-015, NR-020 | [NR-111](work-items/NR-111-owner-drawn-accessibility-provider.md) |
+| NR-112 | Release evidence 不得把未量測的 blocking gates 報成 PASSED | 5 | `planned` | NR-017, NR-104 | [NR-112](work-items/NR-112-release-evidence-unmeasured-gates.md) |
 
 ## Dependency lanes
 
