@@ -44,6 +44,10 @@ struct Settings {
 Settings DefaultSettings();
 
 // Per-user data root from design-spec §10.1: %LOCALAPPDATA%\NimbleRun.
+// Returns an empty string when the Known Folder result is unavailable or not
+// a bounded local absolute path. The test seam validates controlled failures
+// without changing the process environment.
+std::wstring UserDataDirFromLocalAppData(std::wstring_view local_app_data);
 std::wstring DefaultSettingsDir();
 
 // Why Load returned. For anything other than Loaded the out parameter holds

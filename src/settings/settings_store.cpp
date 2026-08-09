@@ -3,6 +3,7 @@
 #include "storage/atomic_text_file.h"
 
 #include <windows.h>
+#include <shlobj.h>
 
 #include <cerrno>
 #include <cstdlib>
@@ -137,12 +138,34 @@ std::vector<std::wstring> DefaultExtensions() {
 }
 
 std::wstring DefaultSettingsDir() {
-    wchar_t buffer[MAX_PATH];
-    const DWORD length = GetEnvironmentVariableW(L"LOCALAPPDATA", buffer, MAX_PATH);
-    if (length == 0 || length >= MAX_PATH) {
+    PWSTR local_app_data = nullptr;
+    const HRESULT hr = SHGetKnownFolderPath(FOLDERID_LocalAppData, KF_FLAG_DEFAULT,
+                                             nullptr, &local_app_data);
+    if (FAILED(hr) || local_app_data == nullptr) {
+        CoTaskMemFree(local_app_data);
         return {};
     }
-    return std::wstring(buffer) + L"\\NimbleRun";
+    const std::wstring result = UserDataDirFromLocalAppData(local_app_data);
+    CoTaskMemFree(local_app_data);
+    return result;
+}
+
+std::wstring UserDataDirFromLocalAppData(std::wstring_view local_app_data) {
+    const std::wstring base = Trim(local_app_data);
+    constexpr std::wstring_view suffix = L"\\NimbleRun";
+    if (!IsLocalAbsolutePath(base) || base.size() > MAX_PATH - suffix.size() ||
+        base.find_first_of(L"\"<>|*?") != std::wstring::npos) {
+        return {};
+    }
+    std::wstring result = base;
+    while (!result.empty() && (result.back() == L'\\' || result.back() == L'/')) {
+        result.pop_back();
+    }
+    if (result.empty() || result.size() > MAX_PATH - suffix.size()) {
+        return {};
+    }
+    result += suffix;
+    return result;
 }
 
 SettingsStore::SettingsStore(std::wstring directory)

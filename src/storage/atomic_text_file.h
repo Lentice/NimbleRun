@@ -18,10 +18,16 @@ namespace nimblerun {
 // write so a crash mid-write never corrupts the real file (design-spec §10.2).
 
 inline std::wstring JoinPath(std::wstring_view directory, std::wstring_view name) {
+    if (directory.empty()) {
+        return {};
+    }
     return std::wstring(directory) + L"\\" + std::wstring(name);
 }
 
 inline bool EnsureDirectory(std::wstring_view directory) {
+    if (directory.empty()) {
+        return false;
+    }
     if (CreateDirectoryW(std::wstring(directory).c_str(), nullptr) != FALSE) {
         return true;
     }
@@ -251,6 +257,9 @@ inline VersionedReadStatus ReadVersionedLines(std::wstring_view directory,
                                               int expected_schema,
                                               std::vector<std::wstring>& lines) {
     lines.clear();
+    if (directory.empty()) {
+        return VersionedReadStatus::Missing;
+    }
 
     const std::wstring path = JoinPath(directory, name);
     std::string bytes;
@@ -310,6 +319,9 @@ inline VersionedReadStatus ReadVersionedLines(std::wstring_view directory,
 // Preserve the original file for diagnostics by renaming it aside. Never a
 // silent overwrite: the user's corrupt data stays recoverable (design-spec §11).
 inline void PreserveCorrupt(std::wstring_view directory, std::wstring_view name) {
+    if (directory.empty()) {
+        return;
+    }
     const std::wstring path = JoinPath(directory, name);
     const DWORD attributes = GetFileAttributesW(path.c_str());
     if (attributes == INVALID_FILE_ATTRIBUTES ||

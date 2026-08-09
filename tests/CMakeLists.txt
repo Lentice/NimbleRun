@@ -11,7 +11,7 @@ set(NIMBLERUN_TESTS
     "nimblerun_search_test|unit/search_engine_test.cpp|nimblerun_search"
     "nimblerun_hotkey_test|unit/hotkey_registration_test.cpp|nimblerun_hotkey"
     "nimblerun_start_menu_catalog_test|unit/start_menu_catalog_test.cpp|nimblerun_catalog"
-    "nimblerun_settings_test|unit/settings_store_test.cpp|nimblerun_settings"
+    "nimblerun_settings_test|unit/settings_store_test.cpp|nimblerun_settings nimblerun_catalog nimblerun_usage nimblerun_pins nimblerun_icons nimblerun_diagnostics"
     "nimblerun_appsfolder_catalog_test|unit/appsfolder_catalog_test.cpp|nimblerun_catalog"
     "nimblerun_app_filter_test|unit/app_filter_test.cpp|nimblerun_catalog"
     "nimblerun_user_folder_catalog_test|unit/user_folder_catalog_test.cpp|nimblerun_catalog"

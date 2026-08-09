@@ -102,3 +102,10 @@ git diff --name-only
 實作者需記錄 Known Folder failure policy、每個 consumer 的 path invariant、controlled
 failure test、build／CTest 與是否有舊資料 migration 需求（本 item 預設沒有）。
 
+### 實作結果（2026-08-09）
+
+- `DefaultSettingsDir()` 改用 `SHGetKnownFolderPath(FOLDERID_LocalAppData)`；API 失敗、空值、非 local absolute、含非法字元或超過 bounded path 長度時回傳空字串，沒有 environment、current directory、EXE、root 或 temp fallback。
+- `wWinMain` 只解析一次 root。settings、usage、pins、catalog cache、logs 與 icons cache 均以同一個有效 root 組路徑；root 不可用時 settings／usage 只用記憶體預設值，catalog／icon cache 與 diagnostic log 停用，catalog cache write gate 永久關閉。
+- `JoinPath`、`EnsureDirectory`、`ReadVersionedLines`、`PreserveCorrupt` 與 atomic text write 對空 directory fail-closed；因此空 root 不會形成 relative 或 rooted-current-drive 寫入。
+- `tests/unit/settings_store_test.cpp` 新增 controlled empty-root self-check，驗證 settings、usage、pins、catalog cache、diagnostic log、icon cache 不會在 current directory 建立檔案，並覆蓋 empty／relative／UNC／malformed／overlong resolver 輸入。
+- 舊資料不遷移、不刪除；沒有 migration 需求。Release build 與 focused CTest（5/5）及全量 CTest（25/25）通過。

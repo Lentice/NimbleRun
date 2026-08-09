@@ -201,6 +201,9 @@ nimblerun::SettingsStore* g_settings_store = nullptr;
 // Set once in wWinMain and shared by the DiagnosticLog construction and the
 // Settings dialog's "Open log folder" button.
 std::wstring g_log_directory;
+// Set once in wWinMain. Empty means the Known Folder resolver failed; all
+// app-owned persistence and caches stay disabled for the process lifetime.
+std::wstring g_user_data_directory;
 // Current settings mirror, refreshed after the dialog applies (NR-013/NR-011).
 nimblerun::Settings g_settings;
 bool g_hide_after_launch = true;
@@ -1298,7 +1301,7 @@ void OnGenerationCompleteRefresh() {
     // never overwrite it (design-spec §10.4); the in-memory snapshot
     // keeps working and the flag stays set for the whole run.
     if (!g_catalog_cache_disable_writes) {
-        nimblerun::SaveCatalogCache(nimblerun::DefaultSettingsDir(),
+        nimblerun::SaveCatalogCache(g_user_data_directory,
                                     g_refresh->Snapshot());
     }
 }
@@ -3280,11 +3283,16 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     // cache immediately while the full build runs in the background. The panel
     // model points at the coordinator's live snapshot, which swaps atomically
     // only when every source in a generation has reported.
+    g_user_data_directory = nimblerun::DefaultSettingsDir();
+    const bool persistence_available = !g_user_data_directory.empty();
+    const std::wstring& data_directory = g_user_data_directory;
     nimblerun::Settings settings = nimblerun::DefaultSettings();
-    nimblerun::SettingsStore settings_store(nimblerun::DefaultSettingsDir());
+    nimblerun::SettingsStore settings_store(data_directory);
     // NR-058: the result is kept until the diagnostic log exists; the flags and
     // the log line are handled after g_diag is created below.
-    const nimblerun::SettingsLoadResult settings_result = settings_store.Load(settings);
+    const nimblerun::SettingsLoadResult settings_result =
+        persistence_available ? settings_store.Load(settings)
+                               : nimblerun::SettingsLoadResult::Missing;
     g_settings_store = &settings_store;
     g_settings = settings;
     g_hide_after_launch = settings.hide_after_launch;
@@ -3294,22 +3302,25 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     g_refresh = &refresh;
     std::vector<nimblerun::AppEntry> cached;
     bool cache_newer = false;
-    if (nimblerun::LoadCatalogCache(nimblerun::DefaultSettingsDir(), cached, &cache_newer)) {
+    if (persistence_available &&
+        nimblerun::LoadCatalogCache(data_directory, cached, &cache_newer)) {
         refresh.SetSnapshot(std::move(cached));
     }
     // NR-079: a newer-schema file on disk must not be overwritten by this build
     // (design-spec §10.4); the flag stays set for the whole run.
-    g_catalog_cache_disable_writes = cache_newer;
+    g_catalog_cache_disable_writes = !persistence_available || cache_newer;
 
-    nimblerun::UsageStore usage(nimblerun::DefaultSettingsDir());
-    const nimblerun::UsageLoadResult usage_result = usage.Load();
+    nimblerun::UsageStore usage(data_directory);
+    const nimblerun::UsageLoadResult usage_result =
+        persistence_available ? usage.Load() : nimblerun::UsageLoadResult::Missing;
     g_usage = &usage;
 
     // NR-054: design-spec §10.1 puts the log at logs\nimblerun.log, not beside
     // settings.ini in the root. Keeps the diagnostics artifact out of the
     // user-data listing, so "delete my data" and "send me your log" are
     // different directories.
-    g_log_directory = nimblerun::JoinPath(nimblerun::DefaultSettingsDir(), L"logs");
+    g_log_directory = persistence_available
+        ? nimblerun::JoinPath(data_directory, L"logs") : std::wstring{};
     nimblerun::DiagnosticLog diag(g_log_directory, L"nimblerun.log");
     g_diag = &diag;
 
@@ -3329,7 +3340,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
 
     // NR-018: the pin store is reloaded and reconciled in RefreshPins(); only
     // the (non-owning) pointer is kept so the model and host share one store.
-    nimblerun::PinStore pins(nimblerun::DefaultSettingsDir());
+    nimblerun::PinStore pins(data_directory);
     g_pins = &pins;
 
     nimblerun::PanelModel model(&refresh.Snapshot(), {});
@@ -3352,8 +3363,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     // icon worker; the UI thread only owns the pointer and never calls it.
     // Declared before the worker so it is destroyed after it.
     nimblerun::IconStore::IconStorePaths icon_store_paths;
-    icon_store_paths.pack =
-        std::filesystem::path(nimblerun::DefaultSettingsDir()) / L"icons.cache";
+    if (persistence_available) {
+        icon_store_paths.pack = std::filesystem::path(data_directory) / L"icons.cache";
+    }
     nimblerun::IconStore icon_store(icon_store_paths,
                                     nimblerun::IconStore::kMaxPackBytes, &diag);
 

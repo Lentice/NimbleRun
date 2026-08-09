@@ -113,6 +113,7 @@ target_link_libraries(nimblerun_settings
     PUBLIC
         kernel32
         advapi32
+        shell32
 )
 
 # user_folder_catalog consumes the settings types and DefaultExtensions().

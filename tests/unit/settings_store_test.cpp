@@ -1,6 +1,11 @@
 #include "settings/settings_store.h"
 
+#include "catalog/catalog_cache.h"
+#include "diagnostics/diagnostic_log.h"
+#include "icons/icon_store.h"
+#include "pins/pin_store.h"
 #include "storage/atomic_text_file.h"
+#include "usage/usage_store.h"
 
 #include <windows.h>
 
@@ -20,7 +25,10 @@ using nimblerun::Settings;
 using nimblerun::SettingsLoadResult;
 using nimblerun::SettingsStore;
 using nimblerun::Theme;
+using nimblerun::UsageLoadResult;
+using nimblerun::UsageStore;
 using nimblerun::VersionedReadStatus;
+using nimblerun::UserDataDirFromLocalAppData;
 
 namespace {
 
@@ -340,6 +348,76 @@ void TestReadVersionedLines(const std::wstring& dir) {
            "loaded lines exclude the schema header line");
 }
 
+void TestUnavailableUserDataRootIsFailClosed() {
+    Expect(UserDataDirFromLocalAppData(L"").empty(), "empty LocalAppData is rejected");
+    Expect(UserDataDirFromLocalAppData(L"relative\\path").empty(),
+           "relative LocalAppData is rejected");
+    Expect(UserDataDirFromLocalAppData(L"\\\\server\\share").empty(),
+           "UNC LocalAppData is rejected");
+    Expect(UserDataDirFromLocalAppData(L"C:\\bad|root").empty(),
+           "malformed LocalAppData is rejected");
+
+    std::wstring overlong = L"C:\\";
+    overlong.append(MAX_PATH, L'a');
+    Expect(UserDataDirFromLocalAppData(overlong).empty(),
+           "overlong LocalAppData is rejected");
+
+    const std::wstring valid = UserDataDirFromLocalAppData(L"C:\\Users\\tester\\AppData\\Local");
+    Expect(valid == L"C:\\Users\\tester\\AppData\\Local\\NimbleRun",
+           "valid LocalAppData resolves to NimbleRun");
+
+    const std::wstring outside = MakeTempDir("empty_root");
+    wchar_t previous[MAX_PATH];
+    Expect(GetCurrentDirectoryW(MAX_PATH, previous) != 0, "read current directory");
+    Expect(SetCurrentDirectoryW(outside.c_str()) != FALSE, "set controlled current directory");
+
+    SettingsStore settings_store(L"");
+    Settings settings;
+    Expect(settings_store.Load(settings) == SettingsLoadResult::Missing,
+           "empty root disables settings load");
+    Expect(!settings_store.Save(settings), "empty root disables settings save");
+
+    UsageStore usage_store(L"");
+    Expect(usage_store.Load() == UsageLoadResult::Missing,
+           "empty root disables usage load");
+    usage_store.RecordLaunch(L"app", 1);
+    Expect(!usage_store.Save(), "empty root disables usage save");
+
+    nimblerun::PinStore pin_store(L"");
+    Expect(pin_store.Load() == nimblerun::PinLoadResult::Missing,
+           "empty root disables pin load");
+    pin_store.Pin(L"app", L"App", 1);
+    Expect(!pin_store.Save(), "empty root disables pin save");
+
+    nimblerun::SaveCatalogCache(L"", {});
+    nimblerun::DiagnosticLog log(L"", L"nimblerun.log");
+    log.Write(L"test", L"empty-root");
+    nimblerun::IconStore icon_store({});
+    Expect(icon_store.Open() == nimblerun::IconStore::StoreState::Disabled,
+           "empty root disables icon cache");
+
+    Expect(SetCurrentDirectoryW(previous) != FALSE, "restore current directory");
+    Expect(!fs::exists(fs::path(outside) / L"settings.ini"),
+           "empty root creates no settings file outside root");
+    Expect(!fs::exists(fs::path(outside) / L"usage.tsv"),
+           "empty root creates no usage file outside root");
+    Expect(!fs::exists(fs::path(outside) / L"favorites.txt"),
+           "empty root creates no pin file outside root");
+    Expect(!fs::exists(fs::path(outside) / L"catalog.cache"),
+           "empty root creates no catalog cache outside root");
+    Expect(!fs::exists(fs::path(outside) / L"icons.cache"),
+           "empty root creates no icon cache outside root");
+    Expect(!fs::exists(fs::path(outside) / L"logs"),
+           "empty root creates no log directory outside root");
+
+    const std::wstring marker = L"nr107-empty-root-" + std::to_wstring(GetCurrentProcessId()) + L".tmp";
+    Expect(!nimblerun::AtomicWriteUtf8Text(L"", marker, L"must not be written"),
+           "empty root disables atomic writes");
+    std::vector<std::wstring> lines;
+    Expect(ReadVersionedLines(L"", marker, 1, lines) == VersionedReadStatus::Missing,
+           "empty root disables reads");
+}
+
 } // namespace
 
 int wmain() {
@@ -359,6 +437,7 @@ int wmain() {
     TestCorruptLoadSaveWritesFile(MakeTempDir("writable_corrupt"));
     TestAtomicWriteFailure(MakeTempDir("atomic"));
     TestReadVersionedLines(MakeTempDir("versioned"));
+    TestUnavailableUserDataRootIsFailClosed();
     std::printf("NR-004 settings store check PASSED\n");
     return 0;
 }
