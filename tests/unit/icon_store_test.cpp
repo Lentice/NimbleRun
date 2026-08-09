@@ -351,7 +351,8 @@ void TestNewerSchema(const fs::path& dir) {
 
 void TestEviction(const fs::path& dir) {
     ResetPack(dir);
-    IconStore store(IconStore::IconStorePaths{PackPath(dir)}, /*max_bytes=*/80);
+    IconStore store(IconStore::IconStorePaths{PackPath(dir)},
+                    /*max_bytes=*/kPayloadStart + 80);
     store.Open();
     store.Put(Id(1), 48, Payload(1, 40), 0x1000, 1);
     store.Flush({}, 1);
@@ -366,7 +367,8 @@ void TestEviction(const fs::path& dir) {
 
 void TestPinnedExemption(const fs::path& dir) {
     ResetPack(dir);
-    IconStore store(IconStore::IconStorePaths{PackPath(dir)}, /*max_bytes=*/80);
+    IconStore store(IconStore::IconStorePaths{PackPath(dir)},
+                    /*max_bytes=*/kPayloadStart + 80);
     store.Open();
     store.Put(Id(1), 48, Payload(1, 40), 0x1000, 1);
     store.Flush({}, 1);
@@ -509,6 +511,50 @@ void TestOverBudgetPack(const fs::path& dir) {
            "over-budget pack rebuilt to the bounded empty-pack size");
 }
 
+// NR-108: the fixed prefix counts toward the budget, and a rejected batch
+// must leave the committed header and physical file untouched.
+void TestWholePackBudget(const fs::path& dir) {
+    ResetPack(dir);
+    {
+        IconStore store(IconStore::IconStorePaths{PackPath(dir)});
+        Expect(store.Open() == StoreState::Ready, "budget test open");
+        const std::vector<std::uint8_t> before = ReadFileBytes(PackPath(dir));
+        PackHeader before_header;
+        Expect(nimblerun::DecodeHeader(before.data(), before.size(), before_header) ==
+                   nimblerun::PackStatus::Ok,
+               "budget test reads initial header");
+
+        store.Put(Id(1), 48, Payload(1, kPackByteBudget - kPayloadStart + 1), 0x1000, 1);
+        Expect(store.Flush({}, 1), "oversized payload is dropped safely");
+        const std::vector<std::uint8_t> after = ReadFileBytes(PackPath(dir));
+        PackHeader after_header;
+        Expect(after.size() == before.size(), "oversized payload does not grow the pack");
+        Expect(nimblerun::DecodeHeader(after.data(), after.size(), after_header) ==
+                   nimblerun::PackStatus::Ok,
+               "oversized payload leaves a valid header");
+        Expect(after_header.payload_end == before_header.payload_end,
+               "oversized payload does not commit a new payload_end");
+        Expect(store.Lookup(Id(1), 48, 0x1000, 1).empty(), "oversized payload is not cached");
+    }
+
+    ResetPack(dir);
+    IconStore small(IconStore::IconStorePaths{PackPath(dir)}, kPayloadStart + 80);
+    Expect(small.Open() == StoreState::Ready, "batch budget test open");
+    small.Put(Id(1), 48, Payload(1, 40), 0x1000, 1);
+    small.Put(Id(2), 48, Payload(2, 40), 0x2000, 1);
+    small.Put(Id(3), 48, Payload(3, 40), 0x3000, 1);
+    Expect(small.Flush({Id(1)}, 1), "oversized batch is dropped safely");
+    const std::vector<std::uint8_t> batch = ReadFileBytes(PackPath(dir));
+    PackHeader batch_header;
+    Expect(batch.size() <= kPayloadStart + 80, "batch respects whole-pack budget");
+    Expect(nimblerun::DecodeHeader(batch.data(), batch.size(), batch_header) ==
+               nimblerun::PackStatus::Ok,
+           "batch leaves a valid header");
+    Expect(batch_header.payload_end <= kPayloadStart + 80,
+           "batch header respects whole-pack budget");
+    Expect(small.Lookup(Id(1), 48, 0x1000, 1).empty(), "oversized batch does not cache pinned input");
+}
+
 void TestRandomFuzz(const fs::path& dir) {
     std::mt19937 rng(20260805);
     for (int i = 0; i < 50; ++i) {
@@ -543,6 +589,7 @@ void RunAll(const fs::path& dir) {
     TestLockedFile(dir);
     TestMaliciousPayloadEnd(dir);
     TestOverBudgetPack(dir);
+    TestWholePackBudget(dir);
     TestRandomFuzz(dir);
 }
 

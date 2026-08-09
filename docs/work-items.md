@@ -144,7 +144,7 @@
 | NR-105 | Directory watcher 保留通知不可因無後續事件而永久沉默 | 2 | `planned` | NR-101 | [NR-105](work-items/NR-105-watcher-pending-notification-liveness.md) |
 | NR-106 | Rebuild setup／handoff failure 必須完成 generation | 3 | `planned` | NR-097, NR-100 | [NR-106](work-items/NR-106-rebuild-setup-completion.md) |
 | NR-107 | Per-user data root 不得 fallback 到空／相對路徑 | 1 | `done` | NR-004, NR-054, NR-096 | [NR-107](work-items/NR-107-safe-user-data-root.md) |
-| NR-108 | IconStore write path 必須遵守 whole-pack byte budget | 3 | `planned` | NR-035, NR-050, NR-075 | [NR-108](work-items/NR-108-icon-store-whole-pack-budget.md) |
+| NR-108 | IconStore write path 必須遵守 whole-pack byte budget | 3 | `done` | NR-035, NR-050, NR-075 | [NR-108](work-items/NR-108-icon-store-whole-pack-budget.md) |
 | NR-109 | Icon worker 的 store lifecycle／flush 不能逃出例外邊界 | 3 | `planned` | NR-097, NR-099 | [NR-109](work-items/NR-109-icon-worker-store-exception-boundary.md) |
 | NR-110 | Single-instance wake-up 不得有 HWND 建立前競態 | 1 | `planned` | NR-002 | [NR-110](work-items/NR-110-single-instance-startup-race.md) |
 | NR-111 | Owner-drawn App rows 必須提供真正的 Windows accessibility tree | 3 | `planned` | NR-015, NR-020 | [NR-111](work-items/NR-111-owner-drawn-accessibility-provider.md) |

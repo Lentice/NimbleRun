@@ -3,6 +3,7 @@
 #include "diagnostics/diagnostic_log.h"
 #include "pins/pin_store.h"
 
+#include <algorithm>
 #include <cstring>
 #include <utility>
 
@@ -35,7 +36,9 @@ bool ReplaceFileWithRetry(const std::wstring& tmp_path, const std::wstring& pack
 } // namespace
 
 IconStore::IconStore(IconStorePaths paths, std::uint64_t max_bytes, DiagnosticLog* log)
-    : pack_path_(std::move(paths.pack)), max_bytes_(max_bytes), log_(log) {}
+    : pack_path_(std::move(paths.pack)),
+      max_bytes_(std::min(max_bytes, kPackByteBudget)),
+      log_(log) {}
 
 IconStore::~IconStore() {
     Unmap();
@@ -263,9 +266,17 @@ bool IconStore::EvictOne(const std::unordered_set<std::uint64_t>& pinned_hashes,
 }
 
 bool IconStore::GrowView(std::uint64_t needed) {
+    if (needed > max_bytes_) {
+        return false;
+    }
     std::uint64_t target = needed;
     if (target % kGrowGranularity != 0) {
-        target += kGrowGranularity - target % kGrowGranularity;
+        const std::uint64_t rounded =
+            target + kGrowGranularity - target % kGrowGranularity;
+        target = rounded <= max_bytes_ ? rounded : max_bytes_;
+    }
+    if (target < needed || target > max_bytes_) {
+        return false;
     }
     LARGE_INTEGER size;
     size.QuadPart = static_cast<LONGLONG>(target);
@@ -365,7 +376,11 @@ bool IconStore::Flush(const std::vector<std::wstring>& pinned_ids, std::uint64_t
         return false;
     }
     if (pending_.empty()) {
-        return true;
+        if (file_size_ <= max_bytes_) {
+            return true;
+        }
+        const bool compacted = Compact();
+        return compacted && file_size_ <= max_bytes_;
     }
 
     // A payload that fails its CRC on disk is reclaimed as a free slot here, so
@@ -391,6 +406,49 @@ bool IconStore::Flush(const std::vector<std::wstring>& pinned_ids, std::uint64_t
         }
     }
 
+    // The limit is for the complete pack: the fixed prefix leaves only this
+    // much room for live payloads, and every pending payload in this batch must
+    // fit before any mapping growth or copy is attempted.
+    const std::uint64_t payload_budget =
+        max_bytes_ > kPayloadStart ? max_bytes_ - kPayloadStart : 0;
+    std::uint64_t pending_payload_bytes = 0;
+    for (const auto& [key, pending] : pending_) {
+        if (pending.payload.size() > payload_budget ||
+            pending_payload_bytes > payload_budget - pending.payload.size()) {
+            pending_.clear();
+            return true;
+        }
+        pending_payload_bytes += pending.payload.size();
+    }
+
+    std::vector<bool> touched(kIndexCapacity, false);
+    std::uint64_t live = LivePayloadBytes();
+    while (live > payload_budget - pending_payload_bytes) {
+        if (!EvictOne(pinned_hashes, touched, /*allow_pinned=*/false) &&
+            !EvictOne(pinned_hashes, touched, /*allow_pinned=*/true)) {
+            pending_.clear();
+            return true;
+        }
+        live = LivePayloadBytes();
+    }
+
+    // Eviction creates dead payload bytes in the current pack. Compact before
+    // staging writes when the append portion is full, so GrowView still sees a
+    // bounded whole-pack target.
+    if (file_size_ > max_bytes_ || header_.payload_end > max_bytes_ ||
+        pending_payload_bytes > max_bytes_ - header_.payload_end) {
+        const bool compacted = Compact();
+        if (!compacted && state_ != StoreState::Ready) {
+            pending_.clear();
+            return false;
+        }
+        if (file_size_ > max_bytes_ || header_.payload_end > max_bytes_ ||
+            pending_payload_bytes > max_bytes_ - header_.payload_end) {
+            pending_.clear();
+            return true;
+        }
+    }
+
     struct Write {
         std::size_t slot = 0;
         PackEntry entry;
@@ -398,7 +456,7 @@ bool IconStore::Flush(const std::vector<std::wstring>& pinned_ids, std::uint64_t
     };
     std::vector<Write> writes;
     writes.reserve(pending_.size());
-    std::vector<bool> touched(kIndexCapacity, false);
+    touched.assign(kIndexCapacity, false);
 
     // 1. Assign a slot to every pending put (reusing the existing one on
     //    overwrite). Slot pressure evicts the oldest non-pinned entry first.
@@ -451,23 +509,37 @@ bool IconStore::Flush(const std::vector<std::wstring>& pinned_ids, std::uint64_t
 
     // 3. Evict until the live payload fits the budget. Pinned entries are
     //    exempt unless nothing else is left (hard limits still apply).
-    std::uint64_t live = LivePayloadBytes();
-    while (live > max_bytes_) {
+    while (live > payload_budget) {
         if (!EvictOne(pinned_hashes, touched, /*allow_pinned=*/false)) {
             break;
         }
         live = LivePayloadBytes();
     }
-    while (live > max_bytes_) {
+    while (live > payload_budget) {
         if (!EvictOne(pinned_hashes, touched, /*allow_pinned=*/true)) {
             break;
         }
         live = LivePayloadBytes();
     }
+    if (live > payload_budget) {
+        // The staged writes are not on disk yet. Rescan the committed header
+        // to discard the in-memory staging/eviction decisions as one unit.
+        ScanIndex();
+        pending_.clear();
+        return true;
+    }
 
     // 4. Grow the mapping once for the whole round.
+    const std::uint64_t append_budget =
+        header_.payload_end <= max_bytes_ ? max_bytes_ - header_.payload_end : 0;
     std::uint64_t new_bytes = 0;
     for (const Write& write : writes) {
+        if (new_bytes > append_budget ||
+            write.payload.size() > append_budget - new_bytes) {
+            ScanIndex();
+            pending_.clear();
+            return true;
+        }
         new_bytes += write.payload.size();
     }
     const std::uint64_t new_payload_end = header_.payload_end + new_bytes;

@@ -68,7 +68,7 @@ public:
     // read side (DecodeHeader) and the eviction side both derive from it.
     static constexpr std::uint64_t kMaxPackBytes = kPackByteBudget;
 
-    // max_bytes overrides the byte budget for eviction tests; production
+    // max_bytes overrides the whole-pack budget for eviction tests; production
     // callers leave it at the default.
     explicit IconStore(IconStorePaths paths,
                        std::uint64_t max_bytes = kMaxPackBytes,
