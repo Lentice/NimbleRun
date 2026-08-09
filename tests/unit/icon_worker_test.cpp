@@ -388,6 +388,52 @@ void TestStopDropsQueueAndSilencesNewPosts() {
     DestroyWindow(window);
 }
 
+// NR-097: the handoff delivery edge. When the target window is gone, the
+// worker's PostMessageW fails and the existing erase guard must delete the
+// registered object -- no leak, no crash. The window is destroyed while the
+// request is gated IN FLIGHT so the post provably happens after destruction.
+void TestFailedPostErasesHandoffAndLeaksNothing() {
+    const HWND window = CreateMessageWindow();
+    FakeProvider provider;
+    provider.gate = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    IconWorker worker(window, kReadyMessage, provider);
+    worker.Start();
+
+    worker.Post({Entry(L"gone"), Key(L"gone"), true});
+    const DWORD entered_deadline = GetTickCount() + 1000;
+    while (!provider.entered.load() && GetTickCount() < entered_deadline) {
+        Sleep(1);
+    }
+    Expect(provider.entered.load(), "worker is blocked in the gated provider");
+
+    DestroyWindow(window);  // the worker's post below will fail: target_ is gone
+
+    SetEvent(provider.gate);  // release the worker so it posts to the dead window
+
+    // The failed post erases the registered token (which deletes the object);
+    // poll the registry under the shared mutex until it drains or times out.
+    const DWORD drain_deadline = GetTickCount() + 5000;
+    for (;;) {
+        bool empty;
+        {
+            std::lock_guard<std::mutex> lock(nimblerun::g_handoff_mutex);
+            empty = nimblerun::g_icon_handoffs.empty();
+        }
+        if (empty || GetTickCount() >= drain_deadline) {
+            break;
+        }
+        Sleep(2);
+    }
+    {
+        std::lock_guard<std::mutex> lock(nimblerun::g_handoff_mutex);
+        Expect(nimblerun::g_icon_handoffs.empty(),
+               "a failed post leaves no handoff entry behind");
+    }
+
+    CloseHandle(provider.gate);
+    worker.Stop();
+}
+
 // --- NR-036: disk-layer round trips through a temp pack. ---
 
 fs::path TestDir() {
@@ -740,6 +786,7 @@ int wmain() {
     TestVisibleJumpsTheQueue();
     TestVisibleJumpsAheadOfQueuedPrewarm();
     TestStopDropsQueueAndSilencesNewPosts();
+    TestFailedPostErasesHandoffAndLeaksNothing();
 
     TestDiskRoundTripServesSecondSessionFromDisk();
     TestSourceStampChangeRefetchesFromProvider();

@@ -1294,11 +1294,17 @@ void StartRebuild(HWND window, std::vector<nimblerun::CatalogSource> sources) {
     // triggered it, not settings applied after it began.
     const nimblerun::Settings settings_snapshot = g_settings;
     for (const nimblerun::CatalogSource source : sources) {
-        std::thread worker([window, generation, source, settings_snapshot]() {
-            auto* result = new RebuildResult;
-            result->generation = generation;
-            result->source = source;
+        std::thread worker;
+        try {
+            worker = std::thread([window, generation, source, settings_snapshot]() {
+            // NR-097: the allocation and the generation/source assignment are
+            // inside the try so a heap-exhaustion failure is caught instead of
+            // escaping the thread entry point.
+            RebuildResult* result = nullptr;
             try {
+                result = new RebuildResult;
+                result->generation = generation;
+                result->source = source;
                 switch (source) {
                 case nimblerun::CatalogSource::StartMenu: {
                     // NR-063: the enumerator reports source-level failure; the worker
@@ -1332,6 +1338,16 @@ void StartRebuild(HWND window, std::vector<nimblerun::CatalogSource> sources) {
                 }
                 }
             } catch (...) {
+                if (result == nullptr) {
+                    // NR-097: the result could not be allocated at all; there
+                    // is nothing to deliver and no token to post. Log and drop
+                    // this source for the generation (the coordinator treats a
+                    // missing report as the source having no result this cycle).
+                    if (g_diag) {
+                        g_diag->Write(L"rebuild", L"exception");
+                    }
+                    return;
+                }
                 // NR-076: an allocation/enumeration exception must not terminate
                 // the process (design-spec §11). Report a source failure so the
                 // coordinator keeps this source's old entries (design-spec
@@ -1349,8 +1365,19 @@ void StartRebuild(HWND window, std::vector<nimblerun::CatalogSource> sources) {
             // object -- NR-063's leak guard.
             {
                 std::lock_guard<std::mutex> lock(nimblerun::g_handoff_mutex);
-                g_rebuild_handoffs[reinterpret_cast<std::uintptr_t>(result)] =
-                    std::unique_ptr<RebuildResult>(result);
+                try {
+                    g_rebuild_handoffs[reinterpret_cast<std::uintptr_t>(result)] =
+                        std::unique_ptr<RebuildResult>(result);
+                } catch (...) {
+                    // NR-097: a bad_alloc during registry insertion must not
+                    // terminate the process or leak the object. Nothing was
+                    // registered, so drop the result and skip the post.
+                    if (g_diag) {
+                        g_diag->Write(L"rebuild", L"exception");
+                    }
+                    delete result;
+                    return;
+                }
             }
             if (!PostMessageW(window, kRebuildDoneMessage,
                               static_cast<WPARAM>(generation),
@@ -1358,8 +1385,27 @@ void StartRebuild(HWND window, std::vector<nimblerun::CatalogSource> sources) {
                 std::lock_guard<std::mutex> lock(nimblerun::g_handoff_mutex);
                 g_rebuild_handoffs.erase(reinterpret_cast<std::uintptr_t>(result));
             }
-        });
-        g_rebuild_threads.push_back(std::move(worker));
+            });
+        } catch (...) {
+            // NR-097: thread construction failed (std::system_error) on the UI
+            // thread. No worker was started, so there is nothing to join; log
+            // and skip this source for the generation.
+            if (g_diag) {
+                g_diag->Write(L"rebuild", L"exception");
+            }
+            continue;
+        }
+        try {
+            g_rebuild_threads.push_back(std::move(worker));
+        } catch (...) {
+            // NR-097: a joinable std::thread that is destroyed = terminate.
+            // push_back failed (bad_alloc), so join the just-started worker and
+            // skip this source; the process survives.
+            if (g_diag) {
+                g_diag->Write(L"rebuild", L"exception");
+            }
+            worker.join();
+        }
     }
 }
 

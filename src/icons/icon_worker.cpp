@@ -40,7 +40,17 @@ void IconWorker::Start() {
         return;  // already running
     }
     stop_ = false;
-    thread_ = std::thread(&IconWorker::Run, this);
+    try {
+        thread_ = std::thread(&IconWorker::Run, this);
+    } catch (...) {
+        // NR-097: thread creation failed (std::system_error). Stay stopped so
+        // later Post() calls drop requests; icons degrade to the fallback and
+        // the worker stays optional. Never propagate out of Start().
+        stop_ = true;
+        if (store_ != nullptr) {
+            store_->WriteLog(L"icon-worker", L"exception");
+        }
+    }
 }
 
 void IconWorker::Stop() {
@@ -121,10 +131,14 @@ void IconWorker::Run() {
         }
 
         const IconRequest& request = task.request;
-        auto* result = new IconResult;
-        result->encoded_key = request.key.Encode();
-
+        // NR-097: the result allocation and the encoded_key are inside the try
+        // so a heap-exhaustion failure is caught, not an unguarded escape from
+        // the worker entry point.
+        IconResult* result = nullptr;
         try {
+            result = new IconResult;
+            result->encoded_key = request.key.Encode();
+
             if (store_ != nullptr) {
                 // NR-036 fetch order (design-spec §FR-009): memory LRU (UI side),
                 // then the disk pack, then Shell. The worker owns every store call.
@@ -156,6 +170,15 @@ void IconWorker::Run() {
                 result->bitmap = provider_.Load(request.entry, request.key);
             }
         } catch (...) {
+            if (result == nullptr) {
+                // NR-097: the result could not be allocated at all (heap
+                // exhaustion). Nothing to hand back; the pending key stays set
+                // and the fallback keeps showing. Log and move on.
+                if (store_ != nullptr) {
+                    store_->WriteLog(L"icon-worker", L"exception");
+                }
+                continue;
+            }
             // NR-076: a throwing Shell/WIC/alloc path must not terminate the
             // process (design-spec §11: catch, log, discard). Report an empty
             // bitmap so the UI clears the pending key and keeps the fallback.
@@ -172,8 +195,19 @@ void IconWorker::Run() {
         // the object -- the old "window gone" leak guard.
         {
             std::lock_guard<std::mutex> lock(g_handoff_mutex);
-            g_icon_handoffs[reinterpret_cast<std::uintptr_t>(result)] =
-                std::unique_ptr<IconResult>(result);
+            try {
+                g_icon_handoffs[reinterpret_cast<std::uintptr_t>(result)] =
+                    std::unique_ptr<IconResult>(result);
+            } catch (...) {
+                // NR-097: a bad_alloc during registry insertion must not
+                // terminate the process or leak the object. Nothing was
+                // registered, so skip the post.
+                if (store_ != nullptr) {
+                    store_->WriteLog(L"icon-worker", L"exception");
+                }
+                delete result;
+                continue;
+            }
         }
         if (!PostMessageW(target_, result_message_, 0,
                           reinterpret_cast<LPARAM>(result))) {

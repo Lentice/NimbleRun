@@ -101,8 +101,33 @@ void CatalogWatcher::SetRoots(const std::vector<std::wstring>& roots,
         watch->index = static_cast<int>(i + 1);  // 1-based, 0 means none
         std::shared_ptr<CatalogWatcher::Watch> shared =
             std::shared_ptr<CatalogWatcher::Watch>(std::move(watch));
-        shared->thread = std::thread(WatchLoop, shared);
-        watches_.push_back(std::move(shared));    }
+        try {
+            shared->thread = std::thread(WatchLoop, shared);
+        } catch (...) {
+            // NR-097: thread creation failed (std::system_error). Close the
+            // opened directory handle and skip this root; other watches keep
+            // working. The watch is never added to watches_.
+            CloseHandle(shared->directory);
+            shared->directory = INVALID_HANDLE_VALUE;
+            continue;
+        }
+        try {
+            watches_.push_back(std::move(shared));
+        } catch (...) {
+            // NR-097: bad_alloc while growing watches_. Tear the watch down
+            // cleanly -- stop, cancel the blocked read, join the thread, close
+            // the handle -- so a joinable std::thread member is never destroyed
+            // without a join and no partially-initialized watch is left behind.
+            shared->stop.store(true);
+            CancelIoEx(shared->directory, nullptr);
+            if (shared->thread.joinable()) {
+                shared->thread.join();
+            }
+            CloseHandle(shared->directory);
+            shared->directory = INVALID_HANDLE_VALUE;
+            continue;
+        }
+    }
 }
 
 void CatalogWatcher::Stop() {
