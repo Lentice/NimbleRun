@@ -152,7 +152,7 @@
 | NR-113 | Catalog cache 項目未經來源驗證不得啟動 | 3 | `done` | NR-008, NR-011, NR-079 | [NR-113](work-items/NR-113-catalog-cache-launch-provenance.md) |
 | NR-114 | IconStore 開啟時拒絕超過 whole-pack budget 的實體檔案 | 3 | `done` | NR-075, NR-108 | [NR-114](work-items/NR-114-icon-store-open-budget-guard.md) |
 | NR-115 | Rebuild failure wake-up 失敗仍必須完成 generation | 3 | `done` | NR-100, NR-106 | [NR-115](work-items/NR-115-rebuild-failure-wakeup-reliability.md) |
-| NR-116 | Cold-start cache ＋ 首輪 source failure 保留該來源快取行與 usage | 3 | `ready` | NR-011, NR-063, NR-113 | [NR-116](work-items/NR-116-cold-start-cache-source-failure-retention.md) |
+| NR-116 | Cold-start cache ＋ 首輪 source failure 保留該來源快取行與 usage | 3 | `done` | NR-011, NR-063, NR-113 | [NR-116](work-items/NR-116-cold-start-cache-source-failure-retention.md) |
 
 ## Dependency lanes
 

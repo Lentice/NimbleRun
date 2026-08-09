@@ -3611,6 +3611,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     if (persistence_available &&
         nimblerun::LoadCatalogCache(data_directory, cached, &cache_newer)) {
         refresh.SetSnapshot(std::move(cached));
+        // NR-116: seed the per-source old entries from the startup cache, so a
+        // source that fails the FIRST rebuild keeps its cached rows instead of
+        // dropping them from the snapshot and wiping its usage records (§FR-008).
+        refresh.SeedSourceEntriesFromSnapshot();
     }
     // NR-079: a newer-schema file on disk must not be overwritten by this build
     // (design-spec §10.4); the flag stays set for the whole run.

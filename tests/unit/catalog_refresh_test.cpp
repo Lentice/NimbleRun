@@ -460,6 +460,72 @@ void TestSetSnapshotRespectsPrefilledNormalizedName() {
            "SetSnapshot keeps a prefilled normalized_name");
 }
 
+// NR-116: the cold-start gap. The host loads catalog.cache into the merged
+// snapshot and seeds the per-source old entries; when the FIRST rebuild loses
+// one source, that source's cached rows stay in the snapshot (unverified,
+// NR-113) instead of vanishing and wiping its usage records through the
+// reconcile (§FR-008). A later fully-successful generation replaces them with
+// fresh verified entries.
+void TestSeedSourceEntriesRetainsFailedSourceRows() {
+    CatalogRefreshCoordinator c;
+    AppEntry cache_app = Entry(L"cache-app", AppSource::AppsFolder);
+    AppEntry cache_user = Entry(L"cache-user", AppSource::UserFolder);
+    AppEntry cache_start = Entry(L"cache-start", AppSource::UserStartMenu);
+    for (AppEntry* entry : {&cache_app, &cache_user, &cache_start}) {
+        entry->launch_verified = false;  // cache rows are unverified (NR-113)
+    }
+    c.SetSnapshot({cache_app, cache_user, cache_start});
+    c.SeedSourceEntriesFromSnapshot();
+
+    const std::uint64_t gen = c.BeginGeneration(
+        {CatalogSource::StartMenu, CatalogSource::AppsFolder, CatalogSource::UserFolder});
+    c.ApplySourceResult(gen, CatalogSource::StartMenu,
+                        {Entry(L"fresh-start", AppSource::UserStartMenu)});
+    c.ApplySourceResult(gen, CatalogSource::UserFolder,
+                        {Entry(L"fresh-user", AppSource::UserFolder)});
+    c.ApplySourceFailure(gen, CatalogSource::AppsFolder);
+
+    Expect(c.GenerationComplete(gen), "NR-116: generation completes with the failed source");
+    Expect(!c.IsRebuildInProgress(), "NR-116: no rebuild in progress after completion");
+    const std::vector<AppEntry> after = c.Snapshot();
+    bool found_cache_app = false;
+    bool cache_app_unverified = false;
+    bool found_fresh_start = false;
+    bool found_fresh_user = false;
+    for (const AppEntry& entry : after) {
+        if (entry.stable_id == L"cache-app") {
+            found_cache_app = true;
+            cache_app_unverified = !entry.launch_verified;
+        }
+        found_fresh_start = found_fresh_start || entry.stable_id == L"fresh-start";
+        found_fresh_user = found_fresh_user || entry.stable_id == L"fresh-user";
+    }
+    Expect(after.size() == 3,
+           "NR-116: snapshot has not shrunk for the failed source");
+    Expect(found_cache_app && cache_app_unverified,
+           "NR-116: failed AppsFolder keeps its cached rows, still unverified");
+    Expect(found_fresh_start && found_fresh_user,
+           "NR-116: healthy sources publish their fresh verified entries");
+
+    const std::uint64_t gen2 = c.BeginGeneration(
+        {CatalogSource::StartMenu, CatalogSource::AppsFolder, CatalogSource::UserFolder});
+    c.ApplySourceResult(gen2, CatalogSource::AppsFolder,
+                        {Entry(L"cache-app", AppSource::AppsFolder)});  // same id, fresh
+    c.ApplySourceResult(gen2, CatalogSource::StartMenu,
+                        {Entry(L"fresh-start", AppSource::UserStartMenu)});
+    c.ApplySourceResult(gen2, CatalogSource::UserFolder,
+                        {Entry(L"fresh-user", AppSource::UserFolder)});
+
+    bool fresh_app_verified = false;
+    for (const AppEntry& entry : c.Snapshot()) {
+        if (entry.stable_id == L"cache-app") {
+            fresh_app_verified = entry.launch_verified;
+        }
+    }
+    Expect(fresh_app_verified,
+           "NR-116: a later successful generation replaces the retained cache row with a fresh verified one");
+}
+
 // NR-022: a failed launch with no rebuild running triggers exactly one refresh.
 void TestFailureNoRebuildTriggersOnce() {
     nimblerun::LaunchFailureRefreshGate gate;
@@ -728,6 +794,7 @@ int wmain() {
     TestDeliveryFailureCompletesGeneration();
     TestSetupFailureCompletesGeneration();
     TestFailureWakeupDrainCompletesGeneration();
+    TestSeedSourceEntriesRetainsFailedSourceRows();
     TestSnapshotFillsNormalizedName();
     TestSetSnapshotFillsNormalizedName();
     TestSetSnapshotRespectsPrefilledNormalizedName();

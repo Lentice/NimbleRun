@@ -176,6 +176,31 @@ void CatalogRefreshCoordinator::SetSnapshot(std::vector<AppEntry> merged) {
     merged_ = std::move(merged);
 }
 
+void CatalogRefreshCoordinator::SeedSourceEntriesFromSnapshot() {
+    // NR-116: split the startup cache snapshot back into per-source old entries.
+    // RebuildMerged then keeps each entry under its own source, so a source that
+    // fails the first rebuild retains its cached rows instead of dropping them
+    // from the snapshot (§FR-008). Values are copied untouched (launch_verified
+    // stays false for cache rows, NR-113). A switch over every source: adding an
+    // AppSource without a CatalogSource mapping trips -Wswitch.
+    for (const AppEntry& entry : merged_) {
+        CatalogSource source = CatalogSource::UserFolder;
+        switch (entry.source) {
+            case AppSource::UserStartMenu:
+            case AppSource::CommonStartMenu:
+                source = CatalogSource::StartMenu;
+                break;
+            case AppSource::AppsFolder:
+                source = CatalogSource::AppsFolder;
+                break;
+            case AppSource::UserFolder:
+                source = CatalogSource::UserFolder;
+                break;
+        }
+        source_entries_[source].push_back(entry);
+    }
+}
+
 bool CatalogRefreshCoordinator::GenerationComplete(std::uint64_t generation) const {
     if (generation != generation_) {
         return false;

@@ -137,3 +137,33 @@ git diff --name-only
 實作者需記錄 seed 方法形狀、verified 優先規則在 `Beats` 的位置、冷啟動 fixture、失敗來源行的
 unverified 保留、generation 完成證據、usage 資料損失路徑被關閉的方式、build／CTest 結果與
 任何未涵蓋的跨來源 stable_id 收斂邊角。
+
+實作（2026-08-09，single clean worker）：
+
+- **seed 方法**：`CatalogRefreshCoordinator` 新增公開 `void SeedSourceEntriesFromSnapshot()`
+  （`catalog_refresh.h` 於 `SetSnapshot` 旁、`catalog_refresh.cpp` 於 `SetSnapshot` 後）。對 `merged_`
+  每個 entry 以 exhaustive switch（`-Wswitch` 對未列舉 `AppSource` 警示）把 `AppSource`→`CatalogSource`
+  對映（UserStartMenu／CommonStartMenu→StartMenu、AppsFolder→AppsFolder、UserFolder→UserFolder）後
+  `source_entries_[source].push_back(entry)`；entry 值原樣複製（`launch_verified` 保留）、不動
+  `pending_`／`last_event_ms_`／generation state。host 啟動在 `LoadCatalogCache` 成功後
+  `SetSnapshot(std::move(cached))` 之後呼叫一次（`main.cpp:3611-3615`）。`RebuildMerged` 內的
+  `SetSnapshot` 不 re-seed。
+- **verified 優先**：`dedup.cpp` `Beats` 開頭（shortcut／source-priority 之前）加
+  `if (candidate.launch_verified != kept.launch_verified) return candidate.launch_verified;`——
+  fresh verified 行不被同 stable_id 的未驗證 cache 行靠既有 precedence 淘汰；enumeration 產出同質
+  verified，既有排序不變。
+- **冷啟動 fixture**：`catalog_refresh_test` 新增 `TestSeedSourceEntriesRetainsFailedSourceRows`——
+  seed 三來源 snapshot（全 unverified）→ 三來源 generation 中 AppsFolder `ApplySourceFailure`、
+  其餘兩來源 fresh `ApplySourceResult` → 斷言 snapshot 未縮水（size 3）、失敗來源的 cache 行保留且仍
+  unverified、healthy fresh 行在、generation 完成、`IsRebuildInProgress()` false；再一輪全成功 generation
+  後 cache 行被 fresh verified 取代。
+- **dedup fixture**：`identity_dedup_test` 新增 `TestVerifiedBeatsUnverifiedInDedup`——AppsFolder EXE
+  body（unverified）vs UserStartMenu shortcut（verified）同 stable_id → verified 勝；兩者皆 verified →
+  既有 AppsFolder precedence 不變。
+- **usage 資料損失路徑關閉方式**：失敗來源的 cache 行保留在 snapshot → `RefreshPanelSnapshot` 的
+  usage Reconcile 不再面對縮水 snapshot、不刪除該來源紀錄；`SaveCatalogCache` 也不再寫縮水版。
+- **build／CTest**：Release x64（LLVM-MinGW＋Ninja）無新增 warning；focused 2/2 綠（catalog_refresh、
+  identity_dedup）；完整 CTest 25/25 綠（含 lifecycle_check）。
+- **未涵蓋**：跨來源 stable_id 收斂的 collision 僅在 dedup 單元層覆蓋（verified-wins）；`RebuildMerged`
+  中失敗來源未驗證行與 healthy 來源 fresh 行同 stable_id 時 fresh 勝、cache 副本被 dedup 丟棄——正確。
+  未對「重複呼叫 seed」設守衛（僅啟動路徑呼叫一次，依 non-goal）。commit：`<controller fills after commit>`

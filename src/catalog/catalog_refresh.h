@@ -82,6 +82,17 @@ public:
     // Replaces the whole merged snapshot directly (startup cache load).
     void SetSnapshot(std::vector<AppEntry> merged);
 
+    // NR-116: at startup the host loads catalog.cache into the merged snapshot
+    // (SetSnapshot) and then calls this to seed the per-source "old entries" the
+    // coordinator retains on failure. Splitting the cache snapshot by AppSource
+    // means a source that FAILS the first rebuild keeps its cached rows (displayed,
+    // still launch_verified == false per NR-113) instead of vanishing from the
+    // panel and wiping its usage records (§FR-008). Entries keep their values
+    // untouched, including launch_verified. Only the host's startup cache-load path
+    // calls this; RebuildMerged's own SetSnapshot must NOT re-seed (it would
+    // overwrite per-source losers with dedup winners).
+    void SeedSourceEntriesFromSnapshot();
+
     // True when every source in the current generation has reported (success or
     // failure). NR-063: exposed for the host to reset its launch-failure gate
     // only when a whole rebuild cycle has finished, not on the first source.

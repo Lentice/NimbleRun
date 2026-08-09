@@ -234,6 +234,46 @@ void TestOrderingReproducible() {
     ExpectEntriesEqual(first, second);
 }
 
+// NR-116: a fresh current-source entry (verified) must never lose dedup to a
+// retained cache row (unverified) with the same stable_id, even when the cache
+// row carries better source precedence or is an EXE body while the fresh row is
+// a shortcut. Source priority is unchanged when both entries are verified.
+void TestVerifiedBeatsUnverifiedInDedup() {
+    const std::wstring target = L"C:\\Program Files\\AppX\\app.exe";
+    const std::wstring lnk =
+        L"C:\\Users\\me\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\AppX.lnk";
+    const std::wstring id = HashStableId(NormalizePathKey(target));
+
+    {
+        // Cache row: AppsFolder EXE body, unverified. Fresh row: user start
+        // menu shortcut, verified. Without the NR-116 rule the cache row wins
+        // on both the shortcut test and source precedence.
+        AppEntry cache = Entry(id, L"AppX", AppSource::AppsFolder, target);
+        cache.launch_verified = false;
+        std::vector<AppEntry> input = {
+            cache,
+            Entry(id, L"AppX", AppSource::UserStartMenu, lnk),  // verified (default)
+        };
+        const DedupResult out = DeduplicateCatalog(input);
+        Expect(out.entries.size() == 1, "NR-116: verified row keeps the slot");
+        Expect(out.entries[0].launch_verified, "NR-116: the verified entry is kept");
+        Expect(out.entries[0].source == AppSource::UserStartMenu,
+               "NR-116: the fresh shortcut, not the cached body, is kept");
+    }
+    {
+        // Both verified: source precedence decides as before (AppsFolder EXE
+        // body beats the user start menu shortcut to it).
+        std::vector<AppEntry> input = {
+            Entry(id, L"AppX", AppSource::UserStartMenu, lnk),
+            Entry(id, L"AppX", AppSource::AppsFolder, target),
+        };
+        const DedupResult out = DeduplicateCatalog(input);
+        Expect(out.entries.size() == 1, "NR-116: verified-only dedup still merges");
+        Expect(out.entries[0].source == AppSource::AppsFolder,
+               "NR-116: both verified, AppsFolder precedence unchanged");
+    }
+}
+
 void TestEmptyInput() {
     const DedupResult out = DeduplicateCatalog({});
     Expect(out.entries.empty(), "empty input yields empty result");
@@ -253,6 +293,7 @@ int wmain() {
     TestAppsFolderSameNameDistinct();
     TestPackagedAppAmbiguityKept();
     TestOrderingReproducible();
+    TestVerifiedBeatsUnverifiedInDedup();
     TestEmptyInput();
     std::printf("NR-007 identity and dedup check PASSED\n");
     return 0;

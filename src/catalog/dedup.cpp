@@ -56,6 +56,14 @@ bool IsShortcut(const AppEntry& entry) {
 }
 
 bool Beats(const AppEntry& candidate, const AppEntry& kept) {
+    // NR-116: a fresh current-source entry (verified) must never lose dedup to a
+    // retained cache row (unverified) with the same stable_id. This only changes
+    // mixed-provenance merges (cold-start retention); enumerator-produced entries
+    // are uniformly verified, so the shortcut/source-priority rules below keep
+    // their existing order for homogeneous input.
+    if (candidate.launch_verified != kept.launch_verified) {
+        return candidate.launch_verified;
+    }
     if (IsShortcut(candidate) != IsShortcut(kept)) {
         return !IsShortcut(candidate);
     }
