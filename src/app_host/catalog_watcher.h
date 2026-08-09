@@ -40,6 +40,11 @@ public:
         HWND window = nullptr;
         UINT message = 0;
         int index = 0;
+        // NR-101: delivery intent retained when a PostMessageW fails. 0 = nothing
+        // retained, 1 = a normal change, 2 = a full-rescan marker; a full rescan
+        // dominates a normal change when coalescing. Only touched by the watcher
+        // thread.
+        std::atomic<int> pending_notify{0};
     };
 
 private:

@@ -137,3 +137,37 @@ if(CMAKE_HOST_WIN32)
         )
     endif()
 endif()
+
+# NR-101 exception: catalog_watcher.cpp is compiled into the NimbleRun
+# executable, not a library, so this test compiles the watcher source directly
+# (the app_host module it belongs to). Registered after the loop so existing
+# CTest test numbers do not shift.
+add_executable(nimblerun_catalog_watcher_test
+    unit/catalog_watcher_test.cpp
+    ../src/app_host/catalog_watcher.cpp
+)
+
+target_include_directories(nimblerun_catalog_watcher_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src
+)
+
+target_link_libraries(nimblerun_catalog_watcher_test PRIVATE user32 kernel32)
+
+target_compile_definitions(nimblerun_catalog_watcher_test
+    PRIVATE
+        UNICODE
+        _UNICODE
+        WIN32_LEAN_AND_MEAN
+        NOMINMAX
+        WINVER=0x0A00
+        _WIN32_WINNT=0x0A00
+)
+
+if(MSVC OR CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
+    target_compile_options(nimblerun_catalog_watcher_test PRIVATE /W4 /permissive- /EHsc)
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    target_compile_options(nimblerun_catalog_watcher_test PRIVATE -Wall -Wextra -Wpedantic)
+    target_link_options(nimblerun_catalog_watcher_test PRIVATE -municode -static)
+endif()
+
+add_test(NAME nimblerun_catalog_watcher_test COMMAND nimblerun_catalog_watcher_test)

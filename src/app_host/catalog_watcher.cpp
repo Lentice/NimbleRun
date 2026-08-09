@@ -11,6 +11,43 @@ namespace {
 constexpr DWORD kNotifyFilter =
     FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME | FILE_NOTIFY_CHANGE_LAST_WRITE;
 constexpr DWORD kBufferBytes = 64 * 1024;
+// NR-101: retained delivery intent levels and the bounded post-retry backoff.
+// A failed PostMessageW (full queue, teardown race) must not silently lose a
+// change; the intent is coalesced into watch.pending_notify and re-delivered on
+// the next WatchLoop iteration.
+constexpr int kNotifyChange = 1;
+constexpr int kNotifyFullRescan = 2;
+constexpr int kPostRetries = 2;
+constexpr DWORD kPostRetrySleepMs = 250;
+
+// NR-101: delivers a change/full-rescan intent to the host through the existing
+// message path, retaining it when the post fails. Coalescing lets a full rescan
+// dominate a normal change, so a full-rescan intent is never downgraded. Only
+// the watcher thread touches pending_notify; a permanently invalid window
+// (teardown) stops delivery quietly.
+void PostNotification(CatalogWatcher::Watch& watch, int level) {
+    if (!watch.window || !IsWindow(watch.window)) {
+        return;  // teardown: never deliver to a destroyed HWND; Stop() joins
+    }
+    int pending = watch.pending_notify.load();
+    if (level > pending) {
+        pending = level;
+        watch.pending_notify.store(pending);
+    }
+    const bool full_rescan = pending == kNotifyFullRescan;
+    // Bounded backoff for a transiently full queue; never an endless retry
+    // loop. On exhaustion the intent stays retained so the top-of-loop recovery
+    // re-delivers at the next event / overflow / error cycle.
+    for (int attempt = 0; attempt < kPostRetries; ++attempt) {
+        if (PostMessageW(watch.window, watch.message,
+                         static_cast<WPARAM>(watch.index),
+                         full_rescan ? 1 : 0) != FALSE) {
+            watch.pending_notify.store(0);
+            return;
+        }
+        Sleep(kPostRetrySleepMs);
+    }
+}
 
 void WatchLoop(std::shared_ptr<CatalogWatcher::Watch> watch) {
     std::vector<BYTE> buffer(kBufferBytes);
@@ -19,6 +56,12 @@ void WatchLoop(std::shared_ptr<CatalogWatcher::Watch> watch) {
     // drives a 1 Hz rebuild loop in the host (§FR-008/NFR-002).
     bool reported = false;
     for (;;) {
+        // NR-101: re-deliver an intent a failed post retained earlier. This runs
+        // on the next event / overflow / error cycle, so recovery is event-driven
+        // (no timer). PostNotification guards an invalid window itself.
+        if (watch->pending_notify.load() != 0) {
+            PostNotification(*watch, watch->pending_notify.load());
+        }
         DWORD bytes_returned = 0;
         const BOOL ok = ReadDirectoryChangesW(
             watch->directory,
@@ -42,9 +85,8 @@ void WatchLoop(std::shared_ptr<CatalogWatcher::Watch> watch) {
             // of busy-looping. Report the first failure only; the backoff sleep
             // continues, and the next successful ReadDirectoryChangesW resets
             // the flag so a genuine later event is reported again.
-            if (!reported && watch->window && IsWindow(watch->window)) {
-                PostMessageW(watch->window, watch->message,
-                             static_cast<WPARAM>(watch->index), 1);
+            if (!reported) {
+                PostNotification(*watch, kNotifyFullRescan);
             }
             reported = true;
             Sleep(1000);
@@ -53,16 +95,10 @@ void WatchLoop(std::shared_ptr<CatalogWatcher::Watch> watch) {
         reported = false;
         if (bytes_returned == 0) {
             // Buffer overflow: the event list is incomplete, rescan the source.
-            if (watch->window && IsWindow(watch->window)) {
-                PostMessageW(watch->window, watch->message,
-                             static_cast<WPARAM>(watch->index), 1);
-            }
+            PostNotification(*watch, kNotifyFullRescan);
             continue;
         }
-        if (watch->window && IsWindow(watch->window)) {
-            PostMessageW(watch->window, watch->message,
-                         static_cast<WPARAM>(watch->index), 0);
-        }
+        PostNotification(*watch, kNotifyChange);
     }
 }
 
