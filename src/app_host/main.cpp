@@ -38,6 +38,7 @@
 #include <dwrite.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <ctime>
 #include <cwchar>
@@ -247,6 +248,14 @@ std::vector<nimblerun::CatalogSource> g_watch_sources;
 // Only ever touched on the UI thread (StartRebuild and WM_DESTROY), so it needs
 // no lock of its own.
 std::vector<std::thread> g_rebuild_threads;
+
+// NR-098: cooperative cancellation signal for in-flight rebuild scans. Set on
+// the UI thread (StartRebuild and WM_DESTROY both run there) before the
+// previous cycle's threads are joined, and reset only after they are all
+// joined, so the enumerators on those threads read it while it is stable and
+// the next generation starts clean. The atomic is the only synchronization the
+// enumerators need; no lock is required around it.
+std::atomic<bool> g_rebuild_cancel{false};
 
 // NR-017: bounded local diagnostic log under the per-user data dir. Only
 // sanitized stage names, error codes and short details are written; never
@@ -1261,13 +1270,21 @@ void RefreshPanelSnapshot() {
 // the previous one first. Rebuilds are debounced 500 ms apart (§FR-008), so a
 // cycle's threads have almost always finished by the time this is called, and
 // a finished thread returns from join() at once.
+// NR-098: the cancellation flag is set BEFORE any join, so a scan still in
+// flight (large or stuck directory, slow Shell extension) stops at its next
+// safe iteration boundary instead of blocking the UI thread on join() until it
+// finishes (design-spec §9.4). Reset only after every thread is joined so the
+// next generation starts clean. StartRebuild and WM_DESTROY both use this one
+// helper, so they share the same cancel→join order.
 void JoinRebuildThreads() {
+    g_rebuild_cancel.store(true);
     for (std::thread& worker : g_rebuild_threads) {
         if (worker.joinable()) {
             worker.join();
         }
     }
     g_rebuild_threads.clear();
+    g_rebuild_cancel.store(false);
 }
 
 // NR-011: starts one background thread per source in `sources` for a rebuild
@@ -1279,10 +1296,10 @@ void StartRebuild(HWND window, std::vector<nimblerun::CatalogSource> sources) {
     // NR-049: join the previous cycle before starting a new one. Rebuilds are
     // debounced 500 ms apart (§FR-008) and a cycle's threads have almost
     // always finished by the time the next one starts, so this is normally a
-    // no-op; when it is not, blocking the UI thread briefly is the correct
-    // trade against an unbounded thread vector. If a rebuild ever becomes
-    // slow enough that this is visible, the fix is to make the scan
-    // cancellable, not to go back to detach().
+    // no-op; when it is not, the join is bounded because JoinRebuildThreads
+    // first signals the cooperative cancellation flag, so a slow scan stops at
+    // its next safe iteration boundary instead of blocking the UI thread
+    // (NR-098).
     JoinRebuildThreads();
     const std::uint64_t generation = g_refresh->BeginGeneration(sources);
     // NR-049: the rebuild threads must never touch g_settings. It is UI-thread
@@ -1309,7 +1326,8 @@ void StartRebuild(HWND window, std::vector<nimblerun::CatalogSource> sources) {
                 case nimblerun::CatalogSource::StartMenu: {
                     // NR-063: the enumerator reports source-level failure; the worker
                     // just forwards it so the coordinator keeps the old entries.
-                    const auto res = nimblerun::EnumerateStartMenuCatalog();
+                    // NR-098: a cancelled scan also comes back as a source failure.
+                    const auto res = nimblerun::EnumerateStartMenuCatalog(&g_rebuild_cancel);
                     result->failed = !res.source_ok;
                     result->entries = std::move(res.entries);
                     break;
@@ -1320,7 +1338,7 @@ void StartRebuild(HWND window, std::vector<nimblerun::CatalogSource> sources) {
                     // merged snapshot clears old packaged-app entries via the same
                     // ApplySourceResult path.
                     if (settings_snapshot.include_windows_apps) {
-                        const auto res = nimblerun::EnumerateAppsFolderCatalog();
+                        const auto res = nimblerun::EnumerateAppsFolderCatalog(&g_rebuild_cancel);
                         result->failed = !res.source_ok;
                         result->entries = std::move(res.entries);
                     } else {
@@ -1331,7 +1349,8 @@ void StartRebuild(HWND window, std::vector<nimblerun::CatalogSource> sources) {
                     // NR-092: the enumerator reports source-level failure when an
                     // open directory's walk fails mid-enumeration; the worker just
                     // forwards it so the coordinator keeps the old entries.
-                    const auto res = nimblerun::EnumerateUserFolderCatalog(settings_snapshot);
+                    const auto res =
+                        nimblerun::EnumerateUserFolderCatalog(settings_snapshot, &g_rebuild_cancel);
                     result->failed = !res.source_ok;
                     result->entries = std::move(res.entries);
                     break;

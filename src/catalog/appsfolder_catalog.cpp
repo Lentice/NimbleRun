@@ -123,8 +123,12 @@ bool BuildAppsFolderEntry(const std::wstring& display_name,
     return true;
 }
 
-AppsFolderEnumerateResult EnumerateAppsFolderCatalog() {
+AppsFolderEnumerateResult EnumerateAppsFolderCatalog(std::atomic<bool>* cancel) {
     AppsFolderEnumerateResult result;
+    if (cancel && cancel->load()) {
+        result.source_ok = false;  // NR-098: cancelled: keep old entries
+        return result;
+    }
     ComGuard com;
     if (!com.Usable()) {
         result.source_ok = false;  // source-level failure (design-spec §FR-008)
@@ -148,6 +152,10 @@ AppsFolderEnumerateResult EnumerateAppsFolderCatalog() {
     }
 
     for (;;) {
+        if (cancel && cancel->load()) {
+            result.source_ok = false;  // NR-098: cancelled: keep old entries
+            break;
+        }
         IShellItem* child = nullptr;
         const HRESULT next = enumerator->Next(1, &child, nullptr);
         if (next == S_FALSE) {

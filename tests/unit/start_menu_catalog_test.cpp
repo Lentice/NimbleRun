@@ -8,11 +8,13 @@
 #include <shobjidl.h>
 #include <shtypes.h>
 
+#include <atomic>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -263,6 +265,85 @@ void TestMissingDirectory() {
     Expect(entries.empty(), "missing root yields no entries");
     RemoveTreeBestEffort(root);
 }
+
+// NR-098: a token that is already set must stop the walk before it starts and
+// must not commit anything; the same fixture without the token still walks
+// cleanly (the default nullptr argument keeps every existing caller compiling).
+void TestCancellationBeforeWalk() {
+    const std::wstring root = MakeTempDir("cancel_pre");
+    Expect(fs::create_directories(root + L"\\SubA"), "create cancel fixture subdir");
+    Expect(fs::create_directories(root + L"\\SubB"), "create cancel fixture subdir");
+    WriteBytes(root + L"\\Alpha.exe", "dummy");
+    WriteBytes(root + L"\\SubA\\Beta.exe", "dummy");
+    Expect(CreateShortcut(root + L"\\Gamma.lnk",
+                          L"C:\\Windows\\System32\\notepad.exe", L""),
+           "create cancel fixture shortcut");
+
+    std::atomic<bool> cancel{true};
+    std::vector<AppEntry> cancelled;
+    Expect(!EnumerateProgramsDirectory(root, AppSource::UserStartMenu, cancelled, &cancel),
+           "cancelled walk reports failure");
+    Expect(cancelled.empty(), "cancelled walk commits nothing");
+
+    std::vector<AppEntry> control;
+    Expect(EnumerateProgramsDirectory(root, AppSource::UserStartMenu, control),
+           "control walk ends without failure");
+    Expect(!control.empty(), "control walk populates entries");
+
+    RemoveTreeBestEffort(root);
+}
+
+// NR-098: a mid-walk cancellation must stop the walk and must not commit the
+// partial prefix as a complete snapshot. The fixture uses .lnk shortcuts spread
+// over subdirectories: each item goes through Shell resolution in ProcessFile,
+// so the walk spans many OS timeslices and the polling thread reliably observes
+// it mid-flight before the cancel lands (a plain .exe fixture could finish the
+// whole walk inside one timeslice on a fast core, making the test flaky).
+void TestCancellationMidWalk() {
+    const std::wstring root = MakeTempDir("cancel_mid");
+    constexpr int kDirs = 40;
+    constexpr int kFilesPerDir = 25;
+    std::size_t total = 0;
+    for (int d = 0; d < kDirs; ++d) {
+        const std::wstring dir = root + L"\\D" + std::to_wstring(d);
+        Expect(fs::create_directories(dir), "create mid-walk fixture subdir");
+        for (int f = 0; f < kFilesPerDir; ++f) {
+            Expect(CreateShortcut(dir + L"\\f" + std::to_wstring(f) + L".lnk",
+                                  L"C:\\Windows\\System32\\notepad.exe", L""),
+                   "create mid-walk fixture shortcut");
+            ++total;
+        }
+    }
+
+    std::atomic<bool> cancel{false};
+    std::vector<AppEntry> out;
+    bool walk_ok = true;
+    std::thread walker([&]() {
+        walk_ok = EnumerateProgramsDirectory(root, AppSource::UserStartMenu, out, &cancel);
+    });
+    // Poll out.size() from this thread until the walk has committed its first
+    // entry. Benign test-only concurrent read: only this thread reads the size
+    // while the worker pushes, and the final asserts run after join(). The
+    // deadline turns a regression that never pushes into a clean failure
+    // instead of an infinite hang.
+    const std::int64_t deadline =
+        static_cast<std::int64_t>(GetTickCount64()) + 5000;
+    while (out.size() == 0 && static_cast<std::int64_t>(GetTickCount64()) < deadline) {
+        Sleep(0);
+    }
+    cancel.store(true);
+    walker.join();
+
+    // The cancelled walk reports failure so the caller keeps its old entries,
+    // and the partial prefix is strictly smaller than the fixture -- nothing
+    // was committed as complete. A single FindNextFileW still runs to
+    // completion, so the exact stop point is at the next iteration boundary.
+    Expect(!walk_ok, "cancelled mid-walk returns failure (caller keeps old entries)");
+    Expect(out.size() > 0, "walk was mid-flight when cancelled");
+    Expect(out.size() < total, "cancelled mid-walk commits no complete snapshot");
+
+    RemoveTreeBestEffort(root);
+}
 void TestKnownFoldersSmoke() {
     // SHGetKnownFolderPath(FOLDERID_Programs) on a dev machine resolves to the
     // real user Start Menu; acceptable as a smoke test of the wiring only.
@@ -296,6 +377,8 @@ int wmain() {
 
     TestFixtureEnumeration();
     TestMissingDirectory();
+    TestCancellationBeforeWalk();
+    TestCancellationMidWalk();
     TestKnownFoldersSmoke();
 
     CoUninitialize();

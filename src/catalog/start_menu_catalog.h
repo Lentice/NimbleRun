@@ -2,6 +2,7 @@
 
 #include "catalog/app_entry.h"
 
+#include <atomic>
 #include <string>
 #include <vector>
 
@@ -20,17 +21,21 @@ struct StartMenuEnumerateResult {
 // Enumerates launchable apps from the current user's and all users' Start Menu
 // Programs Known Folders (FOLDERID_Programs, FOLDERID_CommonPrograms), resolved
 // via the Shell Known Folder API. Returns plain copyable AppEntry values with
-// no Shell COM pointer retained.
-StartMenuEnumerateResult EnumerateStartMenuCatalog();
+// no Shell COM pointer retained. `cancel` is an optional cooperative
+// cancellation token (NR-098): when set the walk stops at the next safe
+// iteration boundary, reports source_ok = false and commits nothing.
+StartMenuEnumerateResult EnumerateStartMenuCatalog(std::atomic<bool>* cancel = nullptr);
 
 // Core recursive enumeration of one Programs-style directory. Injectable so
 // tests can drive the logic with a synthetic fixture instead of the real Start
 // Menu. A missing or unreadable root yields nothing and is still a clean end
 // (NR-063); a single corrupt shortcut is skipped and never aborts the walk.
-// Returns false only when the walk started but failed mid-enumeration (NR-091):
-// the collected prefix must not be committed as a complete source.
+// Returns false only when the walk started but failed mid-enumeration (NR-091)
+// or was cancelled (NR-098): the collected prefix must not be committed as a
+// complete source. `cancel` is optional (nullptr = no cancellation).
 bool EnumerateProgramsDirectory(const std::wstring& root,
                                 AppSource source,
-                                std::vector<AppEntry>& out);
+                                std::vector<AppEntry>& out,
+                                std::atomic<bool>* cancel = nullptr);
 
 } // namespace nimblerun

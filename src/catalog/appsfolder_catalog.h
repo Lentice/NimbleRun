@@ -2,6 +2,7 @@
 
 #include "catalog/app_entry.h"
 
+#include <atomic>
 #include <cstddef>
 #include <string>
 #include <vector>
@@ -28,7 +29,10 @@ struct AppsFolderEnumerateResult {
 // A child whose parsing name is an AUMID gets its source_path from the Shell's
 // link-target property when it has one, so the row shows the real program path
 // instead of the "Windows app" label. Display only, never the identity key.
-AppsFolderEnumerateResult EnumerateAppsFolderCatalog();
+// `cancel` is an optional cooperative cancellation token (NR-098): when set the
+// enumeration stops at the next safe iteration boundary, reports
+// source_ok = false and commits nothing.
+AppsFolderEnumerateResult EnumerateAppsFolderCatalog(std::atomic<bool>* cancel = nullptr);
 
 // An AppsFolder parsing name for a legacy app is often Known Folder relative,
 // e.g. "{6D809377-...}\Notepad++\notepad++.exe" (design-spec §2.6). Expands the

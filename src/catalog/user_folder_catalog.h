@@ -3,6 +3,7 @@
 #include "catalog/app_entry.h"
 #include "settings/settings_store.h"
 
+#include <atomic>
 #include <string>
 #include <vector>
 
@@ -30,7 +31,10 @@ struct UserFolderEnumerateResult {
 // without extension, source_path and launch_identity equal to the full file
 // path (Shell-launchable), and a stable id hashed from that path (§10.3).
 // .exe/.cmd/.bat must be readable regular files; .lnk/.appref-ms are kept for
-// Shell validation at launch time.
-UserFolderEnumerateResult EnumerateUserFolderCatalog(const Settings& settings);
+// Shell validation at launch time. `cancel` is an optional cooperative
+// cancellation token (NR-098): when set the walk stops at the next safe
+// iteration boundary, reports source_ok = false and commits nothing.
+UserFolderEnumerateResult EnumerateUserFolderCatalog(const Settings& settings,
+                                                     std::atomic<bool>* cancel = nullptr);
 
 } // namespace nimblerun

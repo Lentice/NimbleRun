@@ -189,9 +189,15 @@ void ProcessFile(const std::wstring& path, AppSource source, std::vector<AppEntr
 // Returns false only when the walk started but did not finish cleanly
 // (NR-091): a mid-walk FindNextFileW failure, including a recursive child's,
 // poisons the whole source so the caller keeps the old entries. A missing or
-// unreadable directory is still a clean skip (NR-063 empty-walk success).
+// unreadable directory is still a clean skip (NR-063 empty-walk success). A
+// set `cancel` token also yields false at the next safe iteration boundary
+// (NR-098), so the collected prefix is never committed as a complete source.
 bool EnumerateDirectoryRecursive(const std::wstring& directory, AppSource source,
-                                 std::vector<AppEntry>& out) {
+                                 std::vector<AppEntry>& out,
+                                 std::atomic<bool>* cancel) {
+    if (cancel && cancel->load()) {
+        return false;  // NR-098: cancelled before this subtree: report failure
+    }
     const std::wstring pattern = directory + L"\\*";
     WIN32_FIND_DATAW find_data{};
     const HANDLE find = FindFirstFileW(pattern.c_str(), &find_data);
@@ -200,6 +206,10 @@ bool EnumerateDirectoryRecursive(const std::wstring& directory, AppSource source
     }
     bool failed = false;
     do {
+        if (cancel && cancel->load()) {
+            failed = true;  // NR-098: cancelled mid-walk: no partial commit
+            break;
+        }
         const std::wstring name = find_data.cFileName;
         if (name == L"." || name == L"..") {
             continue;
@@ -209,7 +219,7 @@ bool EnumerateDirectoryRecursive(const std::wstring& directory, AppSource source
             if ((find_data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0) {
                 // ponytail: junctions/symlinks are not followed so a loop cannot
                 // recurse forever; reparse-point app dirs are not a real source.
-                if (!EnumerateDirectoryRecursive(full, source, out)) {
+                if (!EnumerateDirectoryRecursive(full, source, out, cancel)) {
                     failed = true;  // NR-091: a child's failure must reach the caller
                 }
             }
@@ -242,8 +252,12 @@ std::wstring KnownFolderPath(REFKNOWNFOLDERID folder) {
 
 } // namespace
 
-StartMenuEnumerateResult EnumerateStartMenuCatalog() {
+StartMenuEnumerateResult EnumerateStartMenuCatalog(std::atomic<bool>* cancel) {
     StartMenuEnumerateResult result;
+    if (cancel && cancel->load()) {
+        result.source_ok = false;  // NR-098: cancelled: keep old entries
+        return result;
+    }
     ComGuard com;
     if (!com.Usable()) {
         result.source_ok = false;  // source-level failure (design-spec §FR-008)
@@ -252,12 +266,15 @@ StartMenuEnumerateResult EnumerateStartMenuCatalog() {
 
     const std::wstring user_root = KnownFolderPath(FOLDERID_Programs);
     if (!user_root.empty() &&
-        !EnumerateProgramsDirectory(user_root, AppSource::UserStartMenu, result.entries)) {
+        !EnumerateProgramsDirectory(user_root, AppSource::UserStartMenu, result.entries, cancel)) {
         result.source_ok = false;  // NR-091: mid-walk failure: keep old entries
+        if (cancel && cancel->load()) {
+            return result;  // NR-098: cancelled: stop before the next root
+        }
     }
     const std::wstring common_root = KnownFolderPath(FOLDERID_CommonPrograms);
     if (!common_root.empty() &&
-        !EnumerateProgramsDirectory(common_root, AppSource::CommonStartMenu, result.entries)) {
+        !EnumerateProgramsDirectory(common_root, AppSource::CommonStartMenu, result.entries, cancel)) {
         result.source_ok = false;  // NR-091: mid-walk failure: keep old entries
     }
     // NR-063: at least one known folder resolved (even to an empty walk) is a
@@ -271,12 +288,16 @@ StartMenuEnumerateResult EnumerateStartMenuCatalog() {
 }
 
 bool EnumerateProgramsDirectory(const std::wstring& root, AppSource source,
-                                std::vector<AppEntry>& out) {
+                                std::vector<AppEntry>& out,
+                                std::atomic<bool>* cancel) {
+    if (cancel && cancel->load()) {
+        return false;  // NR-098: cancelled before the walk: report failure
+    }
     ComGuard com;
     if (!com.Usable()) {
         return false;  // source-level failure (design-spec §FR-008)
     }
-    return EnumerateDirectoryRecursive(root, source, out);
+    return EnumerateDirectoryRecursive(root, source, out, cancel);
 }
 
 } // namespace nimblerun

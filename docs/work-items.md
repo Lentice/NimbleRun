@@ -134,7 +134,7 @@
 | NR-095 | AppsFolder 從未成功列舉時，下一次顯示面板應立即重試 | 2 | `done` | NR-006, NR-011, NR-063, NR-081 | [NR-095](work-items/NR-095-appsfolder-first-success-retry.md) |
 | NR-096 | NewerSchema 載入後，所有 user-data Save 路徑仍須保護原檔 | 1 | `done` | NR-004, NR-009, NR-013, NR-018, NR-058, NR-072, NR-080 | [NR-096](work-items/NR-096-newer-schema-write-guard.md) |
 | NR-097 | 補完 worker setup／handoff 的例外邊界，不讓背景例外終止 process | 3 | `done` | NR-076, NR-077 | [NR-097](work-items/NR-097-worker-setup-exception-boundary.md) |
-| NR-098 | Catalog rebuild 在關閉與新世代前必須具備可控取消路徑 | 3 | `ready` | NR-049, NR-063, NR-090, NR-091, NR-092 | [NR-098](work-items/NR-098-rebuild-shutdown-cancellation.md) |
+| NR-098 | Catalog rebuild 在關閉與新世代前必須具備可控取消路徑 | 3 | `done` | NR-049, NR-063, NR-090, NR-091, NR-092 | [NR-098](work-items/NR-098-rebuild-shutdown-cancellation.md) |
 | NR-099 | Icon worker queue 要有上限，並可取消過期工作 | 3 | `ready` | NR-032, NR-036, NR-037 | [NR-099](work-items/NR-099-icon-queue-bound-and-stop.md) |
 | NR-100 | Rebuild result delivery 失敗時，不得讓 generation 永久卡住 | 3 | `ready` | NR-063, NR-073, NR-077 | [NR-100](work-items/NR-100-rebuild-completion-handoff.md) |
 | NR-101 | Directory watcher 的 PostMessage 失敗不得遺失 catalog 變更 | 2 | `ready` | NR-011, NR-063, NR-065, NR-074 | [NR-101](work-items/NR-101-watcher-notification-delivery.md) |
