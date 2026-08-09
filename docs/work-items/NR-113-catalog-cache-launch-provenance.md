@@ -149,4 +149,4 @@ git diff --name-only
   cache row 的未驗證 identity 會留在 snapshot 直到後續成功重新驗證；依 §FR-008 單一來源失敗語意正確
   （可顯示、仍被 guard 擋啟動）。此為既有行為，非本 item 引入。
 
-commit：`<controller fills after commit>`
+commit：`43330cb`
