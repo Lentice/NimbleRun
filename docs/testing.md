@@ -12,7 +12,7 @@ ctest --test-dir build --output-on-failure
 
 - **Unit tests** (`tests/unit/*.cpp`): the bulk of the suite, one executable per library, covering the pure search, ranking, catalog, storage, settings, icons, pins, usage, and diagnostics logic. The `nimblerun_catalog_watcher_test` is the exception: it compiles `src/app_host/catalog_watcher.cpp` directly because the watcher is part of the executable, not a library. Keep catalog, storage, and scoring tests free of HWND and Shell COM dependencies wherever possible.
 - **Integration check** (`tests/integration/lifecycle_check.ps1`): registered as the `nimblerun_lifecycle_check` test; launches a real `NimbleRun.exe`, verifies the single-instance wake-up, and the tray Exit terminates cleanly. Also runs under `ctest`.
-- **Release evidence** (`tests/release/release_evidence.ps1`): builds, runs the full suite, samples the idle working set / private bytes / handle count of a settled hidden instance, and regenerates `docs/release-evidence.md`. Run manually before a release with `pwsh -NoProfile -File tests/release/release_evidence.ps1`; it is not registered as a `ctest` test.
+- **Release evidence** (`tests/release/release_evidence.ps1`): builds, runs the full suite, records process smoke context, and regenerates `docs/release-evidence.md`. The report has one row for every NFR-001 blocking metric; any row that is not measured with its required profile makes the result `INCOMPLETE` and the runner exits non-zero. Run manually before a release with `pwsh -NoProfile -File tests/release/release_evidence.ps1`; it is not registered as a `ctest` test.
 
 ## Manual smoke test
 
@@ -41,7 +41,7 @@ When testing a conflicting or Windows-reserved shortcut, confirm that NimbleRun 
 - [ ] Corrupt shortcuts, icon failures, and corrupt caches do not crash the process.
 - [ ] High contrast, light/dark mode, keyboard navigation, and 100/150/200% DPI work.
 - [ ] Core flows work without network access or administrator rights.
-- [ ] Release measurements pass the blocking thresholds in `docs/performance-baseline.md`.
+- [ ] Release measurements pass every blocking threshold in `docs/performance-baseline.md`; an `INCOMPLETE` evidence report is not a release pass.
 
 ## Required test environments
 

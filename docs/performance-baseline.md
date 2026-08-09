@@ -17,6 +17,17 @@ These are Release x64 measurements, not Debug estimates. Record the OS build, CP
 | 單次整窗重繪（grid，24 格） | — | — | 1.40 ms（p95 1.94 ms） | 見下方「整窗重繪的成本」，2026-08-07；參考值，不設門檻 |
 | 單次整窗重繪（list，8 列） | — | — | 0.74 ms（p95 0.95 ms） | 同上。這是每次按鍵 `EN_UPDATE` 整窗失效的實際代價 |
 
+## Release evidence contract
+
+The nine NFR-001 rows with blocking thresholds are release gates. The values in this
+baseline are historical measurements or context unless the current release evidence
+report identifies a compliant measurement source. In particular, the existing 3-second
+idle samples do not satisfy the specification's initial-indexing-plus-60-second idle
+condition, and the app-owned thread value is an expectation until a start-address
+census. `tests/release/release_evidence.ps1` therefore emits every blocking row and
+returns `INCOMPLETE` with a non-zero exit code for any row that is not measured. A
+process-total thread count, executable size, or estimate cannot satisfy a blocking row.
+
 ## 整窗重繪的成本
 
 2026-08-07 稽核提出兩個效能假設，兩個都以量測否決，**不開 work item**：

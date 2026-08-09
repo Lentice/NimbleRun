@@ -1,12 +1,11 @@
 # Release evidence runner (NR-017 / design-spec §12.4, §15 Phase 5).
 #
 # Produces a repeatable evidence report with tool versions, environment
-# conditions, the exact commands run and their exit codes, plus a few objective
-# measurements compared against the blocking thresholds in
-# docs/performance-baseline.md. Runs build + the full CTest suite, a process
-# launch/terminate smoke, and a short soak. Fails (exit 1) when a blocking
-# threshold is exceeded or the build/test suite fails; sub-threshold items are
-# reported as known issues, not failures.
+# conditions, the exact commands run and their exit codes, plus an explicit
+# row for every NFR-001 blocking metric. Runs build + the full CTest suite, a
+# process launch/terminate smoke, and a short soak. Unknown blocking metrics
+# fail closed as INCOMPLETE (exit 2); measured threshold failures and build /
+# test failures exit 1. Process totals and estimates are context only.
 #
 # Usage:
 #   pwsh -NoProfile -File tests/release/release_evidence.ps1 [-OutPath <file.md>]
@@ -186,8 +185,29 @@ $process += '```'
 $process += ""
 
 # ---- Threshold comparison ------------------------------------------------
-# Only thresholds that are objective and measurable from this harness are
-# gated here. The full table stays in docs/performance-baseline.md.
+# NFR-001 has nine blocking rows. Keep this list explicit: a new baseline row
+# must not disappear from release evidence. A row is release-valid only when
+# this runner has a measurement source that satisfies the NFR-001 conditions
+# (Release x64, no debugger, initial indexing complete, 60s idle, and the
+# required catalog/DPI profile). Existing smoke samples are context, not
+# substitutes for those measurements.
+$blockingMetrics = @(
+    [pscustomobject]@{ Metric = 'Idle CPU, 15-minute average'; Threshold = '> 0.5% logical CPU equivalent'; Source = 'No 15-minute idle CPU sample in this runner'; Measured = 'not measured'; Value = 'not measured'; Verdict = 'INCOMPLETE' }
+    [pscustomobject]@{ Metric = 'Idle working set'; Threshold = '> 80 MiB'; Source = 'The 3-second smoke sample is context only; no compliant 60-second idle profile'; Measured = 'not measured'; Value = 'not measured'; Verdict = 'INCOMPLETE' }
+    [pscustomobject]@{ Metric = 'Idle private bytes'; Threshold = '> 70 MiB'; Source = 'The 3-second smoke sample is context only; no compliant 60-second idle profile'; Measured = 'not measured'; Value = 'not measured'; Verdict = 'INCOMPLETE' }
+    [pscustomobject]@{ Metric = 'Visible panel with 20 icons working set'; Threshold = '> 100 MiB'; Source = 'No visible-panel 20-icon census'; Measured = 'not measured'; Value = 'not measured'; Verdict = 'INCOMPLETE' }
+    [pscustomobject]@{ Metric = 'Cold start to hotkey-ready'; Threshold = '> 1,000 ms'; Source = 'No startup-to-hotkey-ready timestamp'; Measured = 'not measured'; Value = 'not measured'; Verdict = 'INCOMPLETE' }
+    [pscustomobject]@{ Metric = 'Warm hotkey to input-ready, p95'; Threshold = 'p95 > 150 ms'; Source = 'No warm hotkey/input-ready latency profile'; Measured = 'not measured'; Value = 'not measured'; Verdict = 'INCOMPLETE' }
+    [pscustomobject]@{ Metric = 'Filter 500 apps, p95'; Threshold = 'p95 > 16 ms'; Source = 'No 500-entry p95 profile run by this release invocation'; Measured = 'not measured'; Value = 'not measured'; Verdict = 'INCOMPLETE' }
+    [pscustomobject]@{ Metric = 'Idle app-owned thread count'; Threshold = '超出 2 + watcher root 數'; Source = 'No start-address census; process total is context only'; Measured = 'not measured'; Value = 'not measured'; Verdict = 'INCOMPLETE' }
+    [pscustomobject]@{ Metric = 'icons.cache file size'; Threshold = '> 48 MiB'; Source = 'No complete icon build followed by an actual file-size sample'; Measured = 'not measured'; Value = 'not measured'; Verdict = 'INCOMPLETE' }
+)
+if ($blockingMetrics.Count -ne 9) {
+    throw "NFR-001 blocking metric list must contain exactly 9 rows"
+}
+$metricFailures = @($blockingMetrics | Where-Object { $_.Measured -eq 'measured' -and $_.Verdict -eq 'FAIL' })
+$metricIncomplete = @($blockingMetrics | Where-Object { $_.Measured -ne 'measured' -or $_.Verdict -eq 'INCOMPLETE' })
+
 $threadCount = $null
 foreach ($line in $idle) {
     if ($line -match '^idle thread count: (\d+)$') {
@@ -198,32 +218,26 @@ foreach ($line in $idle) {
 $gate = @()
 $gate += "## Blocking-threshold gate"
 $gate += ""
-$gate += "| Metric | Blocking threshold | Measured | Verdict |"
-$gate += "|---|---|---|---|"
-$gateFailure = $stale
-
-# The idle thread-count threshold now applies to app-owned threads only
-# (design-spec section 9.2, docs/performance-baseline.md): 1 UI thread + 1
-# resident icon worker + one directory watcher per watcher root. This harness
-# can only read the process total, which also counts Direct2D/D3D/DXGI device
-# threads, STA COM / Shell extension RPC threads and ntdll threadpool workers.
-# Gating on that total measured other people's implementations, so it is now
-# recorded as environment context instead. Restoring a real gate needs a thread
-# start-address census here.
-if ($null -ne $threadCount) {
-    $gate += "| Idle process thread count | not gated (context only) | $threadCount | recorded |"
-} else {
-    $gate += "| Idle process thread count | not gated (context only) | not measured | recorded |"
+$gate += "| Metric | Blocking threshold | Measurement source | Measured | Value | Verdict |"
+$gate += "|---|---|---|---|---|---|"
+foreach ($metric in $blockingMetrics) {
+    $gate += "| $($metric.Metric) | $($metric.Threshold) | $($metric.Source) | $($metric.Measured) | $($metric.Value) | $($metric.Verdict) |"
 }
-if ($stale) {
-    $gate += "| CTest registration vs executed | registered == executed | registered $registeredTests vs executed $executedDisplay | STALE |"
-}
+$gate += ""
+$gate += "### CTest gate"
+$gate += ""
+$gate += "CTest is a separate release gate; its registration count comes from live `ctest -N` output."
+$gate += ""
+$gate += "| Metric | Threshold | Measurement source | Measured | Value | Verdict |"
+$gate += "|---|---|---|---|---|---|"
+$gate += "| CTest registration vs executed | registered == executed | live ctest -N vs full-suite output | measured | registered $registeredTests vs executed $executedDisplay | $(if ($stale) { 'STALE' } else { 'PASS' }) |"
 
 # Sub-threshold items that are not hard gates are recorded as known issues.
 $gate += ""
-$gate += "### Known issues (below target, not blocking)"
+$gate += "### Non-blocking process context"
 $gate += ""
-$gate += "- Idle CPU 15-min average, working set/private bytes budget, cold start, warm hotkey p95, and filter p95 are recorded in `docs/performance-baseline.md` and require the full measurement harness (multi-machine, 100/500/2000-entry catalogs). Not gated here."
+$gate += "- Idle process thread count: $(if ($null -eq $threadCount) { 'not measured' } else { $threadCount }). This is context only and never substitutes for the app-owned start-address census."
+$gate += "- Idle working set/private bytes and the short soak are smoke context only; they do not satisfy the NFR-001 60-second/profile requirements."
 $gate += ""
 $gate += '### Thread-count attribution'
 $gate += ""
@@ -251,11 +265,20 @@ foreach ($item in @($configure, $build, $ctest)) {
 $sections += $process
 $sections += $gate
 
+$gateFailure = $stale -or ($metricFailures.Count -gt 0)
+$incomplete = $metricIncomplete.Count -gt 0
 $exitFailures = $configure.Exit -or $build.Exit -or $ctest.Exit -or ($smokeFailures -gt 0) -or ($soakFailures -gt 0) -or $gateFailure
 
 $sections += "## Result"
 $sections += ""
-$sections += if ($exitFailures) { "- **FAILED** (build/test/process/threshold gate failed)" } else { "- **PASSED**" }
+$result = if ($incomplete) {
+    if ($exitFailures) { 'INCOMPLETE (blocking NFR-001 metrics are not measured; another gate also failed)' } else { 'INCOMPLETE (one or more blocking NFR-001 metrics are not measured)' }
+} elseif ($exitFailures) {
+    'FAILED (build/test/process/threshold gate failed)'
+} else {
+    'PASSED'
+}
+$sections += "- **$result**"
 $sections += ""
 
 $report = $sections -join "`n"
@@ -265,8 +288,15 @@ if ($exitFailures) {
     if ($stale) {
         Write-Output "STALE: registered CTest count ($registeredTests) differs from the executed count ($executedDisplay). Regenerate after a clean build + ctest run."
     }
+    if ($incomplete) {
+        Write-Output 'Evidence is incomplete: one or more blocking NFR-001 metrics are not measured.'
+    }
     Write-Output 'One or more gates failed.'
     exit 1
+}
+if ($incomplete) {
+    Write-Output 'Evidence is incomplete: one or more blocking NFR-001 metrics are not measured.'
+    exit 2
 }
 Write-Output 'All gates passed.'
 exit 0

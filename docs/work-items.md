@@ -148,7 +148,7 @@
 | NR-109 | Icon worker 的 store lifecycle／flush 不能逃出例外邊界 | 3 | `planned` | NR-097, NR-099 | [NR-109](work-items/NR-109-icon-worker-store-exception-boundary.md) |
 | NR-110 | Single-instance wake-up 不得有 HWND 建立前競態 | 1 | `planned` | NR-002 | [NR-110](work-items/NR-110-single-instance-startup-race.md) |
 | NR-111 | Owner-drawn App rows 必須提供真正的 Windows accessibility tree | 3 | `planned` | NR-015, NR-020 | [NR-111](work-items/NR-111-owner-drawn-accessibility-provider.md) |
-| NR-112 | Release evidence 不得把未量測的 blocking gates 報成 PASSED | 5 | `planned` | NR-017, NR-104 | [NR-112](work-items/NR-112-release-evidence-unmeasured-gates.md) |
+| NR-112 | Release evidence 不得把未量測的 blocking gates 報成 PASSED | 5 | `done` | NR-017, NR-104 | [NR-112](work-items/NR-112-release-evidence-unmeasured-gates.md) |
 
 ## Dependency lanes
 

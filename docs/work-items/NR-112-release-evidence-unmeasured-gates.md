@@ -103,6 +103,22 @@ git diff --name-only
 
 ## Handoff
 
-實作者需記錄每個 blocking row 的 measurement source、pass/fail/incomplete table、25/25
-CTest evidence、multi-environment limitations、runner exit code 與是否需要拆出的後續 measurement items。
+（2026-08-09 實作）
 
+- `tests/release/release_evidence.ps1` 明列 NFR-001 的 9 個 blocking rows；每列都有
+  threshold、measurement source、`measured`、value、`PASS`／`FAIL`／`INCOMPLETE` verdict。
+  現行 runner 尚未擁有符合規格的 60 秒 idle、可見 20 icons、cold/warm UI latency、
+  500-entry p95、app-owned start-address census 或完整 icons.cache profile，因此這些
+  rows 寫 `not measured`／`INCOMPLETE`，不把 3 秒 process smoke 或 baseline estimate 當證據。
+- 行程總執行緒數只留在 process context；沒有拿它替代 app-owned thread gate。CTest
+  registration 仍由 live `ctest -N` 取得，本次為 `Total Tests: 25`，full suite 為 25/25。
+- `docs/testing.md` 與 `docs/performance-baseline.md` 已明確說明 `INCOMPLETE` 不得視為
+  release pass；`docs/release-evidence.md` 為本 runner 產出的 current report。
+- 本次 runner exit code：`2`（build／CTest／process smoke 通過，但 blocking metrics
+  未完整量測）。完整 measurement profile 仍需拆成後續 measurement items，至少覆蓋兩個
+  Windows 11 x64 環境、100/500/2,000 catalog 與 100/150/200% DPI。
+- 獨立提升權限的 CTest 重跑曾有一次 `nimblerun_icon_store_test` 的
+  `FAILED: oldest evicted`（其餘 24/25）；該測試與目前工作樹既有的 NR-108 `IconStore`
+  修改重疊，NR-112 未修改或診斷它。最終 release runner 同次完整 suite 為 25/25，故
+  current evidence 保留 25-test authority。
+- 未修改 `src/`、未修改 `docs/work-items.md` status、未 commit／未 push。
