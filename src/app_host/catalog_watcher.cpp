@@ -66,6 +66,9 @@ void WatchLoop(std::shared_ptr<CatalogWatcher::Watch> watch) {
     bool reported = false;
     DWORD pending_retry_ms = kPendingNotifyRetryInitialMs;
     for (;;) {
+        if (watch->stop.load()) {
+            break;
+        }
         // NR-101/105: re-deliver an intent a failed post retained earlier.
         // PostNotification guards an invalid window itself.
         if (watch->pending_notify.load() != 0) {
@@ -82,6 +85,12 @@ void WatchLoop(std::shared_ptr<CatalogWatcher::Watch> watch) {
             &overlapped,
             nullptr);
         const DWORD start_error = started == FALSE ? GetLastError() : ERROR_SUCCESS;
+        // Stop() can win the race immediately before this read starts, so its
+        // first CancelIoEx may have seen no pending operation. Cancel again
+        // after the call to close that gap before entering the wait.
+        if (watch->stop.load()) {
+            CancelIoEx(watch->directory, &overlapped);
+        }
         if (started == FALSE && start_error != ERROR_IO_PENDING) {
             if (start_error == ERROR_OPERATION_ABORTED || watch->stop.load()) {
                 break;  // CancelIoEx from Stop(): normal shutdown
