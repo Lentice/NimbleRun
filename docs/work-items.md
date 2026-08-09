@@ -149,6 +149,9 @@
 | NR-110 | Single-instance wake-up 不得有 HWND 建立前競態 | 1 | `done` | NR-002 | [NR-110](work-items/NR-110-single-instance-startup-race.md) |
 | NR-111 | Owner-drawn App rows 必須提供真正的 Windows accessibility tree | 3 | `done` | NR-015, NR-020 | [NR-111](work-items/NR-111-owner-drawn-accessibility-provider.md) |
 | NR-112 | Release evidence 不得把未量測的 blocking gates 報成 PASSED | 5 | `done` | NR-017, NR-104 | [NR-112](work-items/NR-112-release-evidence-unmeasured-gates.md) |
+| NR-113 | Catalog cache 項目未經來源驗證不得啟動 | 3 | `ready` | NR-008, NR-011, NR-079 | [NR-113](work-items/NR-113-catalog-cache-launch-provenance.md) |
+| NR-114 | IconStore 開啟時拒絕超過 whole-pack budget 的實體檔案 | 3 | `ready` | NR-075, NR-108 | [NR-114](work-items/NR-114-icon-store-open-budget-guard.md) |
+| NR-115 | Rebuild failure wake-up 失敗仍必須完成 generation | 3 | `ready` | NR-100, NR-106 | [NR-115](work-items/NR-115-rebuild-failure-wakeup-reliability.md) |
 
 ## Dependency lanes
 
@@ -277,6 +280,17 @@ NR-103（PMv2 initial DPI query）── 依賴 NR-015（done）；MEDIUM；修�
 NR-104（CTest／release evidence count drift）── 依賴 NR-017、NR-056、NR-089（皆 done）；MEDIUM；純測試／文件，不改產品 code
 ```
 
+## 稽核修補 lane 8（NR-113～NR-115，2026-08-09 第十次全 repo 稽核產出）
+
+```
+NR-113（catalog.cache launch provenance）── 依賴 NR-008、NR-011、NR-079（皆 done）；CRITICAL；
+        cache 可供啟動前顯示，但 cache-only／未經目前來源驗證的項目不得進入 Shell launch
+NR-114（IconStore Open-time physical whole-pack budget）── 依賴 NR-075、NR-108（皆 done）；IMPORTANT；
+        補 NR-108 只保護成功 Flush、NR-075 只保護 payload_end 的 read-side 缺口
+NR-115（rebuild failure wake-up PostMessage failure）── 依賴 NR-100、NR-106（皆 done）；IMPORTANT；
+        覆寫兩項交接區「記錄留在 vector 等下次 drain」的安全假設：醒醒訊息本身失敗時沒有下次事件
+```
+
 ## 已否決的方向 — 不要重開
 
 寫新 item 前先讀這節（[AGENTS.md](../AGENTS.md) §Work item authoring rules 要求）。以下方向都已有明確依據被否決；**要重開是允許的，但新 item 內必須寫出覆寫與新證據**，不要在此節之外默默開一個。此節只收「有依據的否決」，純粹的優先序取捨屬於下面的 §計畫決策紀錄。
@@ -290,6 +304,13 @@ NR-104（CTest／release evidence count drift）── 依賴 NR-017、NR-056、
 | 把 FR-004a 的 program-like 判準套用到 FR-005 使用者自訂資料夾 | `docs/design-spec.md:354` | 明文「此判準**不套用於** FR-005 的使用者自訂資料夾」。該來源的把關者是使用者自己勾選的副檔名清單；二次過濾會無聲擋掉使用者手動加入的副檔名。 |
 
 ## 計畫決策紀錄
+
+- 2026-08-09（NR-113～NR-115，第十次全 repo 稽核）：cache 與 icon pack 都是可重建快取，
+  但「可重建」不等於「可把未驗證內容當成啟動信任來源」或「可在 Open 時接受超額實體檔案」。
+  NR-113 保留有效 cache 的即時顯示，只把目前 Catalog source 的成功結果視為 launch provenance；
+  NR-114 以既有 `kPackByteBudget` 同時約束 payload_end 與 physical file size，不新增第二個 magic number。
+  另有 NR-115 擴充 NR-100／NR-106：它不改 event-driven、token registry 或 generation semantics，
+  只修正 failure record 已入列但 wake-up `PostMessageW` 失敗時沒有任何後續 drain 事件的缺口。
 
 - 2026-08-09（NR-095，首次 AppsFolder 失敗重試）：**覆寫 NR-081 Decisions §3 的
   no-success 表示方式**。NR-081 正確保留了 running-generation guard，也正確要求
