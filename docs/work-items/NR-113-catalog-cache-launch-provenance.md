@@ -119,5 +119,34 @@ git diff --name-only
 
 ## Handoff
 
-實作者需記錄 cache row 的 display-vs-launch 狀態、fresh source 驗證邊界、四個 launch caller 的
-追蹤結果、竄改 fixture、Shell call 是否被阻擋、build／CTest 結果與任何未涵蓋的跨版本 Shell 行為。
+實作（2026-08-09，single clean worker）：
+
+- **display-vs-launch 狀態**：`AppEntry` 新增可 copy 的 `bool launch_verified = true`（`src/catalog/app_entry.h`，
+  尾部成員、不序列化）。來源 enumeration 產生的 entry 預設 verified；`LoadCatalogCache` 對每個解析出的
+  entry 設 `launch_verified = false`（`src/catalog/catalog_cache.cpp:145-150`），因此 cache row 可顯示／搜尋
+  但不可啟動。`SerializeEntry` 與 cache schema（version 2、7 fields）一字未動，reload 一律從未驗證開始——
+  這是正確語意：cache 是重建加速器，不是真實來源（§10.2）。
+- **單一 activation guard**：所有 launch 入口（Enter `main.cpp:2778,2845`、滑鼠 `WM_LBUTTONDOWN:3266`、
+  `WM_LBUTTONUP:3288`、Alt+digit，全部收斂到 `ActivateRow:1040` → `LaunchEntry`）都由 `LaunchEntry`
+  （`src/launch/shell_launch.cpp:8`）的同一 guard 覆蓋：`launch_identity.empty() || !launch_verified` →
+  `{false, ERROR_INVALID_PARAMETER}`，不呼叫 Shell。context menu（`ShowItemMenu`）無 launch item，
+  非 launch 路徑。guard 失敗沿用既有 NR-022 launch-failure／refresh 流程，未新增任何 caller 側重複判斷。
+- **fresh source 驗證邊界**：`CatalogRefreshCoordinator::RebuildMerged` 只從 `source_entries_`（enumeration
+  產出、verified=true）重建 merged snapshot；stale generation 由 `generation_` 檢查丟棄
+  （`catalog_refresh.cpp:107`）。完成一代後 cache 竄改的 identity 不會被帶入 fresh snapshot；`DeduplicateCatalog`
+  整筆 copy，旗標隨 entry 走（單次呼叫內 entry 同質）。
+- **竄改 fixture**：`catalog_refresh_test` 新增 `TestCacheLoadEntriesAreUnverified`——Save 一筆
+  verified=true、valid identity 的 entry → Load 回 `launch_verified == false`、`stable_id`／`launch_identity`
+  仍可顯示；證明竄改 identity 的 cache row 可載入顯示但不會被信任。
+- **Shell call 阻擋證明**：`shell_launch_test` 新增 `TestRejectsUnverifiedIdentity`——valid `.cmd` path 但
+  `launch_verified=false` → rejected（`ERROR_INVALID_PARAMETER`）、probe 的 marker 檔未建立（500 ms
+  等待確認未啟動）；既有 `TestLaunchesControlledHelper`（verified=true）照常啟動 probe。
+- **sanity grep**：全 repo 唯一 `ShellExecuteExW` 呼叫為 `shell_launch.cpp:21`、`main.cpp:1136`
+  （Settings「Open file location」verb，非 catalog launch）、`settings_dialog.cpp:559`（同類）；皆不繞過 guard。
+- **build／CTest**：Release x64（LLVM-MinGW + Ninja）無新增 warning；focused 2/2 綠（shell_launch、
+  catalog_refresh）、完整 CTest 25/25 綠（含 lifecycle_check）。
+- **未涵蓋**：首輪 rebuild 若某來源失敗，該來源保留舊 entries（`ApplySourceFailure`）——cold start 下
+  cache row 的未驗證 identity 會留在 snapshot 直到後續成功重新驗證；依 §FR-008 單一來源失敗語意正確
+  （可顯示、仍被 guard 擋啟動）。此為既有行為，非本 item 引入。
+
+commit：`<controller fills after commit>`

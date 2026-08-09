@@ -142,6 +142,12 @@ bool LoadCatalogCache(const std::wstring& directory, std::vector<AppEntry>& out,
             return false;
         }
         entry.search_alias = UnescapeText(fields[6]);
+        // NR-113: the cache is a speed-only snapshot, never a source of truth
+        // (design-spec §10.2), and launch_verified is never serialized (schema
+        // stays at version 2). Every entry read from it is unverified until a
+        // current source enumeration produces the identity again: it can be
+        // displayed, but launching is gated until then.
+        entry.launch_verified = false;
         out.push_back(std::move(entry));
     }
     // The cache is a snapshot; run it through dedup so load never reintroduces

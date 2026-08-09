@@ -5,7 +5,7 @@
 namespace nimblerun {
 
 LaunchResult LaunchEntry(const AppEntry& entry, HWND owner) {
-    if (entry.launch_identity.empty()) {
+    if (entry.launch_identity.empty() || !entry.launch_verified) {
         return {false, ERROR_INVALID_PARAMETER};
     }
 

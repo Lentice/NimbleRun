@@ -28,6 +28,13 @@ struct AppEntry {
     // exactly like normalized_name. Never part of the stable id (design-spec
     // §10.3) and never part of dedup.
     std::wstring search_alias;
+    // NR-113: true when launch_identity was produced by a current source
+    // enumeration; false for entries synthesized from catalog.cache, which is
+    // a rebuildable accelerator, not a source of truth. Unverified entries stay
+    // displayable and searchable but are rejected at the launch boundary until
+    // a fresh enumeration produces the identity again. Never serialized into
+    // the cache format; a reload always starts unverified.
+    bool launch_verified = true;
 };
 
 } // namespace nimblerun

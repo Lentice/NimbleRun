@@ -107,11 +107,31 @@ void TestLaunchesControlledHelper() {
     RemoveTreeBestEffort(base);
 }
 
+void TestRejectsUnverifiedIdentity() {
+    const std::wstring base = MakeTempDir("unverified");
+    const std::wstring script = base + L"\\launch_probe.cmd";
+    const std::wstring marker = base + L"\\launched.txt";
+    WriteProbeScript(script);
+
+    AppEntry entry = MakeUserFolderEntry(script);
+    entry.launch_verified = false;  // a cache-synthesized entry (NR-113)
+    const LaunchResult result = LaunchEntry(entry);
+    Expect(!result.ok, "unverified identity is rejected");
+    Expect(result.error_code == ERROR_INVALID_PARAMETER,
+           "unverified rejection reports ERROR_INVALID_PARAMETER");
+    Sleep(500);
+    Expect(!fs::exists(fs::path(marker)),
+           "an unverified entry never reaches the Shell (no marker file)");
+
+    RemoveTreeBestEffort(base);
+}
+
 } // namespace
 
 int wmain() {
     TestRejectsEmptyIdentity();
+    TestRejectsUnverifiedIdentity();
     TestLaunchesControlledHelper();
-    std::printf("NR-008 shell launch check PASSED\n");
+    std::printf("NR-008/NR-113 shell launch check PASSED\n");
     return 0;
 }

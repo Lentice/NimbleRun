@@ -487,6 +487,29 @@ void TestCacheRoundTrip() {
     RemoveTreeBestEffort(dir);
 }
 
+// NR-113: a cache entry is displayable but not launchable until a current
+// source enumeration produces its identity again. SaveCatalogCache never writes
+// the flag (schema stays at version 2), so every LoadCatalogCache entry comes
+// back unverified while its identity still round-trips for display.
+void TestCacheLoadEntriesAreUnverified() {
+    const std::wstring dir = TempDir();
+    std::vector<AppEntry> entries = {
+        Entry(L"tampered", AppSource::UserFolder),
+    };
+    entries[0].launch_verified = true;  // the writer is not the trust boundary
+
+    SaveCatalogCache(dir, entries);
+    std::vector<AppEntry> loaded;
+    Expect(LoadCatalogCache(dir, loaded), "valid cache loads");
+    Expect(loaded.size() == 1, "one entry round-trips");
+    Expect(loaded[0].stable_id == L"tampered", "stable id preserved for display");
+    Expect(loaded[0].launch_identity == entries[0].launch_identity,
+           "launch identity preserved for display");
+    Expect(!loaded[0].launch_verified,
+           "a cache-synthesized entry is not launchable until a source re-validates it");
+    RemoveTreeBestEffort(dir);
+}
+
 void TestCorruptCacheRebuilds() {
     const std::wstring dir = TempDir();
     SaveCatalogCache(dir, {Entry(L"id1", AppSource::UserStartMenu)});
@@ -667,6 +690,7 @@ int wmain() {
     TestSetSnapshotRespectsPrefilledNormalizedName();
     TestSetSnapshotNormalizesSearchAlias();
     TestCacheRoundTrip();
+    TestCacheLoadEntriesAreUnverified();
     TestCacheRoundTripSearchAlias();
     TestNewerSchemaCacheRebuilds();
     TestNewerSchemaCacheReportsAndLeavesOutUntouched();
