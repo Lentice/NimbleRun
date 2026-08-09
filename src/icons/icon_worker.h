@@ -12,6 +12,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace nimblerun {
@@ -24,6 +25,16 @@ struct IconRequest {
     AppEntry entry;
     IconKey key;
     bool visible = false;  // true = user is looking at it now, jump the queue
+    // Host-owned encoded key, when this is a visible request. Keeping it in
+    // the task lets a setup-failure path report the exact pending key without
+    // allocating another string on the worker.
+    std::wstring encoded_key;
+
+    IconRequest() = default;
+    IconRequest(AppEntry entry_value, IconKey key_value, bool visible_value,
+                std::wstring encoded_key_value = {})
+        : entry(std::move(entry_value)), key(std::move(key_value)),
+          visible(visible_value), encoded_key(std::move(encoded_key_value)) {}
 };
 
 // Result handed back to the UI thread. owned by the receiving window; a
@@ -44,6 +55,17 @@ struct IconResult {
 // receipt; WM_DESTROY clears whatever is still in flight.
 inline std::mutex g_handoff_mutex;
 inline std::unordered_map<std::uintptr_t, std::unique_ptr<IconResult>> g_icon_handoffs;
+// A result that cannot be allocated, registered, or posted has no token for
+// the normal completion path. The worker records its visible key here; the UI
+// drains it on the next event or ShowPanel and clears the pending request.
+inline std::vector<std::wstring> g_icon_dropped_keys;
+
+inline std::vector<std::wstring> TakeIconDroppedKeys() {
+    std::lock_guard<std::mutex> lock(g_handoff_mutex);
+    std::vector<std::wstring> keys = std::move(g_icon_dropped_keys);
+    g_icon_dropped_keys.clear();
+    return keys;
+}
 
 // NR-036: tagged queue element. A Load task carries an IconRequest; a Flush
 // task carries the pinned-id list and the wall-clock time the UI handed over,
@@ -90,7 +112,7 @@ public:
     // cache writes get one final best-effort flush before the thread exits.
     void Stop();
     // Never blocks. visible requests push_front, prewarm requests push_back.
-    void Post(IconRequest request);
+    bool Post(IconRequest request);
     // Never blocks. Lower priority than any visible request; the worker calls
     // IconStore::Flush(pinned_ids, now_utc) when it reaches this task.
     void PostFlush(std::vector<std::wstring> pinned_ids, std::uint64_t now_utc);

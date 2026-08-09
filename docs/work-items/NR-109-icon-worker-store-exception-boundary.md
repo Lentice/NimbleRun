@@ -112,6 +112,28 @@ git diff --name-only
 
 ## Handoff
 
-實作者需記錄每個 store call site 的 catch／state policy、request completion table、failure
-self-check、worker shutdown、build／CTest 與未能注入的 OS-only branch。
+實作（2026-08-09）：
 
+- **Store call-site policy**：`Run` 的 `Open`、request `Lookup`／`Put`、normal queue-drain
+  `Flush`、explicit `PostFlush` 與 shutdown final `Flush` 都在 worker boundary 內；
+  `Open`／`Lookup` 例外降級為 provider-only，`Put`／`Flush` 例外停用 store，失敗的
+  diagnostic 也由不拋例外的 logger 吞住。`Flush == false` 保留讀取能力但停用後續寫入。
+
+- **Request completion**：visible `Post` 先回傳成功／失敗，host 入隊失敗立即清除
+  `g_pending_icon_keys`；worker 的 result allocation、registry insert 或 `PostMessageW`
+  失敗會記錄 encoded key，透過既有 `kIconReadyMessage` wake-up 或下一次 `ShowPanel`
+  清除 pending，讓 fallback 保持可見且稍後可重試。registry ownership 使用 scoped
+  `unique_ptr`，failure path 在 mutex 外記錄 dropped key，避免 double-free／deadlock。
+
+- **Focused self-check**：`TestStoreFailuresAreContained` 注入 `Open`／`Flush` 例外，
+  驗證 provider fallback、worker 可繼續處理並可 Stop；`TestFailedPostErasesHandoffAndLeaksNothing`
+  驗證 dropped visible key 可清除並以相同 key 重試。
+
+- **驗證**：Release `cmake --build build` 通過；
+  `ctest --test-dir build -R "icon_worker|icon_store" --output-on-failure`：2/2 通過；
+  `ctest --test-dir build --output-on-failure`：25/25 通過。focused retry fixture
+  在關閉 gate 後明確設為 `nullptr`，避免 Windows HANDLE value reuse 造成測試假死。
+
+- **未完成風險**：沒有安全方式在 production 中注入 heap exhaustion、registry allocation
+  failure 或 `PostMessageW` queue failure；測試覆蓋 store exception 與實際 failed-post
+  handoff，OS-only allocation branch 由 scoped ownership／drop-key invariant 保護。

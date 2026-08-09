@@ -866,6 +866,12 @@ void PrewarmEmptyStatePage(HWND window) {
     }
 }
 
+void ClearDroppedIconRequests() {
+    for (const std::wstring& key : nimblerun::TakeIconDroppedKeys()) {
+        g_pending_icon_keys.erase(key);
+    }
+}
+
 // Defined below, next to the panel-refresh path it is also part of; the launch
 // path needs it before that point.
 void StampRankingFields();
@@ -1016,8 +1022,14 @@ void RequestVisibleIcon(const nimblerun::AppEntry& entry, const nimblerun::IconK
         g_requested_icon_keys.count(encoded) != 0) {
         return;
     }
-    g_pending_icon_keys.insert(encoded);
-    g_icon_worker->Post({entry, key, /*visible=*/true});
+    try {
+        g_pending_icon_keys.insert(encoded);
+        if (!g_icon_worker->Post({entry, key, /*visible=*/true, encoded})) {
+            g_pending_icon_keys.erase(encoded);
+        }
+    } catch (...) {
+        g_pending_icon_keys.erase(encoded);
+    }
 }
 
 void DrawDecodedIcon(const nimblerun::IconBitmap& icon,
@@ -2223,6 +2235,9 @@ void ShowPanel(HWND window) {
     g_drag_row = -1;
     g_drag_gap = -1;
     g_dragging = false;
+    // NR-109: setup failures have no IconResult token to reach the normal
+    // completion message; clear them before allowing this show to retry.
+    ClearDroppedIconRequests();
     // NR-012/NR-032: allow a retry of transient icon failures on this open.
     // The pending set is deliberately NOT cleared: those requests are still in
     // flight and their results keep landing in the LRU (that is the prewarm).
@@ -2912,6 +2927,10 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
         DestroyWindow(window);
         return 0;
     case kIconReadyMessage: {
+        if (w_param != 0) {
+            ClearDroppedIconRequests();
+            return 0;
+        }
         // NR-032: one decoded icon finished on the worker thread. The heap
         // IconResult is owned by this window and deleted here; a failed load
         // still reports (empty bitmap) so the pending set is cleared and the

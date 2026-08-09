@@ -73,14 +73,14 @@ public:
     explicit IconStore(IconStorePaths paths,
                        std::uint64_t max_bytes = kMaxPackBytes,
                        DiagnosticLog* log = nullptr);
-    ~IconStore();
+    virtual ~IconStore();
 
     IconStore(const IconStore&) = delete;
     IconStore& operator=(const IconStore&) = delete;
 
     // Open (or create) the pack and classify its integrity. Safe to call once
     // at worker startup. Never throws.
-    StoreState Open();
+    virtual StoreState Open();
     StoreState State() const { return state_; }
     StoreStats Stats() const { return stats_; }
 
@@ -88,21 +88,21 @@ public:
     // intact, and not stale. Copies out of the mapped view so the caller never
     // holds a pointer into the mapping. Empty vector = miss. now_utc and
     // source_stamp come from the caller (injectable clock / stat).
-    std::vector<std::uint8_t> Lookup(const std::wstring& stable_id, int variant,
-                                     std::uint64_t source_stamp, std::uint64_t now_utc);
+    virtual std::vector<std::uint8_t> Lookup(const std::wstring& stable_id, int variant,
+                                             std::uint64_t source_stamp, std::uint64_t now_utc);
 
     // Queue a payload for persistence. Buffers in memory; nothing touches disk
     // until Flush(). Overwrites any pending or stored entry for the same key.
-    void Put(const std::wstring& stable_id, int variant,
-             std::vector<std::uint8_t> payload,
-             std::uint64_t source_stamp, std::uint64_t now_utc);
+    virtual void Put(const std::wstring& stable_id, int variant,
+                     std::vector<std::uint8_t> payload,
+                     std::uint64_t source_stamp, std::uint64_t now_utc);
 
     // Commit buffered puts: evict as needed (pinned_ids exempt), append
     // payloads, write index entries, then commit the alternate header.
     // Compacts when dead bytes exceed 50%. Returns false on any write failure
     // (state may drop to ReadOnly); the in-memory LRU above is unaffected
     // either way.
-    bool Flush(const std::vector<std::wstring>& pinned_ids, std::uint64_t now_utc);
+    virtual bool Flush(const std::vector<std::wstring>& pinned_ids, std::uint64_t now_utc);
 
     // NR-076: the icon worker reports its own failures through the store's
     // diagnostic channel (the worker owns the store and the store owns the

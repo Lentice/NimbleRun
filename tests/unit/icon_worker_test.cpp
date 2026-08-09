@@ -102,6 +102,40 @@ public:
     }
 };
 
+class ThrowingStore final : public IconStore {
+public:
+    using IconStore::IconStore;
+
+    bool throw_on_open = false;
+    bool throw_on_flush = false;
+    int flush_calls = 0;
+    StoreState open_state = StoreState::Ready;
+
+    StoreState Open() override {
+        if (throw_on_open) {
+            throw std::runtime_error("injected store open failure");
+        }
+        return open_state;
+    }
+
+    std::vector<std::uint8_t> Lookup(const std::wstring&, int,
+                                     std::uint64_t, std::uint64_t) override {
+        return {};
+    }
+
+    void Put(const std::wstring&, int, std::vector<std::uint8_t>,
+             std::uint64_t, std::uint64_t) override {
+    }
+
+    bool Flush(const std::vector<std::wstring>&, std::uint64_t) override {
+        ++flush_calls;
+        if (throw_on_flush) {
+            throw std::runtime_error("injected store flush failure");
+        }
+        return true;
+    }
+};
+
 HWND CreateMessageWindow() {
     WNDCLASSEXW wc{};
     wc.cbSize = sizeof(wc);
@@ -247,6 +281,47 @@ void TestThrowingProviderIsContained() {
     Expect(!later[0]->bitmap.Empty(), "a later request returns a real bitmap");
 
     worker.Stop();
+    DestroyWindow(window);
+}
+
+// NR-109: Open and each event-driven flush boundary must be contained. A
+// thrown store degrades to provider/fallback behavior, while Stop remains
+// joinable and the worker never escapes its thread entry.
+void TestStoreFailuresAreContained() {
+    const HWND window = CreateMessageWindow();
+    {
+        FakeProvider provider;
+        ThrowingStore store(IconStorePaths{});
+        store.throw_on_open = true;
+        IconWorker worker(window, kReadyMessage, provider, &store);
+        worker.Start();
+        worker.Post({Entry(L"open-fallback"), Key(L"open-fallback"), true,
+                     L"open-fallback|48"});
+        std::vector<std::unique_ptr<IconResult>> results;
+        Expect(PumpResults(window, results, 1), "store Open exception still reports");
+        Expect(!results[0]->bitmap.Empty(), "Open failure falls back to provider");
+
+        worker.Post({Entry(L"after-open-failure"), Key(L"after-open-failure"), true,
+                     L"after-open-failure|48"});
+        std::vector<std::unique_ptr<IconResult>> later;
+        Expect(PumpResults(window, later, 1), "worker survives store Open exception");
+        worker.Stop();
+    }
+
+    {
+        FakeProvider provider;
+        ThrowingStore store(IconStorePaths{});
+        store.throw_on_flush = true;
+        IconWorker worker(window, kReadyMessage, provider, &store);
+        worker.Start();
+        worker.Post({Entry(L"flush-failure"), Key(L"flush-failure"), true,
+                     L"flush-failure|48"});
+        std::vector<std::unique_ptr<IconResult>> results;
+        Expect(PumpResults(window, results, 1), "flush setup request reports");
+        worker.PostFlush({}, 1);
+        worker.Stop();
+        Expect(store.flush_calls > 0, "a flush failure was exercised");
+    }
     DestroyWindow(window);
 }
 
@@ -554,11 +629,12 @@ void TestStopDropsQueueAndSilencesNewPosts() {
 void TestFailedPostErasesHandoffAndLeaksNothing() {
     const HWND window = CreateMessageWindow();
     FakeProvider provider;
+    nimblerun::TakeIconDroppedKeys();
     provider.gate = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     IconWorker worker(window, kReadyMessage, provider);
     worker.Start();
 
-    worker.Post({Entry(L"gone"), Key(L"gone"), true});
+    worker.Post({Entry(L"gone"), Key(L"gone"), true, L"gone|48"});
     const DWORD entered_deadline = GetTickCount() + 1000;
     while (!provider.entered.load() && GetTickCount() < entered_deadline) {
         Sleep(1);
@@ -574,11 +650,13 @@ void TestFailedPostErasesHandoffAndLeaksNothing() {
     const DWORD drain_deadline = GetTickCount() + 5000;
     for (;;) {
         bool empty;
+        bool dropped;
         {
             std::lock_guard<std::mutex> lock(nimblerun::g_handoff_mutex);
             empty = nimblerun::g_icon_handoffs.empty();
+            dropped = !nimblerun::g_icon_dropped_keys.empty();
         }
-        if (empty || GetTickCount() >= drain_deadline) {
+        if ((empty && dropped) || GetTickCount() >= drain_deadline) {
             break;
         }
         Sleep(2);
@@ -589,8 +667,28 @@ void TestFailedPostErasesHandoffAndLeaksNothing() {
                "a failed post leaves no handoff entry behind");
     }
 
+    std::set<std::wstring> pending{L"gone|48"};
+    for (const std::wstring& key : nimblerun::TakeIconDroppedKeys()) {
+        pending.erase(key);
+    }
+    Expect(pending.empty(), "a dropped visible request can clear its pending key");
+
     CloseHandle(provider.gate);
+    provider.gate = nullptr;
     worker.Stop();
+
+    // The cleared key is retryable on the next panel show/session.
+    const HWND retry_window = CreateMessageWindow();
+    IconWorker retry_worker(retry_window, kReadyMessage, provider);
+    retry_worker.Start();
+    retry_worker.Post({Entry(L"gone"), Key(L"gone"), true, L"gone|48"});
+    std::vector<std::unique_ptr<IconResult>> retry_results;
+    Expect(PumpResults(retry_window, retry_results, 1),
+           "a dropped key can be retried after pending clear");
+    Expect(retry_results[0]->encoded_key == L"gone|48",
+           "retry returns the same visible key");
+    retry_worker.Stop();
+    DestroyWindow(retry_window);
 }
 
 // --- NR-036: disk-layer round trips through a temp pack. ---
@@ -941,6 +1039,7 @@ int wmain() {
     TestThreeRequestsDeliverThreeResults();
     TestFailureStillReports();
     TestThrowingProviderIsContained();
+    TestStoreFailuresAreContained();
     TestUnknownTokenIgnored();
     TestVisibleJumpsTheQueue();
     TestVisibleJumpsAheadOfQueuedPrewarm();
@@ -957,6 +1056,6 @@ int wmain() {
     TestEmptyResultIsNotPersisted();
     TestStopWithPendingDataFlushesAndDoesNotHang();
 
-    std::printf("NR-032/NR-036/NR-037 icon worker check PASSED\n");
+    std::printf("NR-032/NR-036/NR-037/NR-109 icon worker check PASSED\n");
     return 0;
 }
