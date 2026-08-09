@@ -145,5 +145,5 @@ git diff --name-only
 - **build／CTest**：Release x64（LLVM-MinGW＋Ninja）無新增 warning；focused 2/2 綠（catalog_refresh、
   lifecycle）；完整 CTest 25/25 綠。
 - **未涵蓋**：no-alloc fallback 的 direct post 也失敗（heap 耗盡＋queue 滿同時發生）時無 record 可 drain——
-  NR-106 的 reserve 使該分支為 invariant fallback，列為已記錄殘餘。controller 修正：event 建立移回
-  第一次 `StartRebuild` 之前（原 worker 放在其後，與註解意圖不符的 startup race）。commit：`<controller fills after commit>`
+  NR-106 的 reserve   使該分支為 invariant fallback，列為已記錄殘餘。controller 修正：event 建立移回
+  第一次 `StartRebuild` 之前（原 worker 放在其後，與註解意圖不符的 startup race）。commit：`d07ad2f`
