@@ -130,4 +130,4 @@ header／CRC 結果、memory mapping 是否在拒絕前建立、build／CTest �
 - **build／CTest**：Release x64（LLVM-MinGW＋Ninja）無新增 warning；focused 3/3 綠（icon_pack_format、
   icon_store、icon_worker）；完整 CTest 25/25 綠（含 lifecycle_check）。
 - **未涵蓋**：OS file-lock／mapping failure 仍走既有 `open-failed`→Disabled 路徑（未改）；`Compact`／`GrowView`
-  產生的檔案永遠 ≤ budget，guard 不會誤傷合法 pack。commit：`<controller fills after commit>`
+  產生的檔案永遠 ≤ budget，guard 不會誤傷合法 pack。commit：`db50c56`
