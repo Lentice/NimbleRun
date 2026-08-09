@@ -30,6 +30,7 @@
 #include "settings/settings_store.h"
 #include "storage/atomic_text_file.h"
 #include "ui/panel_layout.h"
+#include "ui/panel_accessibility.h"
 #include "ui/panel_palette.h"
 #include "ui/quick_select.h"
 #include "usage/usage_store.h"
@@ -183,6 +184,7 @@ bool g_tray_icon_active = false;
 
 // Panel state (NR-010). The model is pure; the window translates input.
 nimblerun::PanelModel* g_model = nullptr;
+nimblerun::PanelAccessibilityProvider* g_accessibility = nullptr;
 nimblerun::UsageStore* g_usage = nullptr;
 // NR-018: pure pin store (favorites.txt). The host reloads it when the panel
 // opens and reconciles it against the catalog snapshot; the model only mirrors
@@ -760,6 +762,8 @@ std::vector<int> DragPreviewOrder() {
     return order;
 }
 
+void SyncAccessibility(HWND window);
+
 // NR-020: recomputes the viewport row count from the current client rect and
 // DPI and pushes it into the model (design-spec §4.2/§4.9). Called whenever the
 // panel is shown or resized; no timers. NR-029: the row height differs per
@@ -778,6 +782,91 @@ void UpdateViewportRows(HWND window) {
         ? static_cast<int>(std::lround(nimblerun::layout::kCellHeightDip * layout.scale))
         : layout.row_height;
     g_model->SetViewportRows(std::max(1, list_height / row_height_px));
+    SyncAccessibility(window);
+}
+
+void SyncAccessibility(HWND window) {
+    if (!g_accessibility || !g_model || !window) {
+        return;
+    }
+    nimblerun::PanelAccessibilitySnapshot snapshot;
+    snapshot.query = g_model->Query();
+    snapshot.search_focused = GetFocus() == g_search_edit;
+
+    const auto dpi = static_cast<float>(GetDpiForWindow(window));
+    const auto layout = nimblerun::layout::LayoutForDpi(dpi);
+    const int columns = std::max(1, g_model->Columns());
+    const int page_size = std::max(1, g_model->ViewportRows() * columns);
+    const int first = g_model->FirstVisibleRow();
+    const int visible = g_model->ViewportRows() * columns;
+    const int selected_index = g_model->HasSelection()
+        ? static_cast<int>(g_model->SelectionIndex()) : -1;
+    snapshot.selected_row = selected_index >= first && selected_index < first + visible
+        ? selected_index - first : -1;
+    const int row_count = (static_cast<int>(g_model->Rows().size()) + page_size - 1) /
+                          page_size;
+    snapshot.page = first / page_size + 1;
+    snapshot.page_count = std::max(1, row_count);
+    snapshot.footer = L"Query: " + snapshot.query + L"; Page " +
+                      std::to_wstring(snapshot.page) + L" of " +
+                      std::to_wstring(snapshot.page_count);
+    if (selected_index >= 0) {
+        snapshot.footer += L"; Selected: " + g_model->SelectedAccessibleName();
+    }
+
+    RECT window_rect{};
+    GetWindowRect(window, &window_rect);
+    const auto screen_rect = [&](RECT client) {
+        POINT top_left{client.left, client.top};
+        POINT bottom_right{client.right, client.bottom};
+        ClientToScreen(window, &top_left);
+        ClientToScreen(window, &bottom_right);
+        return RECT{top_left.x, top_left.y, bottom_right.x, bottom_right.y};
+    };
+    RECT search{};
+    if (!g_search_edit || !GetWindowRect(g_search_edit, &search)) {
+        search = screen_rect(RECT{layout.search_left, layout.search_top,
+                                  layout.search_right, layout.search_bottom});
+    }
+    snapshot.search_bounds = search;
+    snapshot.footer_bounds = screen_rect(RECT{0, static_cast<LONG>(
+        std::lround(nimblerun::layout::kFooterTopDip * layout.scale)),
+        window_rect.right - window_rect.left,
+        static_cast<LONG>(std::lround(nimblerun::layout::kPanelHeightDip * layout.scale))});
+
+    snapshot.rows.reserve(static_cast<std::size_t>(std::max(0, visible)));
+    for (int slot = 0; slot < visible; ++slot) {
+        const int index = first + slot;
+        if (index < 0 || index >= static_cast<int>(g_model->Rows().size())) {
+            break;
+        }
+        RECT bounds{};
+        if (columns > 1) {
+            const int row = slot / columns;
+            const int col = slot % columns;
+            bounds = RECT{
+                static_cast<LONG>(std::lround((nimblerun::layout::kGridLeftDip +
+                                               col * nimblerun::layout::kCellWidthDip) * layout.scale)),
+                static_cast<LONG>(std::lround((nimblerun::layout::kListTopDip +
+                                               row * nimblerun::layout::kCellHeightDip) * layout.scale)),
+                static_cast<LONG>(std::lround((nimblerun::layout::kGridLeftDip +
+                                               (col + 1) * nimblerun::layout::kCellWidthDip) * layout.scale)),
+                static_cast<LONG>(std::lround((nimblerun::layout::kListTopDip +
+                                               (row + 1) * nimblerun::layout::kCellHeightDip) * layout.scale))};
+        } else {
+            const int top = layout.list_top + slot * layout.row_height;
+            bounds = RECT{layout.list_left, top, layout.list_right, top + layout.row_height};
+        }
+        nimblerun::PanelAccessibilityElement element;
+        element.role = nimblerun::PanelAccessibilityElement::Role::AppRow;
+        element.name = g_model->AccessibleNameFor(static_cast<std::size_t>(index));
+        element.bounds = screen_rect(bounds);
+        element.selected = slot == snapshot.selected_row;
+        element.disabled = nimblerun::PanelModel::IsMissingPin(
+            g_model->Rows()[static_cast<std::size_t>(index)]);
+        snapshot.rows.push_back(std::move(element));
+    }
+    g_accessibility->Update(window, snapshot);
 }
 
 // NR-022: maps the Win32 error code returned by shell_launch to a short
@@ -1344,6 +1433,7 @@ void RefreshPanelSnapshot() {
     // NR-083: the index views die with this function's snapshot reference;
     // drop the hint so no later RefreshRows dereferences it.
     g_model->SetCatalogIndex(nullptr);
+    SyncAccessibility(g_main_window);
 }
 
 // NR-100: the single post-generation-completion choke point. Runs only when the
@@ -1758,6 +1848,7 @@ void DrawKeyBox(const wchar_t* label, const D2D1_RECT_F& box_rect) {
 void Render(HWND window) {
     PAINTSTRUCT paint{};
     BeginPaint(window, &paint);
+    SyncAccessibility(window);
 
     // NR-015: resolve the palette for this frame; if it differs from the one
     // the live brushes were built with, drop the device resources so they are
@@ -2804,6 +2895,10 @@ LRESULT CALLBACK SearchEditProc(HWND edit, UINT message, WPARAM w_param, LPARAM 
 }
 
 LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_param) {
+    if (message == WM_GETOBJECT && g_accessibility) {
+        const LRESULT result = g_accessibility->OnGetObject(w_param, l_param);
+        return result != 0 ? result : DefWindowProcW(window, message, w_param, l_param);
+    }
     if (message == g_show_panel_message) {
         ShowPanel(window);
         if (g_test_show_semaphore) {
@@ -3461,6 +3556,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         return 1;
     }
     g_main_window = window;
+    g_accessibility = nimblerun::PanelAccessibilityProvider::Create(window);
+    SyncAccessibility(window);
     SetEvent(startup_ready);
     OpenTestShowSemaphore();
 
@@ -3666,6 +3763,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     Release(g_write_factory);
     Release(g_dash_style);
     Release(g_d2d_factory);
+    if (g_accessibility) {
+        auto* provider = g_accessibility;
+        g_accessibility = nullptr;
+        provider->Release();
+    }
     if (g_test_show_semaphore) {
         CloseHandle(g_test_show_semaphore);
         g_test_show_semaphore = nullptr;

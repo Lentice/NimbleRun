@@ -98,6 +98,31 @@ git diff --name-only
 
 ## Handoff
 
-實作者需記錄採用的 Windows accessibility API、element/state mapping、query/page/selection
-同步方式、native smoke evidence、build／CTest 與任何 assistive-technology 差異。
+實作（2026-08-09）：
 
+- **API／lifetime**：採原生 MSAA `IAccessible`，由 `WM_GETOBJECT`／`LresultFromObject`
+  暴露 main window 的 client object；provider 使用 copyable snapshot、shared state 與
+  COM ref-count，沒有保存 Shell pointer。child provider 只持有 parent ref，主視窗
+  teardown 先停止接受新 object，再釋放 host-owned initial ref。
+
+- **Element/state mapping**：root children 是 search field、目前 page 的 visible App rows、
+  footer。row name 來自 `PanelModel::AccessibleNameFor`，role 是 list item；selected
+  映射至 visible child id 並同時回報 `STATE_SYSTEM_SELECTED`／focus，missing pin 回報
+  `STATE_SYSTEM_UNAVAILABLE`；`accLocation` 使用目前 DPI layout 的 screen bounds。
+
+- **Synchronisation**：`SyncAccessibility` 在 catalog/query、viewport/page、Render 與
+  initial window setup 後更新 snapshot；selection、query/page、row name/disabled 變更
+  透過 `NotifyWinEvent` 發出 reorder／selection／focus／state/name change。page offset
+  轉成 visible-slot child id，避免第二頁選取回報到不存在的 child。
+
+- **Checks**：`TestAccessibleProviderMapping` 驗證 names／roles／states／selection／query／
+  footer／child COM lifetime；native smoke 建立真實 Win32 window，送 `WM_GETOBJECT` 並以
+  `ObjectFromLresult` 取得 marshalled `IAccessible`，查詢 child count、row name 與 bounds。
+  Release focused build 與 `nimblerun_dpi_theme_accessibility_test`：1/1 通過；完整
+  CTest 待主 agent 在提交前重跑。
+
+- **未完成風險**：未以真人 screen reader 或跨 process 商用 accessibility inspector 做
+  手工驗收；MSAA client 對 owner-drawn window 的跨版本／輔助技術差異仍需 Windows 10
+  22H2／Windows 11 release smoke 留意。`AccessibleObjectFromWindow` 的 same-process
+  test helper 會走額外 query-classname 路徑，因此 focused smoke 使用同一標準
+  `WM_GETOBJECT`／`ObjectFromLresult` round-trip 驗證 provider contract。

@@ -230,6 +230,7 @@ target_link_libraries(nimblerun_icons
 
 add_library(nimblerun_ui STATIC
     src/ui/panel_layout.cpp
+    src/ui/panel_accessibility.cpp
     src/ui/panel_palette.cpp
 )
 
@@ -251,6 +252,7 @@ target_compile_definitions(nimblerun_ui
 target_link_libraries(nimblerun_ui
     PUBLIC
         nimblerun_settings
+        oleacc
 )
 
 add_library(nimblerun_panel_model STATIC

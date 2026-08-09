@@ -1,18 +1,23 @@
 #include "app_host/panel_model.h"
 #include "search/search_engine.h"
 #include "ui/panel_layout.h"
+#include "ui/panel_accessibility.h"
 #include "ui/panel_palette.h"
 #include "ui/quick_select.h"
 
 #include <cstdio>
 #include <cstdlib>
 #include <cwchar>
+#include <oleacc.h>
 #include <string>
 #include <vector>
 
 using nimblerun::AppEntry;
 using nimblerun::AppSource;
 using nimblerun::PanelModel;
+using nimblerun::PanelAccessibilityElement;
+using nimblerun::PanelAccessibilityProvider;
+using nimblerun::PanelAccessibilitySnapshot;
 using nimblerun::Theme;
 using nimblerun::layout::ClampWindowSize;
 using nimblerun::layout::LayoutForDpi;
@@ -221,6 +226,152 @@ void TestSelectedAccessibleNameEmptyState() {
     Expect(model.SelectedAccessibleName().empty(), "no selection -> empty name");
 }
 
+std::wstring TakeBstr(BSTR value) {
+    const std::wstring result = value == nullptr
+        ? std::wstring{} : std::wstring(value, SysStringLen(value));
+    SysFreeString(value);
+    return result;
+}
+
+VARIANT ChildId(LONG child) {
+    VARIANT id{};
+    id.vt = VT_I4;
+    id.lVal = child;
+    return id;
+}
+
+void TestAccessibleProviderMapping() {
+    auto* provider = PanelAccessibilityProvider::Create(nullptr);
+    Expect(provider != nullptr, "provider allocation");
+    PanelAccessibilitySnapshot snapshot;
+    snapshot.query = L"beta";
+    snapshot.footer = L"Query: beta; Page 2 of 3; Selected: Beta";
+    snapshot.page = 2;
+    snapshot.page_count = 3;
+    snapshot.search_focused = true;
+    snapshot.selected_row = 0;
+    snapshot.rows = {
+        {PanelAccessibilityElement::Role::AppRow, L"Beta", RECT{10, 20, 100, 60}, true, false},
+        {PanelAccessibilityElement::Role::AppRow, L"Missing", RECT{10, 60, 100, 100}, false, true},
+    };
+    Expect(provider->Update(nullptr, snapshot), "provider snapshot update");
+
+    IAccessible* root = provider;
+    LONG count = 0;
+    Expect(SUCCEEDED(root->get_accChildCount(&count)) && count == 4,
+           "search, two rows and footer are exposed");
+    BSTR name = nullptr;
+    Expect(SUCCEEDED(root->get_accName(ChildId(2), &name)) && TakeBstr(name) == L"Beta",
+           "row name comes from snapshot display name");
+    VARIANT role{};
+    Expect(SUCCEEDED(root->get_accRole(ChildId(2), &role)) &&
+               role.vt == VT_I4 && role.lVal == ROLE_SYSTEM_LISTITEM,
+           "row role is list item");
+    VARIANT state{};
+    Expect(SUCCEEDED(root->get_accState(ChildId(3), &state)) &&
+               (state.lVal & STATE_SYSTEM_UNAVAILABLE) != 0,
+           "missing pin is disabled");
+    VARIANT selection{};
+    Expect(SUCCEEDED(root->get_accSelection(&selection)) && selection.lVal == 2,
+           "selection maps to the visible row child id");
+    BSTR value = nullptr;
+    Expect(SUCCEEDED(root->get_accValue(ChildId(1), &value)) && TakeBstr(value) == L"beta",
+           "search value reflects query");
+    Expect(SUCCEEDED(root->get_accValue(ChildId(4), &value)) &&
+               TakeBstr(value).find(L"Page 2 of 3") != std::wstring::npos,
+           "footer value reflects page state");
+    IDispatch* child = nullptr;
+    Expect(SUCCEEDED(root->get_accChild(ChildId(2), &child)) && child != nullptr,
+           "row child is a COM object");
+    IAccessible* row = nullptr;
+    Expect(SUCCEEDED(child->QueryInterface(IID_IAccessible,
+                                           reinterpret_cast<void**>(&row))),
+           "row child supports IAccessible");
+    name = nullptr;
+    Expect(SUCCEEDED(row->get_accName(ChildId(CHILDID_SELF), &name)) &&
+               TakeBstr(name) == L"Beta", "row child name remains stable");
+    row->Release();
+    child->Release();
+    provider->Release();
+}
+
+PanelAccessibilityProvider* g_smoke_provider = nullptr;
+int g_smoke_get_object_calls = 0;
+
+LRESULT CALLBACK AccessibilitySmokeProc(HWND window, UINT message,
+                                        WPARAM w_param, LPARAM l_param) {
+    if (message == WM_GETOBJECT && g_smoke_provider) {
+        ++g_smoke_get_object_calls;
+        return g_smoke_provider->OnGetObject(w_param, l_param);
+    }
+    return DefWindowProcW(window, message, w_param, l_param);
+}
+
+void TestAccessibleProviderWindowSmoke() {
+    const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    Expect(SUCCEEDED(com), "COM initialization for WM_GETOBJECT smoke check");
+    const HINSTANCE instance = GetModuleHandleW(nullptr);
+    const wchar_t class_name[] = L"NimbleRun.AccessibilitySmoke";
+    WNDCLASSW window_class{};
+    window_class.hInstance = instance;
+    window_class.lpfnWndProc = AccessibilitySmokeProc;
+    window_class.lpszClassName = class_name;
+    RegisterClassW(&window_class);
+    HWND window = CreateWindowExW(0, class_name, L"", WS_POPUP,
+                                  100, 100, 300, 200, nullptr, nullptr,
+                                  instance, nullptr);
+    Expect(window != nullptr, "native smoke window creation");
+    g_smoke_provider = PanelAccessibilityProvider::Create(window);
+    Expect(g_smoke_provider != nullptr, "native smoke provider allocation");
+    g_smoke_get_object_calls = 0;
+    PanelAccessibilitySnapshot snapshot;
+    snapshot.footer = L"Page 1 of 1";
+    snapshot.rows.push_back({PanelAccessibilityElement::Role::AppRow,
+                             L"Smoke App", RECT{120, 120, 220, 160}, true, false});
+    snapshot.selected_row = 0;
+    Expect(g_smoke_provider->Update(window, snapshot), "native smoke snapshot update");
+    LONG direct_count = 0;
+    Expect(SUCCEEDED(g_smoke_provider->get_accChildCount(&direct_count)) && direct_count == 3,
+           "native smoke provider keeps its root snapshot");
+    IAccessible* client = nullptr;
+    const LRESULT cookie = SendMessageW(window, WM_GETOBJECT, 0, OBJID_CLIENT);
+    Expect(cookie != 0, "native WM_GETOBJECT returns an accessibility object");
+    Expect(SUCCEEDED(ObjectFromLresult(cookie, IID_IAccessible, 0,
+                                       reinterpret_cast<void**>(&client))) &&
+               client != nullptr,
+           "ObjectFromLresult obtains the WM_GETOBJECT provider");
+    Expect(g_smoke_get_object_calls > 0, "native smoke reached WM_GETOBJECT");
+    LONG count = 0;
+    if (FAILED(client->get_accChildCount(&count))) {
+        std::fprintf(stderr, "FAILED: native child count call\n");
+        std::exit(1);
+    }
+    if (count != 3) {
+        std::fprintf(stderr, "FAILED: native child count=%ld\n", count);
+        std::exit(1);
+    }
+    Expect(count == 3,
+           "native provider exposes search, row and footer");
+    BSTR name = nullptr;
+    Expect(SUCCEEDED(client->get_accName(ChildId(2), &name)) &&
+               TakeBstr(name) == L"Smoke App", "native row name query");
+    LONG left = 0;
+    LONG top = 0;
+    LONG width = 0;
+    LONG height = 0;
+    Expect(SUCCEEDED(client->accLocation(&left, &top, &width, &height, ChildId(2))) &&
+               left == 120 && top == 120 && width == 100 && height == 40,
+           "native row bounds query");
+    client->Release();
+    DestroyWindow(window);
+    g_smoke_provider->Release();
+    g_smoke_provider = nullptr;
+    UnregisterClassW(class_name, instance);
+    if (com == S_OK || com == S_FALSE) {
+        CoUninitialize();
+    }
+}
+
 // NR-023: the search box grew to 16~64 DIP and the list/footer moved down, so
 // the footer band 456..488 keeps 8 visible rows at 96 DPI.
 void TestSearchFieldGeometry() {
@@ -377,6 +528,8 @@ int wmain() {
     TestThemeNeverTouchesCatalogIdentity();
     TestAccessibleNamesPerRow();
     TestSelectedAccessibleNameEmptyState();
+    TestAccessibleProviderMapping();
+    TestAccessibleProviderWindowSmoke();
     TestSearchFieldGeometry();
     TestSearchFieldScalingTo200Percent();
     TestEditRectInsideSearchBox();
@@ -387,6 +540,6 @@ int wmain() {
     TestRowHintReserveWidth();
     TestGridGeometryFits();
     TestGridHoverFillVisible();
-    std::printf("NR-015/NR-024/NR-029 dpi/theme/accessibility check PASSED\n");
+    std::printf("NR-015/NR-024/NR-029/NR-111 accessibility check PASSED\n");
     return 0;
 }
