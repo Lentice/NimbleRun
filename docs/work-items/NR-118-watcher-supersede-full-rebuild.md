@@ -141,3 +141,27 @@ git diff --name-only
 
 實作者需記錄守門形狀、WM_TIMER 延後與 re-arm 行為、full-rescan 延後行為、冷啟動 fixture、
 pending 事件在完成後被服務的證據、non-cold-start 回歸、build／CTest 與未涵蓋的 OS-only path。
+
+實作（2026-08-09，single clean worker）：
+
+- **守門形狀**：`CatalogRefreshCoordinator` 新增公開 `bool ShouldStartRebuild(std::int64_t now_ms) const`
+  （`catalog_refresh.h` 於 `IsRebuildInProgress` 旁、`catalog_refresh.cpp` one-line：
+  `return !IsRebuildInProgress() && HasDueRebuild(now_ms);`）。純值、可測，沿用 NR-081 的 coordinator-guard 形狀。
+- **WM_TIMER**（`main.cpp:3042-3057`）：`KillTimer` 後取 `now`，`ShouldStartRebuild(now)` true →
+  `StartRebuild(DueSources(now))`；false 且 `DueSources(now)` 非空（rebuild 在途、有 pending）→
+  `SetTimer(window, kRebuildTimerId, 500, nullptr)` re-arm（目前 generation 完成後下一個 tick 服務
+  pending）；`due` 為空不 re-arm。re-arm 有界：只在 rebuild 在途且 pending 存在時重複，rebuild 完成即終止。
+- **full-rescan 分支**（`main.cpp:2950-2964`）：`MarkSourceFullRescan` 後 `ShouldStartRebuild(now)` true →
+  立即 `StartRebuild(due)`（原行為）；false 且 due 非空 → `ScheduleDebouncedRebuild(window)` 延後
+  （`kNever` marker 恆為 due，下一個 tick 接住）。normal-event 分支未改。
+- **冷啟動 fixture**：`catalog_refresh_test` 新增 `TestShouldStartRebuildDefersDuringInFlightGeneration`——
+  無 pending→false；pending＋無 running→true；三來源 generation 在途且另一來源 due→false（不得取代）；
+  generation 完成→true（pending 在完成後可被服務）；再開始→false；該 cycle 完成清除 pending→false。
+- **pending 服務證據**：NR-065 的 `generation_event_snapshot_` 使在途事件在目前 generation 完成後仍 pending
+  （`ApplySourceResult` 時間戳比對不變），re-arm 的 timer 在下一個 tick 以 `ShouldStartRebuild` true 啟動
+  該來源的更新 rebuild；完整 rebuild 的 caller（Ctrl+R `:2940`、launch-failure `:1074`、settings `:3088`、
+  首輪 `:3788`）未改、仍可取代。
+- **build／CTest**：Release x64（LLVM-MinGW＋Ninja）無新增 warning；focused 2/2 綠（catalog_refresh、
+  lifecycle）；完整 CTest 26/26 綠。
+- **未涵蓋**：full-rescan 延後依賴「`kNever` 恆為 due」不變式（既有 `MarkSourceFullRescan`／`DueSources`
+  釘住）；re-arm 的 500 ms timer 僅在 rebuild 在途時存在，非 idle 固定 timer。commit：`<controller fills after commit>`

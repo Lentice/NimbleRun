@@ -83,6 +83,10 @@ bool CatalogRefreshCoordinator::IsRebuildInProgress() const {
     return !active_sources_.empty() && !GenerationComplete(generation_);
 }
 
+bool CatalogRefreshCoordinator::ShouldStartRebuild(std::int64_t now_ms) const {
+    return !IsRebuildInProgress() && HasDueRebuild(now_ms);
+}
+
 std::uint64_t CatalogRefreshCoordinator::BeginGeneration(std::vector<CatalogSource> sources) {
     ++generation_;
     active_sources_ = std::move(sources);

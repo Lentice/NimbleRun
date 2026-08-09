@@ -2949,9 +2949,17 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
         const nimblerun::CatalogSource source = WatchIndexToSource(index);
         if (full_rescan) {
             g_refresh->MarkSourceFullRescan(source);
-            const std::vector<nimblerun::CatalogSource> due = g_refresh->DueSources(MonotonicMs());
-            if (!due.empty()) {
-                StartRebuild(window, due);
+            const std::int64_t now = MonotonicMs();
+            if (g_refresh->ShouldStartRebuild(now)) {
+                const std::vector<nimblerun::CatalogSource> due = g_refresh->DueSources(now);
+                if (!due.empty()) {
+                    StartRebuild(window, due);
+                }
+            } else if (!g_refresh->DueSources(now).empty()) {
+                // NR-118: rebuild running; defer the full-rescan marker to the debounce
+                // timer so it is serviced once the current generation completes (the
+                // marker is always due per its kNever timestamp).
+                ScheduleDebouncedRebuild(window);
             }
         } else {
             g_refresh->NotifySourceEvent(source, MonotonicMs());
@@ -3034,10 +3042,15 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
         if (w_param == kRebuildTimerId) {
             KillTimer(window, kRebuildTimerId);
             if (g_refresh) {
-                const std::vector<nimblerun::CatalogSource> due =
-                    g_refresh->DueSources(MonotonicMs());
-                if (!due.empty()) {
-                    StartRebuild(window, due);
+                const std::int64_t now = MonotonicMs();
+                if (g_refresh->ShouldStartRebuild(now)) {
+                    StartRebuild(window, g_refresh->DueSources(now));
+                } else if (!g_refresh->DueSources(now).empty()) {
+                    // NR-118: due sources exist but a rebuild is running; a partial
+                    // cycle must not supersede it (cold-start sources would be left
+                    // unverified or dropped). Re-arm so the pending work is serviced
+                    // by the next tick once the current generation completes.
+                    SetTimer(window, kRebuildTimerId, 500, nullptr);
                 }
             }
         }

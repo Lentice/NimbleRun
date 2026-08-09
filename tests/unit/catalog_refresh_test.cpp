@@ -384,6 +384,48 @@ void TestAppsFolderStalenessSkipsRunningRebuild() {
            "after the cycle completes the staleness check applies again");
 }
 
+// NR-118: a watcher/debounce partial rebuild must never supersede a running
+// generation. While a full rebuild is in flight, ShouldStartRebuild stays false
+// even when another source is due (BeginGeneration would drop the in-flight
+// generation, leaving never-enumerated sources unverified or gone); once the
+// generation completes, the same pending work becomes startable, and starting
+// it flips the guard back to false while the new cycle runs.
+void TestShouldStartRebuildDefersDuringInFlightGeneration() {
+    CatalogRefreshCoordinator c;
+    const std::int64_t t0 = 1000;
+    Expect(!c.ShouldStartRebuild(t0), "no pending work: nothing to start");
+    c.NotifySourceEvent(CatalogSource::StartMenu, t0);
+    const std::int64_t due_ms = t0 + CatalogRefreshCoordinator::kDebounceMs;
+    Expect(c.ShouldStartRebuild(due_ms),
+           "pending work with no running generation is startable");
+
+    const std::uint64_t gen = c.BeginGeneration(
+        {CatalogSource::StartMenu, CatalogSource::AppsFolder, CatalogSource::UserFolder});
+    c.ApplySourceResult(gen, CatalogSource::StartMenu,
+                        {Entry(L"start", AppSource::UserStartMenu)});
+    Expect(c.IsRebuildInProgress(), "a generation with a pending source is in flight");
+    c.NotifySourceEvent(CatalogSource::AppsFolder, t0);  // due while in flight
+    Expect(!c.ShouldStartRebuild(due_ms),
+           "a partial rebuild must not supersede the running generation");
+
+    c.ApplySourceResult(gen, CatalogSource::AppsFolder,
+                        {Entry(L"apps", AppSource::AppsFolder)});
+    c.ApplySourceResult(gen, CatalogSource::UserFolder,
+                        {Entry(L"user", AppSource::UserFolder)});
+    Expect(c.GenerationComplete(gen), "all sources reported: generation complete");
+    Expect(!c.IsRebuildInProgress(), "the completed generation is no longer in flight");
+    Expect(c.ShouldStartRebuild(due_ms),
+           "pending work is serviced after the running generation completes");
+
+    const std::uint64_t gen2 = c.BeginGeneration({CatalogSource::AppsFolder});
+    Expect(!c.ShouldStartRebuild(due_ms),
+           "once started, the guard is false again while the cycle runs");
+    c.ApplySourceResult(gen2, CatalogSource::AppsFolder,
+                        {Entry(L"apps", AppSource::AppsFolder)});
+    Expect(!c.ShouldStartRebuild(due_ms),
+           "a completed cycle clears the pending work: nothing left to start");
+}
+
 // Snapshot is recomputed deterministically and atomic per swap: the caller sees
 // either the old or the new merged list, never a partial build.
 void TestSnapshotIsAtomicAndDeterministic() {
@@ -789,6 +831,7 @@ int wmain() {
     TestAppsFolderNeverSucceededIsDueAtLowUptime();
     TestAppsFolderFailureKeepsDue();
     TestAppsFolderStalenessSkipsRunningRebuild();
+    TestShouldStartRebuildDefersDuringInFlightGeneration();
     TestSnapshotIsAtomicAndDeterministic();
     TestNoPartialSnapshotBeforeAllSourcesReport();
     TestDeliveryFailureCompletesGeneration();

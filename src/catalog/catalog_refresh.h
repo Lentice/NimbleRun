@@ -47,6 +47,15 @@ public:
     // merge its one-shot refresh into the running rebuild.
     bool IsRebuildInProgress() const;
 
+    // NR-118: true when a rebuild should start now -- at least one source is due
+    // and no generation is running. Starting a partial rebuild while one runs
+    // would supersede it (BeginGeneration drops the in-flight generation), which
+    // at cold start leaves never-enumerated sources with only unverified cache
+    // rows or nothing at all (design-spec §FR-008). Callers that always rebuild
+    // every source (Ctrl+R, launch-failure, settings apply, startup) may bypass
+    // this and still supersede.
+    bool ShouldStartRebuild(std::int64_t now_ms) const;
+
     // Begins a rebuild cycle over the given sources. Any ApplySourceResult/
     // Failure carrying an older generation than the latest one is ignored, so a
     // stale worker never overwrites a newer snapshot. The merged snapshot is
