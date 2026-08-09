@@ -138,4 +138,4 @@ event wait 與 WM_QUIT lifecycle、Release build／CTest／lifecycle 結果，�
   （lifecycle、catalog_refresh、message_loop，lifecycle 以真實 exe 跑修正後 loop）；完整 CTest
   **26/26** 綠。
 - **未涵蓋**：真實 `GetMessageW == -1`（OS queue error）無法安全注入；以純 decision 測試＋
-  diagnostic 路徑覆蓋（ticket 允許的最小 seam）。commit：`<controller fills after commit>`
+  diagnostic 路徑覆蓋（ticket 允許的最小 seam）。commit：`c100efe`
