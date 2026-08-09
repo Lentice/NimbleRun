@@ -2063,12 +2063,16 @@ void ShowPanel(HWND window) {
     // NR-015: size the panel in DIPs scaled to the cursor monitor's DPI, then
     // clamp it to the work area. Width/height stay 640x432 DIPs at any DPI, so
     // the same layout math gives predictable bounds at 100/150/200%.
-    UINT dpi_x = 96;
-    UINT dpi_y = 96;
-    GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &dpi_x, &dpi_y);
     const RECT work_area = monitor_info.rcWork;
+    // NR-103: park the (still hidden) window on the cursor monitor first so a
+    // DPI change fires WM_DPICHANGED here and its suggested rect applies the
+    // same DIP-size centering; GetDpiForWindow then reflects the cursor monitor
+    // and stays the single per-window source that WM_DPICHANGED and every later
+    // layout computation use, unlike the awareness-dependent GetDpiForMonitor.
+    SetWindowPos(window, HWND_TOPMOST, work_area.left, work_area.top, 0, 0,
+                 SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER);
     const nimblerun::layout::WindowSize size = nimblerun::layout::ClampWindowSize(
-        static_cast<float>(dpi_x),
+        static_cast<float>(GetDpiForWindow(window)),
         work_area.right - work_area.left,
         work_area.bottom - work_area.top);
     const int left = work_area.left + ((work_area.right - work_area.left) - size.width) / 2;

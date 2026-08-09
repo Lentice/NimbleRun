@@ -22,7 +22,7 @@ ctest --test-dir build --output-on-failure
 4. Press `Esc`. Expected: the search box clears; a second `Esc` hides the panel.
 5. Right-click an item and choose Pin. Expected: the item is pinned; a restart keeps it pinned, and Unpin works the same way.
 6. Open the tray menu. Expected: all four entries (Open, Settings, About, Exit) work.
-7. Open the panel at 200% DPI. Expected: the layout and the icons render correctly.
+7. Open the panel at 200% DPI. Expected: the layout and the icons render correctly. First-show sizing and centering must match a later monitor move at the same DPI: press `Alt+Space` once (the first display) at 100%, 150%, and 200%, verify the panel is centered with the correct DIP layout, then move it to another monitor at the same DPI and confirm the size and centering are identical.
 
 When testing a conflicting or Windows-reserved shortcut, confirm that NimbleRun rejects it, leaves the native shortcut unchanged, keeps any previous working shortcut, and shows only one non-blocking reminder with a settings entry.
 
