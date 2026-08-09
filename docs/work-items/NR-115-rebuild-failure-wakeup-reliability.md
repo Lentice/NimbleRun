@@ -113,3 +113,37 @@ git diff --name-only
 
 實作者需記錄 wake-up failure 注入方式、UI signal／message-pump integration、每一 outcome 的 ownership
 表、generation/source 去重、WM_DESTROY 行為、idle path 影響、build／CTest 與無法安全注入的 OS-only failure path。
+
+實作（2026-08-09，single clean worker ＋ controller 修正一處順序）：
+
+- **UI signal／message-pump integration**：新增檔案層級 manual-reset event `g_rebuild_failure_event`
+  （`src/app_host/main.cpp:348` 附近）。`QueueRebuildSourceFailure` 的 recorded 分支改為
+  `if (!PostMessageW(window, kRebuildDeliveryFailedMessage, 0, 0) && g_rebuild_failure_event) SetEvent(...)`
+  ——wake-up message 失敗（queue 滿）時改由 event 可靠喚醒，不再依賴「留著等下次 drain」。
+  主 message loop（`wWinMain`）由純 `GetMessageW` 改為 `MsgWaitForMultipleObjectsEx(1, &event, INFINITE,
+  QS_ALLINPUT, MWMO_INPUTAVAILABLE)`：`WAIT_OBJECT_0`（event）分支做
+  `DrainRebuildDeliveryFailures()`→完成時 `OnGenerationCompleteRefresh()`＋`InvalidateRect`，然後在
+  `g_delivery_failure_mutex` 下**只有 vector 空才 `ResetEvent`**（level-triggered，racing SetEvent 不丟失）；
+  其餘經 `GetMessageW` 原樣。event 在**第一次 StartRebuild 之前**建立、message loop 結束後
+  （`CoUninitialize` 旁）關閉；`CreateEventW` 失敗（null）時 loop 完全退化為舊 `GetMessageW` 行為、
+  `SetEvent` 有 null guard。`kRebuildDeliveryFailedMessage` case、`DrainRebuildDeliveryFailures`、
+  `OnGenerationCompleteRefresh`、`WM_DESTROY` 皆未改。
+- **wake-up failure 注入**：OS queue-full 無法安全注入；以純 coordinator 測試模擬「多個 source 的
+  result＋wake-up 都失敗、UI 單次 drain」的完成語意。`catalog_refresh_test` 新增
+  `TestFailureWakeupDrainCompletesGeneration`：seed 舊 entries → 新 generation 三 source → StartMenu
+  健康送達 → 依 `DrainRebuildDeliveryFailures` 形狀一次套用 AppsFolder／UserFolder 兩筆 failure →
+  斷言每筆 `ApplySourceFailure` 恰好套用一次、`GenerationComplete(gen)`、`!IsRebuildInProgress()`、
+  healthy 新 entry 發佈、failed source 舊 entries 保留。
+- **ownership table**：成功 delivery＝registry erase（唯一 owner）＋message case 消費；recorded failure＋
+  wake-up OK＝vector（mutex）＋message case drain；recorded failure＋wake-up FAILED＝vector（mutex）＋
+  SetEvent→loop branch 同一 drain；no-alloc fallback（append 拋）＝無 record，message 帶 gen/source 由
+  `CompleteRebuildSourceFailure` 消費；WM_DESTROY＝`JoinRebuildThreads` 後無 worker 能 SetEvent／append，
+  handle 在 loop 結束後關閉，無 use-after-close。generation/source 去重：每 source 每 generation 至多一筆
+  record（NR-106），drain 以 swap 一次消費。
+- **idle path 影響**：`INFINITE` wait 待機、無 polling、無 timer；queue 空且 event 未 signal 時完全阻塞。
+  空 event（create 失敗）退化為舊 loop。lifecycle_check 以真實 exe 驗證新 loop 下視窗/message teardown。
+- **build／CTest**：Release x64（LLVM-MinGW＋Ninja）無新增 warning；focused 2/2 綠（catalog_refresh、
+  lifecycle）；完整 CTest 25/25 綠。
+- **未涵蓋**：no-alloc fallback 的 direct post 也失敗（heap 耗盡＋queue 滿同時發生）時無 record 可 drain——
+  NR-106 的 reserve 使該分支為 invariant fallback，列為已記錄殘餘。controller 修正：event 建立移回
+  第一次 `StartRebuild` 之前（原 worker 放在其後，與註解意圖不符的 startup race）。commit：`<controller fills after commit>`

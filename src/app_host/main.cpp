@@ -344,6 +344,12 @@ std::unordered_map<std::uintptr_t, std::unique_ptr<RebuildResult>> g_rebuild_han
 std::mutex g_delivery_failure_mutex;
 std::vector<std::pair<std::uint64_t, nimblerun::CatalogSource>> g_rebuild_delivery_failures;
 
+// NR-115: manual-reset event the main message loop also waits on. A worker
+// that records a rebuild delivery failure signals it when PostMessageW cannot
+// deliver the wake-up message (queue full), so a recorded failure is always
+// drained instead of waiting for an unrelated later message.
+HANDLE g_rebuild_failure_event = nullptr;
+
 // NR-079: set once at startup when the on-disk catalog.cache carries a newer
 // schema than this build reads. design-spec §10.4 forbids overwriting that
 // file, so cache writes stay off for the run (the cache is a rebuildable
@@ -1516,7 +1522,14 @@ void QueueRebuildSourceFailure(HWND window, std::uint64_t generation,
         }
     }
     if (recorded) {
-        PostMessageW(window, kRebuildDeliveryFailedMessage, 0, 0);
+        // NR-115: a queue-full PostMessageW failure must not strand the record --
+        // the message loop's manual-reset event provides the reliable, event-driven
+        // drain (no polling, no timer). SetEvent is thread-safe on a kernel object;
+        // the UI drains under g_delivery_failure_mutex.
+        if (!PostMessageW(window, kRebuildDeliveryFailedMessage, 0, 0) &&
+            g_rebuild_failure_event != nullptr) {
+            SetEvent(g_rebuild_failure_event);
+        }
         return;
     }
     // No allocation is needed for this direct signal. The receiver validates
@@ -3736,6 +3749,16 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         g_store_load_issues = 0;
     }
 
+    // NR-115: the main loop waits on a manual-reset event alongside the message
+    // queue, so a recorded delivery failure is drained even when its
+    // PostMessageW wake-up failed (queue full). Created before the first rebuild
+    // can queue a failure; closed after WM_DESTROY joined every worker, so no
+    // worker can SetEvent or append after the handle dies.
+    g_rebuild_failure_event =
+        CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    // A null event degrades gracefully: the loop below behaves exactly like the
+    // previous plain GetMessageW loop and SetEvent stays guarded by the null check.
+
     // NR-011: kick off the background full rebuild now that the panel can serve
     // the cached snapshot; the results arrive through kRebuildDoneMessage.
     if (g_refresh) {
@@ -3748,7 +3771,38 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     }
 
     MSG message{};
-    while (GetMessageW(&message, nullptr, 0, 0) > 0) {
+    for (;;) {
+        // NR-115: wait on the delivery-failure event as well as the message queue,
+        // so a recorded failure is drained even when its PostMessageW wake-up
+        // failed (queue full). Event-driven: no polling, no timer.
+        DWORD wait_result = WAIT_FAILED;
+        if (g_rebuild_failure_event != nullptr) {
+            wait_result = MsgWaitForMultipleObjectsEx(
+                1, &g_rebuild_failure_event, INFINITE, QS_ALLINPUT,
+                MWMO_INPUTAVAILABLE);
+        }
+        if (g_rebuild_failure_event != nullptr &&
+            wait_result == WAIT_OBJECT_0) {
+            // A recorded delivery failure woke the loop. Drain under the UI-owned
+            // coordinator; a complete generation refreshes the panel and cache
+            // exactly once (OnGenerationCompleteRefresh). InvalidateRect mirrors
+            // the kRebuildDeliveryFailedMessage case's single repaint.
+            if (DrainRebuildDeliveryFailures()) {
+                OnGenerationCompleteRefresh();
+            }
+            InvalidateRect(window, nullptr, FALSE);
+            // The event is level-triggered: reset only when no records remain, so a
+            // SetEvent racing the drain is never lost. New records after the reset
+            // re-signal it and the next wait returns immediately.
+            std::lock_guard<std::mutex> lock(g_delivery_failure_mutex);
+            if (g_rebuild_delivery_failures.empty()) {
+                ResetEvent(g_rebuild_failure_event);
+            }
+            continue;
+        }
+        if (!GetMessageW(&message, nullptr, 0, 0)) {
+            break;  // WM_QUIT
+        }
         TranslateMessage(&message);
         DispatchMessageW(&message);
     }
@@ -3773,6 +3827,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         g_test_show_semaphore = nullptr;
     }
     CoUninitialize();
+    if (g_rebuild_failure_event != nullptr) {
+        CloseHandle(g_rebuild_failure_event);
+        g_rebuild_failure_event = nullptr;
+    }
     CloseHandle(startup_ready);
     CloseHandle(mutex);
     return static_cast<int>(message.wParam);

@@ -287,6 +287,48 @@ void TestSetupFailureCompletesGeneration() {
            "setup failure preserves the old source while healthy source publishes");
 }
 
+// NR-115: models several sources whose result AND wake-up posts both failed
+// (PostMessageW queue full), so only the manual-reset event signal reaches the
+// UI. The UI drains the recorded failures in ONE pass -- ApplySourceFailure per
+// entry, exactly as DrainRebuildDeliveryFailures does -- and the generation
+// completes with the healthy source's entry and the failed sources' old entries.
+void TestFailureWakeupDrainCompletesGeneration() {
+    CatalogRefreshCoordinator c;
+    const std::uint64_t initial =
+        c.BeginGeneration({CatalogSource::StartMenu, CatalogSource::AppsFolder,
+                           CatalogSource::UserFolder});
+    c.ApplySourceResult(initial, CatalogSource::AppsFolder,
+                        {Entry(L"old-app", AppSource::AppsFolder)});
+    c.ApplySourceResult(initial, CatalogSource::UserFolder,
+                        {Entry(L"old-user", AppSource::UserFolder)});
+
+    const std::uint64_t gen =
+        c.BeginGeneration({CatalogSource::StartMenu, CatalogSource::AppsFolder,
+                           CatalogSource::UserFolder});
+    c.ApplySourceResult(gen, CatalogSource::StartMenu,
+                        {Entry(L"new-start", AppSource::UserStartMenu)});
+    Expect(c.IsRebuildInProgress(), "two failed-wakeup sources still pending");
+
+    Expect(c.ApplySourceFailure(gen, CatalogSource::AppsFolder),
+           "recorded AppsFolder failure applies exactly once");
+    Expect(c.ApplySourceFailure(gen, CatalogSource::UserFolder),
+           "recorded UserFolder failure applies exactly once");
+
+    Expect(c.GenerationComplete(gen), "all sources reported: generation complete");
+    Expect(!c.IsRebuildInProgress(), "no rebuild in progress after the drain");
+    const std::vector<AppEntry> after = c.Snapshot();
+    bool found_new_start = false;
+    bool found_old_app = false;
+    bool found_old_user = false;
+    for (const AppEntry& entry : after) {
+        found_new_start = found_new_start || entry.stable_id == L"new-start";
+        found_old_app = found_old_app || entry.stable_id == L"old-app";
+        found_old_user = found_old_user || entry.stable_id == L"old-user";
+    }
+    Expect(found_new_start && found_old_app && found_old_user,
+           "healthy new entry and both failed sources' old entries remain");
+}
+
 // AppsFolder on-demand rule: no refresh under 10 minutes, refresh when older.
 void TestAppsFolderStaleness() {
     CatalogRefreshCoordinator c;
@@ -685,6 +727,7 @@ int wmain() {
     TestNoPartialSnapshotBeforeAllSourcesReport();
     TestDeliveryFailureCompletesGeneration();
     TestSetupFailureCompletesGeneration();
+    TestFailureWakeupDrainCompletesGeneration();
     TestSnapshotFillsNormalizedName();
     TestSetSnapshotFillsNormalizedName();
     TestSetSnapshotRespectsPrefilledNormalizedName();

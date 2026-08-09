@@ -151,7 +151,7 @@
 | NR-112 | Release evidence 不得把未量測的 blocking gates 報成 PASSED | 5 | `done` | NR-017, NR-104 | [NR-112](work-items/NR-112-release-evidence-unmeasured-gates.md) |
 | NR-113 | Catalog cache 項目未經來源驗證不得啟動 | 3 | `done` | NR-008, NR-011, NR-079 | [NR-113](work-items/NR-113-catalog-cache-launch-provenance.md) |
 | NR-114 | IconStore 開啟時拒絕超過 whole-pack budget 的實體檔案 | 3 | `done` | NR-075, NR-108 | [NR-114](work-items/NR-114-icon-store-open-budget-guard.md) |
-| NR-115 | Rebuild failure wake-up 失敗仍必須完成 generation | 3 | `ready` | NR-100, NR-106 | [NR-115](work-items/NR-115-rebuild-failure-wakeup-reliability.md) |
+| NR-115 | Rebuild failure wake-up 失敗仍必須完成 generation | 3 | `done` | NR-100, NR-106 | [NR-115](work-items/NR-115-rebuild-failure-wakeup-reliability.md) |
 
 ## Dependency lanes
 
