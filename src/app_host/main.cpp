@@ -863,6 +863,10 @@ void StampRankingFields();
 void HidePanel(HWND window) {
     ShowWindow(window, SW_HIDE);
     if (g_icon_worker) {
+        // NR-099: drop the previous hide cycle's queued prewarm before the
+        // fresh flush + prewarm for the new idle session is posted, so stale
+        // prewarm work is cancelled on the new panel state (design-spec §9.2).
+        g_icon_worker->CancelPrewarm();
         const std::vector<std::wstring> pins =
             g_pins ? g_pins->OrderedPins() : std::vector<std::wstring>{};
         g_icon_worker->PostFlush(pins, static_cast<std::uint64_t>(std::time(nullptr)));

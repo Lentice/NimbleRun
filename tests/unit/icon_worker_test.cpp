@@ -351,6 +351,165 @@ void TestVisibleJumpsAheadOfQueuedPrewarm() {
     DestroyWindow(window);
 }
 
+// NR-099: the load queue has a fixed, explainable cap. While the worker is
+// stalled on a gated visible request, an endless prewarm backlog may not grow
+// past kMaxQueuedTasks: a prewarm posted when the queue is at the cap is
+// dropped, and every queued (capped) request still reports, so no visible
+// fallback recovery is lost.
+void TestQueueCapDropsPrewarmWhenFull() {
+    const HWND window = CreateMessageWindow();
+    FakeProvider provider;
+    provider.gate = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    IconWorker worker(window, kReadyMessage, provider);
+    worker.Start();
+
+    worker.Post({Entry(L"visible"), Key(L"visible"), true});
+    const DWORD deadline = GetTickCount() + 1000;
+    while (!provider.entered.load() && GetTickCount() < deadline) {
+        Sleep(1);
+    }
+    Expect(provider.entered.load(), "worker is blocked on the gated visible request");
+
+    for (int i = 0; i < static_cast<int>(IconWorker::kMaxQueuedTasks) - 1; ++i) {
+        worker.Post({Entry(L"p" + std::to_wstring(i)),
+                     Key(L"p" + std::to_wstring(i)), false});
+    }
+    Expect(worker.QueueDepth() == IconWorker::kMaxQueuedTasks - 1,
+           "the prewarm backlog is one below the cap");
+
+    worker.Post({Entry(L"fill"), Key(L"fill"), false});
+    Expect(worker.QueueDepth() == IconWorker::kMaxQueuedTasks,
+           "the next prewarm fills the queue to exactly the cap");
+
+    worker.Post({Entry(L"drop"), Key(L"drop"), false});
+    Expect(worker.QueueDepth() == IconWorker::kMaxQueuedTasks,
+           "an over-cap prewarm is dropped, the depth does not grow");
+
+    SetEvent(provider.gate);
+    std::vector<std::unique_ptr<IconResult>> results;
+    Expect(PumpResults(window, results,
+                       static_cast<int>(IconWorker::kMaxQueuedTasks) + 1),
+           "the in-flight visible and every capped prewarm report a result");
+    Expect(results[0]->encoded_key == L"visible|48",
+           "the visible request's result is never lost (fallback recovery)");
+    for (const auto& result : results) {
+        Expect(!result->bitmap.Empty(), "every capped request carries a bitmap");
+    }
+
+    CloseHandle(provider.gate);
+    worker.Stop();
+    DestroyWindow(window);
+}
+
+// NR-099: when the queue is at the cap, a visible request evicts a prewarm
+// from the back (never itself) so it still jumps the queue and its result
+// arrives -- bounded queue, no lost visible fallback recovery.
+void TestVisibleEvictsPrewarmWhenFull() {
+    const HWND window = CreateMessageWindow();
+    FakeProvider provider;
+    provider.gate = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    IconWorker worker(window, kReadyMessage, provider);
+    worker.Start();
+
+    worker.Post({Entry(L"a"), Key(L"a"), false});
+    const DWORD deadline = GetTickCount() + 1000;
+    while (!provider.entered.load() && GetTickCount() < deadline) {
+        Sleep(1);
+    }
+    Expect(provider.entered.load(), "worker is blocked on the gated prewarm request");
+    for (int i = 0; i < static_cast<int>(IconWorker::kMaxQueuedTasks); ++i) {
+        worker.Post({Entry(L"p" + std::to_wstring(i)),
+                     Key(L"p" + std::to_wstring(i)), false});
+    }
+    Expect(worker.QueueDepth() == IconWorker::kMaxQueuedTasks,
+           "the prewarm backlog fills the queue to the cap");
+
+    worker.Post({Entry(L"vis"), Key(L"vis"), true});
+    Expect(worker.QueueDepth() == IconWorker::kMaxQueuedTasks,
+           "a visible request evicts a prewarm from the back, depth stays capped");
+
+    SetEvent(provider.gate);
+    std::vector<std::unique_ptr<IconResult>> results;
+    Expect(PumpResults(window, results,
+                       static_cast<int>(IconWorker::kMaxQueuedTasks) + 1),
+           "the gated prewarm, the visible, and the surviving prewarms all report");
+    Expect(results[1]->encoded_key == L"vis|48",
+           "the visible request jumped ahead of the queued prewarms and reported");
+    Expect(!results[1]->bitmap.Empty(), "the visible request carries a bitmap");
+
+    CloseHandle(provider.gate);
+    worker.Stop();
+    DestroyWindow(window);
+}
+
+// NR-099: a flood of flush signals coalesces into a single latest task, never
+// a stacked backlog. A gated Load keeps the worker busy so the flush tasks
+// provably pile up (unprocessed) in the queue.
+void TestFlushCoalesces() {
+    const HWND window = CreateMessageWindow();
+    FakeProvider provider;
+    provider.gate = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    IconWorker worker(window, kReadyMessage, provider);
+    worker.Start();
+
+    worker.Post({Entry(L"a"), Key(L"a"), false});
+    const DWORD deadline = GetTickCount() + 1000;
+    while (!provider.entered.load() && GetTickCount() < deadline) {
+        Sleep(1);
+    }
+    Expect(provider.entered.load(), "worker is blocked on the gated request");
+
+    worker.PostFlush({L"a"}, 1);
+    Expect(worker.QueueDepth() == 1, "the first flush task is queued");
+    worker.PostFlush({L"b"}, 2);
+    Expect(worker.QueueDepth() == 1, "a second flush replaces, never stacks");
+    worker.PostFlush({L"c"}, 3);
+    Expect(worker.QueueDepth() == 1, "a third flush still leaves exactly one");
+
+    SetEvent(provider.gate);
+    std::vector<std::unique_ptr<IconResult>> results;
+    Expect(PumpResults(window, results, 1), "the gated load still reports a result");
+
+    CloseHandle(provider.gate);
+    worker.Stop();
+    DestroyWindow(window);
+}
+
+// NR-099: CancelPrewarm drops every queued non-visible Load task but keeps
+// visible Load tasks (their fallback recovery) and the Flush task.
+void TestCancelPrewarmDropsQueuedPrewarm() {
+    const HWND window = CreateMessageWindow();
+    FakeProvider provider;
+    provider.gate = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    IconWorker worker(window, kReadyMessage, provider);
+    worker.Start();
+
+    worker.Post({Entry(L"a"), Key(L"a"), false});
+    const DWORD deadline = GetTickCount() + 1000;
+    while (!provider.entered.load() && GetTickCount() < deadline) {
+        Sleep(1);
+    }
+    Expect(provider.entered.load(), "worker is blocked on the gated prewarm request");
+    worker.Post({Entry(L"b"), Key(L"b"), false});
+    worker.Post({Entry(L"c"), Key(L"c"), false});
+    Expect(worker.QueueDepth() == 2, "two prewarm requests are queued");
+
+    worker.CancelPrewarm();
+    Expect(worker.QueueDepth() == 0, "CancelPrewarm drops every queued prewarm");
+
+    worker.Post({Entry(L"vis"), Key(L"vis"), true});
+    Expect(worker.QueueDepth() == 1, "a visible request survives CancelPrewarm");
+
+    SetEvent(provider.gate);
+    std::vector<std::unique_ptr<IconResult>> results;
+    Expect(PumpResults(window, results, 2), "the gated prewarm and visible report");
+    Expect(results[1]->encoded_key == L"vis|48", "the visible result arrives");
+
+    CloseHandle(provider.gate);
+    worker.Stop();
+    DestroyWindow(window);
+}
+
 void TestStopDropsQueueAndSilencesNewPosts() {
     const HWND window = CreateMessageWindow();
     FakeProvider provider;
@@ -785,6 +944,10 @@ int wmain() {
     TestUnknownTokenIgnored();
     TestVisibleJumpsTheQueue();
     TestVisibleJumpsAheadOfQueuedPrewarm();
+    TestQueueCapDropsPrewarmWhenFull();
+    TestVisibleEvictsPrewarmWhenFull();
+    TestFlushCoalesces();
+    TestCancelPrewarmDropsQueuedPrewarm();
     TestStopDropsQueueAndSilencesNewPosts();
     TestFailedPostErasesHandoffAndLeaksNothing();
 

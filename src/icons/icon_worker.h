@@ -69,6 +69,12 @@ public:
     // `store` is optional (nullptr = no disk layer, the NR-032 behavior). The
     // store is owned by the caller and must outlive the worker; only the worker
     // thread calls into it.
+    // NR-099: fixed, explainable load-queue bound. One visible page (24 cells)
+    // + one prewarm page (24) + headroom for a search-results page and a flush.
+    // When full, only low-priority work is dropped/evicted, never a visible
+    // Load task, so its fallback recovery (design-spec §FR-009) is preserved.
+    static constexpr std::size_t kMaxQueuedTasks = 64;
+
     IconWorker(HWND target, UINT result_message, IconProvider& provider,
                IconStore* store = nullptr);
     ~IconWorker();  // calls Stop()
@@ -88,6 +94,13 @@ public:
     // Never blocks. Lower priority than any visible request; the worker calls
     // IconStore::Flush(pinned_ids, now_utc) when it reaches this task.
     void PostFlush(std::vector<std::wstring> pinned_ids, std::uint64_t now_utc);
+    // NR-099: drops every queued Load task whose request is not visible -- a
+    // stale prewarm from an earlier hide cycle. Visible Load tasks and the
+    // Flush task survive. No-op when the queue holds none.
+    void CancelPrewarm();
+    // NR-099: current queue depth under the mutex. Boundedness diagnostic for
+    // design-spec §9.2 ("queue 有上限並可取消過期請求") and worker tests.
+    std::size_t QueueDepth() const;
 
 private:
     void Run();  // CoInitializeEx(COINIT_APARTMENTTHREADED) ... CoUninitialize
@@ -100,7 +113,8 @@ private:
     IconProvider& provider_;
     IconStore* store_ = nullptr;
     std::thread thread_;
-    std::mutex mutex_;
+    // mutable for the const QueueDepth() boundedness probe.
+    mutable std::mutex mutex_;
     std::condition_variable cv_;
     std::deque<IconTask> queue_;
     bool stop_ = false;

@@ -8,6 +8,7 @@
 #include <windows.h>
 #include <objbase.h>
 
+#include <algorithm>
 #include <ctime>
 #include <utility>
 
@@ -78,8 +79,16 @@ void IconWorker::Post(IconRequest request) {
             return;  // stopped or never started: drop
         }
         if (task.request.visible) {
+            // NR-099: visible always lands at the front; evict from the back,
+            // which is always a prewarm or flush task, never this visible one,
+            // so its fallback recovery (design-spec §FR-009) is never lost.
             queue_.push_front(std::move(task));
-        } else {
+            while (queue_.size() > kMaxQueuedTasks) {
+                queue_.pop_back();
+            }
+        } else if (queue_.size() < kMaxQueuedTasks) {
+            // NR-099: an over-cap prewarm is dropped; a dropped prewarm has no
+            // side effects, and the bound keeps the queue explainable (§9.2).
             queue_.push_back(std::move(task));
         }
     }
@@ -96,9 +105,34 @@ void IconWorker::PostFlush(std::vector<std::wstring> pinned_ids, std::uint64_t n
         if (!thread_.joinable()) {
             return;
         }
-        queue_.push_back(std::move(task));
+        // NR-099: a flood of hide cycles keeps at most one flush task. Replace
+        // an existing Flush in place so the latest pins/now always win; only
+        // push when the queue is below the cap (drop when full).
+        const auto existing = std::find_if(
+            queue_.begin(), queue_.end(),
+            [](const IconTask& t) { return t.kind == IconTaskKind::Flush; });
+        if (existing != queue_.end()) {
+            *existing = std::move(task);
+        } else if (queue_.size() < kMaxQueuedTasks) {
+            queue_.push_back(std::move(task));
+        }
     }
     cv_.notify_one();
+}
+
+void IconWorker::CancelPrewarm() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    // NR-099: drop every queued Load task that is not visible -- a stale
+    // prewarm from an earlier hide cycle. Visible Load tasks and the Flush
+    // task stay. The in-flight request is unaffected (it is not queued).
+    std::erase_if(queue_, [](const IconTask& task) {
+        return task.kind == IconTaskKind::Load && !task.request.visible;
+    });
+}
+
+std::size_t IconWorker::QueueDepth() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return queue_.size();
 }
 
 void IconWorker::Run() {
