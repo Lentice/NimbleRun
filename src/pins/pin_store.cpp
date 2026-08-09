@@ -25,6 +25,9 @@ PinStore::PinStore(std::wstring directory)
 
 PinLoadResult PinStore::Load() {
     pins_.clear();
+    // NR-096: any non-NewerSchema outcome stays writable; only the NewerSchema
+    // branch below sets write_protected_.
+    write_protected_ = false;
 
     std::vector<std::wstring> lines;
     switch (ReadVersionedLines(directory_, kFileName, kSchemaVersion, lines)) {
@@ -33,6 +36,7 @@ PinLoadResult PinStore::Load() {
     case VersionedReadStatus::Missing:
         return PinLoadResult::Missing;
     case VersionedReadStatus::NewerSchema:
+        write_protected_ = true;
         return PinLoadResult::NewerSchema;  // original untouched (design-spec §10.4)
     case VersionedReadStatus::OlderSchema:
         break;  // NR-062: a schema=1 file has no name column; its 2-field lines
@@ -78,6 +82,12 @@ PinLoadResult PinStore::Load() {
 }
 
 bool PinStore::Save() const {
+    // NR-096: a newer-schema file is another build's data (design-spec §10.4).
+    // Refuse without touching the original or the tmp file; the caller's
+    // save-failed handling runs.
+    if (write_protected_) {
+        return false;
+    }
     std::wstring text;
     text += kSchemaPrefix;
     text += std::to_wstring(kSchemaVersion);

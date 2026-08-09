@@ -26,6 +26,9 @@ UsageStore::UsageStore(std::wstring directory)
 
 UsageLoadResult UsageStore::Load() {
     records_.clear();
+    // NR-096: any non-NewerSchema outcome stays writable; only the NewerSchema
+    // branch below sets write_protected_.
+    write_protected_ = false;
 
     std::vector<std::wstring> lines;
     switch (ReadVersionedLines(directory_, kFileName, kSchemaVersion, lines)) {
@@ -34,6 +37,7 @@ UsageLoadResult UsageStore::Load() {
     case VersionedReadStatus::Missing:
         return UsageLoadResult::Missing;
     case VersionedReadStatus::NewerSchema:
+        write_protected_ = true;
         return UsageLoadResult::NewerSchema;  // original untouched (design-spec §10.4)
     default:  // Unreadable / Malformed / OlderSchema
         PreserveCorrupt(directory_, kFileName);
@@ -73,6 +77,12 @@ UsageLoadResult UsageStore::Load() {
 }
 
 bool UsageStore::Save() const {
+    // NR-096: a newer-schema file is another build's data (design-spec §10.4).
+    // Refuse without touching the original or the tmp file; Clear() funnels
+    // through here and restores records_ on the false return.
+    if (write_protected_) {
+        return false;
+    }
     std::wstring text;
     text += kSchemaPrefix;
     text += std::to_wstring(kSchemaVersion);

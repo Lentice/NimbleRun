@@ -275,6 +275,58 @@ void TestNewerSchema() {
     fs::remove_all(dir);
 }
 
+// NR-096: a newer-schema file is another build's data -- Save() must refuse
+// and leave the original file byte-for-byte unchanged, even after
+// RecordLaunch() mutates in-memory state (the launch-success path), and stay
+// refused across re-loads. Clear() funnels through the same guard.
+void TestNewerSchemaSaveRefused() {
+    const std::wstring dir = MakeTempDir("newersave");
+    const std::string content = "schema=99\n" + std::string("not_in_catalog") + "\t5\t1000\n";
+    WriteBytes(dir + L"\\usage.tsv", content);
+    UsageStore store(dir);
+    Expect(store.Load() == UsageLoadResult::NewerSchema, "newer schema reports NewerSchema");
+    store.RecordLaunch(L"another_app", 2000);
+    Expect(store.Save() == false, "Save() refuses a newer-schema store");
+    Expect(ReadBytes(dir + L"\\usage.tsv") == content, "original file unchanged");
+    Expect(!fs::exists(dir + L"\\usage.tsv.tmp"), "no tmp file left behind");
+    Expect(store.Load() == UsageLoadResult::NewerSchema, "re-load still reports NewerSchema");
+    Expect(store.Save() == false, "Save() still refused after re-load");
+    const std::size_t before = store.Records().size();
+    Expect(store.Clear() == false, "Clear() fails on a newer-schema store");
+    Expect(store.Records().size() == before, "Clear() restored the in-memory records");
+    fs::remove_all(dir);
+}
+
+// NR-096 regression: every non-NewerSchema load outcome stays writable.
+void TestNormalLoadsRemainWritable() {
+    // Missing -> writable: a first-run RecordLaunch + Save creates the file.
+    const std::wstring dir = MakeTempDir("writable_missing");
+    UsageStore missing(dir);
+    Expect(missing.Load() == UsageLoadResult::Missing, "missing reports Missing");
+    missing.RecordLaunch(L"app", 100);
+    Expect(missing.Save(), "Save() after a Missing load succeeds");
+    fs::remove_all(dir);
+
+    // Corrupt -> writable (fresh file), on a fresh dir because the corrupt
+    // load renames the original aside.
+    const std::wstring dir2 = MakeTempDir("writable_corrupt");
+    WriteBytes(dir2 + L"\\usage.tsv", "garbage not a usage file\n");
+    UsageStore corrupt(dir2);
+    Expect(corrupt.Load() == UsageLoadResult::Corrupt, "corrupt reports Corrupt");
+    Expect(corrupt.Save(), "Save() after a Corrupt load succeeds (fresh file)");
+    Expect(fs::exists(dir2 + L"\\usage.tsv"), "a fresh usage.tsv was created");
+    fs::remove_all(dir2);
+
+    // Loaded -> the flag is cleared and Save succeeds.
+    const std::wstring dir3 = MakeTempDir("writable_loaded");
+    WriteBytes(dir3 + L"\\usage.tsv", "schema=1\napp\t1\t1000\n");
+    UsageStore loaded(dir3);
+    Expect(loaded.Load() == UsageLoadResult::Loaded, "valid file loads");
+    loaded.RecordLaunch(L"another", 2000);
+    Expect(loaded.Save(), "Save() after a Loaded load succeeds");
+    fs::remove_all(dir3);
+}
+
 void TestAtomicWriteFailure() {
     const std::wstring dir = MakeTempDir("atomic");
     UsageStore store(dir);
@@ -518,6 +570,8 @@ int wmain() {
     TestNegativeTotalLaunchesRejected();
     TestCorruptMidFileClearsRecords();
     TestNewerSchema();
+    TestNewerSchemaSaveRefused();
+    TestNormalLoadsRemainWritable();
     TestAtomicWriteFailure();
     TestForgetExisting();
     TestForgetMissing();

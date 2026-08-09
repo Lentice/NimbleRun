@@ -79,6 +79,11 @@ public:
 private:
     std::wstring directory_;
     std::vector<UsageRecord> records_;
+    // NR-096: true when the last Load() reported NewerSchema. The original file
+    // is another build's data (design-spec §10.4); Save() must refuse to
+    // overwrite it. Cleared by every non-NewerSchema Load outcome. mutable
+    // because Save() is const.
+    mutable bool write_protected_ = false;
 };
 
 // Usage score for one record at `now_utc` (design-spec §4.6): a launch-count

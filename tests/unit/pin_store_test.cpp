@@ -300,6 +300,55 @@ void TestNewerSchema() {
     fs::remove_all(dir);
 }
 
+// NR-096: a newer-schema file is another build's data -- Save() must refuse
+// and leave the original file byte-for-byte unchanged, even after Pin()
+// mutates the in-memory state (the context-menu pin/unpin path), and stay
+// refused across re-loads.
+void TestNewerSchemaSaveRefused() {
+    const std::wstring dir = MakeTempDir("newersave");
+    const std::string content = "schema=99\npinned_app\t1000\n";
+    WriteBytes(dir + L"\\favorites.txt", content);
+    PinStore store(dir);
+    Expect(store.Load() == PinLoadResult::NewerSchema, "newer schema reports NewerSchema");
+    store.Pin(L"another_app", L"Another", 2000);
+    Expect(store.Save() == false, "Save() refuses a newer-schema store");
+    Expect(ReadBytes(dir + L"\\favorites.txt") == content, "original file unchanged");
+    Expect(!fs::exists(dir + L"\\favorites.txt.tmp"), "no tmp file left behind");
+    Expect(store.Load() == PinLoadResult::NewerSchema, "re-load still reports NewerSchema");
+    Expect(store.Save() == false, "Save() still refused after re-load");
+    fs::remove_all(dir);
+}
+
+// NR-096 regression: every non-NewerSchema load outcome stays writable.
+void TestNormalLoadsRemainWritable() {
+    // Missing -> writable: a first-run Pin + Save creates the file.
+    const std::wstring dir = MakeTempDir("writable_missing");
+    PinStore missing(dir);
+    Expect(missing.Load() == PinLoadResult::Missing, "missing reports Missing");
+    missing.Pin(L"app", L"App", 100);
+    Expect(missing.Save(), "Save() after a Missing load succeeds");
+    fs::remove_all(dir);
+
+    // Corrupt -> writable (fresh file), on a fresh dir because the corrupt
+    // load renames the original aside.
+    const std::wstring dir2 = MakeTempDir("writable_corrupt");
+    WriteBytes(dir2 + L"\\favorites.txt", "garbage not a favorites file\n");
+    PinStore corrupt(dir2);
+    Expect(corrupt.Load() == PinLoadResult::Corrupt, "corrupt reports Corrupt");
+    Expect(corrupt.Save(), "Save() after a Corrupt load succeeds (fresh file)");
+    Expect(fs::exists(dir2 + L"\\favorites.txt"), "a fresh favorites.txt was created");
+    fs::remove_all(dir2);
+
+    // Loaded -> the flag is cleared and Save succeeds.
+    const std::wstring dir3 = MakeTempDir("writable_loaded");
+    WriteBytes(dir3 + L"\\favorites.txt", "schema=2\napp\t1000\tApp\n");
+    PinStore loaded(dir3);
+    Expect(loaded.Load() == PinLoadResult::Loaded, "valid file loads");
+    loaded.Pin(L"another", L"Another", 2000);
+    Expect(loaded.Save(), "Save() after a Loaded load succeeds");
+    fs::remove_all(dir3);
+}
+
 // NR-062 critical path: a schema=1 file (2 fields per line, no display_name
 // column) must load cleanly via the OlderSchema path, not be treated as
 // corrupt -- otherwise every existing user's favorites.txt would be wiped to
@@ -489,6 +538,8 @@ int wmain() {
     TestMalformedRow();
     TestCorruptMidFileClearsPins();
     TestNewerSchema();
+    TestNewerSchemaSaveRefused();
+    TestNormalLoadsRemainWritable();
     TestLoadSchema1File();
     TestLoadTrailingFieldsIgnored();
     TestSaveRoundTripsDisplayName();

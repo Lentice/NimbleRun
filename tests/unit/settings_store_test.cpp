@@ -229,6 +229,58 @@ void TestNewerSchema(const std::wstring& dir) {
     Expect(!fs::exists(dir + L"\\settings.ini.corrupt"), "newer schema not treated as corrupt");
 }
 
+// NR-096: a newer-schema file is another build's data -- Save() must refuse
+// and leave the original file byte-for-byte unchanged, even after a runtime
+// mutation (the settings dialog Apply path), and stay refused across re-loads.
+void TestNewerSchemaSaveRefused(const std::wstring& dir) {
+    const std::string content = "schema=99\nrecent_count=30\n";
+    WriteBytes(dir + L"\\settings.ini", content);
+    SettingsStore store(dir);
+    Settings loaded;
+    Expect(store.Load(loaded) == SettingsLoadResult::NewerSchema, "newer schema reports NewerSchema");
+    loaded.recent_count = 35;
+    Expect(store.Save(loaded) == false, "Save() refuses a newer-schema store");
+    Expect(ReadBytes(dir + L"\\settings.ini") == content, "original file unchanged");
+    Expect(!fs::exists(dir + L"\\settings.ini.tmp"), "no tmp file left behind");
+    Expect(store.Load(loaded) == SettingsLoadResult::NewerSchema, "re-load still reports NewerSchema");
+    Expect(store.Save(loaded) == false, "Save() still refused after re-load");
+}
+
+// NR-096 regression: every non-NewerSchema load outcome stays writable.
+void TestMissingLoadSaveWritesFile(const std::wstring& dir) {
+    SettingsStore store(dir);
+    Settings settings;
+    Expect(store.Load(settings) == SettingsLoadResult::Missing, "missing reports Missing");
+    settings.recent_count = 22;
+    Expect(store.Save(settings), "Save() after a Missing load succeeds");
+    Settings reloaded;
+    Expect(store.Load(reloaded) == SettingsLoadResult::Loaded, "saved file reloads");
+    Expect(reloaded.recent_count == 22, "saved value reloads");
+}
+
+void TestLoadedLoadSaveWritesFile(const std::wstring& dir) {
+    WriteBytes(dir + L"\\settings.ini", "schema=1\nrecent_count=20\n");
+    SettingsStore store(dir);
+    Settings settings;
+    Expect(store.Load(settings) == SettingsLoadResult::Loaded, "valid file loads");
+    settings.recent_count = 30;
+    Expect(store.Save(settings), "Save() after a Loaded load succeeds");
+    Settings reloaded;
+    Expect(store.Load(reloaded) == SettingsLoadResult::Loaded, "saved file reloads");
+    Expect(reloaded.recent_count == 30, "saved value reloads");
+}
+
+void TestCorruptLoadSaveWritesFile(const std::wstring& dir) {
+    WriteBytes(dir + L"\\settings.ini", "garbage not a settings file\n");
+    SettingsStore store(dir);
+    Settings settings;
+    Expect(store.Load(settings) == SettingsLoadResult::Corrupt, "corrupt reports Corrupt");
+    Expect(store.Save(settings), "Save() after a Corrupt load succeeds (fresh file)");
+    Expect(fs::exists(dir + L"\\settings.ini"), "a fresh settings.ini was created");
+    Settings reloaded;
+    Expect(store.Load(reloaded) == SettingsLoadResult::Loaded, "fresh file reloads");
+}
+
 void TestAtomicWriteFailure(const std::wstring& dir) {
     SettingsStore store(dir);
     Settings expected;
@@ -301,6 +353,10 @@ int wmain() {
     TestCorrupt(MakeTempDir("corrupt"));
     TestCorruptMidFileUsesDefaults(MakeTempDir("midcorrupt"));
     TestNewerSchema(MakeTempDir("newer"));
+    TestNewerSchemaSaveRefused(MakeTempDir("newersave"));
+    TestMissingLoadSaveWritesFile(MakeTempDir("writable_missing"));
+    TestLoadedLoadSaveWritesFile(MakeTempDir("writable_loaded"));
+    TestCorruptLoadSaveWritesFile(MakeTempDir("writable_corrupt"));
     TestAtomicWriteFailure(MakeTempDir("atomic"));
     TestReadVersionedLines(MakeTempDir("versioned"));
     std::printf("NR-004 settings store check PASSED\n");

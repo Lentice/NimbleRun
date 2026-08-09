@@ -132,7 +132,7 @@
 | NR-093 | 快速鍵擷取要分別追蹤左右修飾鍵的放開狀態 | 4 | `done` | NR-089 | [NR-093](work-items/NR-093-hotkey-physical-modifier-tracking.md) |
 | NR-094 | 統一 MVP UI 語言規格，消除 English／雙語衝突 | 0 | `done` | — | [NR-094](work-items/NR-094-ui-language-source-of-truth.md) |
 | NR-095 | AppsFolder 從未成功列舉時，下一次顯示面板應立即重試 | 2 | `done` | NR-006, NR-011, NR-063, NR-081 | [NR-095](work-items/NR-095-appsfolder-first-success-retry.md) |
-| NR-096 | NewerSchema 載入後，所有 user-data Save 路徑仍須保護原檔 | 1 | `ready` | NR-004, NR-009, NR-013, NR-018, NR-058, NR-072, NR-080 | [NR-096](work-items/NR-096-newer-schema-write-guard.md) |
+| NR-096 | NewerSchema 載入後，所有 user-data Save 路徑仍須保護原檔 | 1 | `done` | NR-004, NR-009, NR-013, NR-018, NR-058, NR-072, NR-080 | [NR-096](work-items/NR-096-newer-schema-write-guard.md) |
 | NR-097 | 補完 worker setup／handoff 的例外邊界，不讓背景例外終止 process | 3 | `ready` | NR-076, NR-077 | [NR-097](work-items/NR-097-worker-setup-exception-boundary.md) |
 | NR-098 | Catalog rebuild 在關閉與新世代前必須具備可控取消路徑 | 3 | `ready` | NR-049, NR-063, NR-090, NR-091, NR-092 | [NR-098](work-items/NR-098-rebuild-shutdown-cancellation.md) |
 | NR-099 | Icon worker queue 要有上限，並可取消過期工作 | 3 | `ready` | NR-032, NR-036, NR-037 | [NR-099](work-items/NR-099-icon-queue-bound-and-stop.md) |

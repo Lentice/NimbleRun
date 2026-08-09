@@ -151,6 +151,9 @@ SettingsStore::SettingsStore(std::wstring directory)
 
 SettingsLoadResult SettingsStore::Load(Settings& out) const {
     out = DefaultSettings();
+    // NR-096: any non-NewerSchema outcome stays writable; only the NewerSchema
+    // branch below sets write_protected_.
+    write_protected_ = false;
 
     std::vector<std::wstring> lines;
     switch (ReadVersionedLines(directory_, kFileName, kSchemaVersion, lines)) {
@@ -159,6 +162,7 @@ SettingsLoadResult SettingsStore::Load(Settings& out) const {
     case VersionedReadStatus::Missing:
         return SettingsLoadResult::Missing;
     case VersionedReadStatus::NewerSchema:
+        write_protected_ = true;
         return SettingsLoadResult::NewerSchema;  // original untouched (design-spec §10.4)
     default:  // Unreadable / Malformed / OlderSchema
         PreserveCorrupt(directory_, kFileName);
@@ -249,6 +253,12 @@ SettingsLoadResult SettingsStore::Load(Settings& out) const {
 }
 
 bool SettingsStore::Save(const Settings& settings) const {
+    // NR-096: a newer-schema file is another build's data (design-spec §10.4).
+    // Refuse without touching the original or the tmp file; the caller's
+    // save-failed handling runs.
+    if (write_protected_) {
+        return false;
+    }
     std::wstring text;
     text += kSchemaPrefix;
     text += std::to_wstring(kSchemaVersion);
