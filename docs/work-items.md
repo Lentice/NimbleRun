@@ -154,6 +154,7 @@
 | NR-115 | Rebuild failure wake-up 失敗仍必須完成 generation | 3 | `done` | NR-100, NR-106 | [NR-115](work-items/NR-115-rebuild-failure-wakeup-reliability.md) |
 | NR-116 | Cold-start cache ＋ 首輪 source failure 保留該來源快取行與 usage | 3 | `done` | NR-011, NR-063, NR-113 | [NR-116](work-items/NR-116-cold-start-cache-source-failure-retention.md) |
 | NR-117 | Message loop 必須正確處理 GetMessageW error，不得 dispatch 未定義 MSG | 3 | `done` | NR-115 | [NR-117](work-items/NR-117-message-loop-getmessage-error.md) |
+| NR-118 | Watcher/debounce 的部分 rebuild 不得取代冷啟動的完整 rebuild | 3 | `ready` | NR-065, NR-081, NR-116 | [NR-118](work-items/NR-118-watcher-supersede-full-rebuild.md) |
 
 ## Dependency lanes
 
@@ -312,7 +313,31 @@ NR-117（GetMessageW error result 被誤當成可 dispatch）── 依賴 NR-11
 | 用 Catalog 項目把空白狀態的格狀填滿（NR-053 的 §4.2 規則 3） | NR-061 的使用者決策（2026-08-07） | 實機上填出 40 格 `3D Vision 相...`／`AccessPort`／`AlertMail48` 這類從未開過的項目，把「我釘的或我用過的」這個唯一語意稀釋掉，且這些格子的右鍵「Remove from recent」按了毫無反應。空白狀態的內容一律只來自釘選清單與使用紀錄；沒有就顯示一行提示。**NR-053 依 `usage_score` 排序的那一半保留。**（2026-08-07 由 NR-071 覆寫：常用區改依最後啟動時間排序、最新在最前，`usage_score` 僅留給 §4.5 搜尋結果的次要排序。「不用其他 App 填充」這條不受影響，仍然有效。） |
 | 把 FR-004a 的 program-like 判準套用到 FR-005 使用者自訂資料夾 | `docs/design-spec.md:354` | 明文「此判準**不套用於** FR-005 的使用者自訂資料夾」。該來源的把關者是使用者自己勾選的副檔名清單；二次過濾會無聲擋掉使用者手動加入的副檔名。 |
 
+## 稽核修補 lane 10（NR-118，2026-08-09 第十二次 fresh audit 產出）
+
+```
+NR-118（watcher/timer 部分 rebuild 取代冷啟動完整 rebuild）── 依賴 NR-065、NR-081、NR-116（皆 done）；
+IMPORTANT；NR-081 守 ShowPanel on-demand、NR-116 守 failure retention，但 WM_TIMER debounce 與
+full-rescan 分支都無 IsRebuildInProgress 守門，可取代首輪完整 rebuild：有 cache 時被取代來源只剩
+unverified 行（顯示不可啟動、無後續完整 rebuild 保證）、無 cache 時來源消失＋usage 清除。修 coordinator
+純值守門 ShouldStartRebuild，watcher/timer 在途時以既有 500 ms debounce timer 延後服務。
+```
+
 ## 計畫決策紀錄
+
+- 2026-08-09（NR-118，第十二次 fresh audit 產出）：NR-117 完成後再派 fresh independent read-only audit，
+  未在 NR-113～NR-117 內找到新 bug；但沿 `kWatchChangedMessage`→`WM_TIMER`→`StartRebuild` 追蹤發現一個
+  **未覆蓋的 IMPORTANT**：`StartRebuild` 一律 join＋`BeginGeneration` 取代在途 generation，而 watcher 的
+  兩個入口（`WM_TIMER` debounce `:3034-3041`、full-rescan `:2950-2955`）沒有 NR-081 那樣的守門。watcher
+  在首輪完整 rebuild 之前啟動（`:3694` vs `:3775`），因此首輪期間任何監看 root 事件會在 debounce 到期時
+  以單一來源部分 cycle 取代完整 rebuild：冷啟動下有 cache 時被取代來源只剩 NR-116 seed 的 unverified 行
+  （顯示但不可啟動、無機制再排完整 rebuild），無 cache 時來源行被 `RebuildMerged` 丟棄 → snapshot 縮水 →
+  usage Reconcile 刪除該來源紀錄＋縮水 cache 覆寫。NR-065 只保證事件不遺失、NR-081 只守 ShowPanel、
+  NR-116 只修 failure 保留，皆未覆蓋。NR-118 修法沿用 NR-081 形狀：coordinator 新增純值守門
+  `ShouldStartRebuild = !IsRebuildInProgress() && HasDueRebuild(now)`；watcher/timer 在途時以既有
+  500 ms debounce timer 延後（目前 generation 完成後的下一個 tick 服務 pending），不新增 timer／polling，
+  完整 rebuild 的 caller（Ctrl+R、launch-failure、settings、首輪）維持可取代。未 commit 於本決策段落；
+  ticket 文件與 tracker 行另 commit。
 
 - 2026-08-09（NR-117，第十一次 post-implementation audit）：獨立驗證 NR-113～NR-116 的 Release
   build／CTest 全綠後，重新檢查 NR-115 的 message loop。原本的 `while (GetMessageW(...) > 0)`
