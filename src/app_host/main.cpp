@@ -75,6 +75,10 @@ constexpr UINT kRebuildDoneMessage = WM_APP + 8;
 // NR-032: one decoded icon finished on the worker thread. lParam = pointer to a
 // heap IconResult the UI thread takes ownership of (empty bitmap = failure).
 constexpr UINT kIconReadyMessage = WM_APP + 9;
+// NR-100: a worker could not deliver its rebuild result (PostMessageW failed);
+// a pure wake-up so the UI drains the pending delivery failures as source
+// failures and the generation can still complete. No payload in the message.
+constexpr UINT kRebuildDeliveryFailedMessage = WM_APP + 10;
 // NR-011: debounce timer id (500 ms, see FR-008).
 constexpr UINT_PTR kRebuildTimerId = 2;
 
@@ -275,6 +279,14 @@ struct RebuildResult {
 // the UI thread moves them out on kRebuildDoneMessage and WM_DESTROY clears
 // whatever is still in flight. Tokens are object addresses.
 std::unordered_map<std::uintptr_t, std::unique_ptr<RebuildResult>> g_rebuild_handoffs;
+
+// NR-100: rebuild sources whose result could not be delivered (PostMessageW
+// failed). The worker records "(generation, source)" before the UI thread
+// drains it as a source failure, so every source still completes its
+// generation exactly once. Only touched by the workers under
+// g_delivery_failure_mutex and by the UI thread under the same mutex.
+std::mutex g_delivery_failure_mutex;
+std::vector<std::pair<std::uint64_t, nimblerun::CatalogSource>> g_rebuild_delivery_failures;
 
 // NR-079: set once at startup when the on-disk catalog.cache carries a newer
 // schema than this build reads. design-spec §10.4 forbids overwriting that
@@ -1268,6 +1280,55 @@ void RefreshPanelSnapshot() {
     g_model->SetCatalogIndex(nullptr);
 }
 
+// NR-100: the single post-generation-completion choke point. Runs only when the
+// whole generation has reported (success or failure), so the launch-failure
+// gate resets and the merged snapshot + cache are refreshed exactly once per
+// completed generation (design-spec §FR-008). No InvalidateRect: the caller
+// owns the single repaint per handled message.
+void OnGenerationCompleteRefresh() {
+    // NR-022: the refresh the launch-failure dialog scheduled has run
+    // to completion, so a future failure can schedule a fresh refresh.
+    g_launch_failure_refresh.OnRefreshComplete();
+    // NR-073: the merged snapshot only changes when the whole generation
+    // has reported; refreshing the panel and writing catalog.cache for
+    // the first 1..n-1 results would reset the selection and re-persist
+    // data the UI thread already holds, every cycle (§FR-008).
+    RefreshPanelSnapshot();
+    // NR-079: a newer-schema catalog.cache is another build's data --
+    // never overwrite it (design-spec §10.4); the in-memory snapshot
+    // keeps working and the flag stays set for the whole run.
+    if (!g_catalog_cache_disable_writes) {
+        nimblerun::SaveCatalogCache(nimblerun::DefaultSettingsDir(),
+                                    g_refresh->Snapshot());
+    }
+}
+
+// NR-100: applies every recorded delivery failure as a source failure, so each
+// source whose result could not be posted still completes its generation
+// (ApplySourceFailure keeps the source's old entries). Entries for a stale
+// generation are dropped harmlessly. Returns true when at least one entry was
+// applied and the current generation completed as a result. UI thread only.
+bool DrainRebuildDeliveryFailures() {
+    if (!g_refresh) {
+        return false;
+    }
+    std::vector<std::pair<std::uint64_t, nimblerun::CatalogSource>> failures;
+    {
+        std::lock_guard<std::mutex> lock(g_delivery_failure_mutex);
+        failures.swap(g_rebuild_delivery_failures);
+    }
+    if (failures.empty()) {
+        return false;
+    }
+    bool applied_any = false;
+    for (const auto& [generation, source] : failures) {
+        if (g_refresh->ApplySourceFailure(generation, source)) {
+            applied_any = true;
+        }
+    }
+    return applied_any && !g_refresh->IsRebuildInProgress();
+}
+
 // NR-049: waits for every in-flight rebuild thread. The rebuild threads read
 // g_settings and g_refresh, so this must run before anything that tears those
 // down; WM_DESTROY is that point in practice, and each new rebuild cycle joins
@@ -1405,8 +1466,18 @@ void StartRebuild(HWND window, std::vector<nimblerun::CatalogSource> sources) {
             if (!PostMessageW(window, kRebuildDoneMessage,
                               static_cast<WPARAM>(generation),
                               reinterpret_cast<LPARAM>(result))) {
+                // NR-063's leak guard: the result never reaches the UI thread,
+                // so erase the token, which deletes the payload.
                 std::lock_guard<std::mutex> lock(nimblerun::g_handoff_mutex);
                 g_rebuild_handoffs.erase(reinterpret_cast<std::uintptr_t>(result));
+                // NR-100: the UI thread must still complete this source for the
+                // generation (ApplySourceFailure keeps its old entries). Record
+                // it under its own mutex and send a payload-free wake-up.
+                {
+                    std::lock_guard<std::mutex> lock(g_delivery_failure_mutex);
+                    g_rebuild_delivery_failures.emplace_back(generation, source);
+                }
+                PostMessageW(window, kRebuildDeliveryFailedMessage, 0, 0);
             }
             });
         } catch (...) {
@@ -2648,25 +2719,28 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
             }
         }
         if (result_applied && g_refresh->GenerationComplete(result->generation)) {
-            // NR-022: the refresh the launch-failure dialog scheduled has run
-            // to completion, so a future failure can schedule a fresh refresh.
-            g_launch_failure_refresh.OnRefreshComplete();
-            // NR-073: the merged snapshot only changes when the whole generation
-            // has reported; refreshing the panel and writing catalog.cache for
-            // the first 1..n-1 results would reset the selection and re-persist
-            // data the UI thread already holds, every cycle (§FR-008).
-            RefreshPanelSnapshot();
-            // NR-079: a newer-schema catalog.cache is another build's data --
-            // never overwrite it (design-spec §10.4); the in-memory snapshot
-            // keeps working and the flag stays set for the whole run.
-            if (!g_catalog_cache_disable_writes) {
-                nimblerun::SaveCatalogCache(nimblerun::DefaultSettingsDir(),
-                                            g_refresh->Snapshot());
-            }
+            OnGenerationCompleteRefresh();
+        }
+        // NR-100: a sibling source's result may have failed to post while this
+        // one was delivered; drain those delivery failures. If that completes
+        // the generation, run the same single completion refresh (NR-073 keeps
+        // the snapshot swap at one choke point).
+        if (DrainRebuildDeliveryFailures()) {
+            OnGenerationCompleteRefresh();
         }
         InvalidateRect(window, nullptr, FALSE);
         return 0;
     }
+    case kRebuildDeliveryFailedMessage:
+        // NR-100: at least one rebuild source could not deliver its result via
+        // kRebuildDoneMessage. Drain the recorded failures as source failures so
+        // every source completes exactly once and the generation cannot stall
+        // in IsRebuildInProgress() forever (payload-free wake-up).
+        if (DrainRebuildDeliveryFailures()) {
+            OnGenerationCompleteRefresh();
+        }
+        InvalidateRect(window, nullptr, FALSE);
+        return 0;
     case WM_TIMER:
         if (w_param == kRebuildTimerId) {
             KillTimer(window, kRebuildTimerId);

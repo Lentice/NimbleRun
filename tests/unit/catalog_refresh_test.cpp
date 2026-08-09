@@ -227,6 +227,31 @@ void TestNoPartialSnapshotBeforeAllSourcesReport() {
     Expect(c.Snapshot().size() == 3, "snapshot swaps only when the generation is complete");
 }
 
+// NR-100: a source whose result could not be delivered (PostMessageW failed)
+// still completes the generation when the UI drains it as a source failure.
+// ApplySourceFailure keeps the delivered StartMenu entries, marks the source
+// received, and the generation finishes instead of stalling in
+// IsRebuildInProgress() forever (design-spec §FR-008).
+void TestDeliveryFailureCompletesGeneration() {
+    CatalogRefreshCoordinator c;
+    const std::uint64_t gen = c.BeginGeneration(
+        {CatalogSource::StartMenu, CatalogSource::AppsFolder, CatalogSource::UserFolder});
+    c.ApplySourceResult(gen, CatalogSource::StartMenu,
+                        {Entry(L"start", AppSource::UserStartMenu)});
+    Expect(c.IsRebuildInProgress(), "generation is in progress after one source delivers");
+
+    c.ApplySourceFailure(gen, CatalogSource::AppsFolder);
+    Expect(c.IsRebuildInProgress(), "still in progress with a source still pending");
+
+    c.ApplySourceFailure(gen, CatalogSource::UserFolder);
+    Expect(c.GenerationComplete(gen), "all sources reported: generation complete");
+    Expect(!c.IsRebuildInProgress(), "no rebuild in progress after the drain completes");
+
+    const std::vector<AppEntry> after = c.Snapshot();
+    Expect(after.size() == 1 && after[0].stable_id == L"start",
+           "delivered StartMenu entry is kept; no partial wipe");
+}
+
 // AppsFolder on-demand rule: no refresh under 10 minutes, refresh when older.
 void TestAppsFolderStaleness() {
     CatalogRefreshCoordinator c;
@@ -600,6 +625,7 @@ int wmain() {
     TestAppsFolderStalenessSkipsRunningRebuild();
     TestSnapshotIsAtomicAndDeterministic();
     TestNoPartialSnapshotBeforeAllSourcesReport();
+    TestDeliveryFailureCompletesGeneration();
     TestSnapshotFillsNormalizedName();
     TestSetSnapshotFillsNormalizedName();
     TestSetSnapshotRespectsPrefilledNormalizedName();
