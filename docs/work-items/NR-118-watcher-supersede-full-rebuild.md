@@ -164,4 +164,4 @@ pending 事件在完成後被服務的證據、non-cold-start 回歸、build／C
 - **build／CTest**：Release x64（LLVM-MinGW＋Ninja）無新增 warning；focused 2/2 綠（catalog_refresh、
   lifecycle）；完整 CTest 26/26 綠。
 - **未涵蓋**：full-rescan 延後依賴「`kNever` 恆為 due」不變式（既有 `MarkSourceFullRescan`／`DueSources`
-  釘住）；re-arm 的 500 ms timer 僅在 rebuild 在途時存在，非 idle 固定 timer。commit：`<controller fills after commit>`
+  釘住）；re-arm 的 500 ms timer 僅在 rebuild 在途時存在，非 idle 固定 timer。commit：`2c0645c`
