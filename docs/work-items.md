@@ -152,6 +152,7 @@
 | NR-113 | Catalog cache 項目未經來源驗證不得啟動 | 3 | `done` | NR-008, NR-011, NR-079 | [NR-113](work-items/NR-113-catalog-cache-launch-provenance.md) |
 | NR-114 | IconStore 開啟時拒絕超過 whole-pack budget 的實體檔案 | 3 | `done` | NR-075, NR-108 | [NR-114](work-items/NR-114-icon-store-open-budget-guard.md) |
 | NR-115 | Rebuild failure wake-up 失敗仍必須完成 generation | 3 | `done` | NR-100, NR-106 | [NR-115](work-items/NR-115-rebuild-failure-wakeup-reliability.md) |
+| NR-116 | Cold-start cache ＋ 首輪 source failure 保留該來源快取行與 usage | 3 | `ready` | NR-011, NR-063, NR-113 | [NR-116](work-items/NR-116-cold-start-cache-source-failure-retention.md) |
 
 ## Dependency lanes
 
@@ -304,6 +305,19 @@ NR-115（rebuild failure wake-up PostMessage failure）── 依賴 NR-100、NR
 | 把 FR-004a 的 program-like 判準套用到 FR-005 使用者自訂資料夾 | `docs/design-spec.md:354` | 明文「此判準**不套用於** FR-005 的使用者自訂資料夾」。該來源的把關者是使用者自己勾選的副檔名清單；二次過濾會無聲擋掉使用者手動加入的副檔名。 |
 
 ## 計畫決策紀錄
+
+- 2026-08-09（NR-116，fresh audit 產出）：NR-113～NR-115 完成後對整個 repo 做 fresh read-only audit，
+  未在三個新 commit 內找到 critical/important 問題；但追蹤冷啟動路徑發現一個**未覆蓋的 IMPORTANT**
+  缺口：`SetSnapshot` 只把 cache 寫進 `merged_`、從不 seed `source_entries_`，因此 valid cache 冷啟動後
+  **首輪** rebuild 若某來源失敗，`RebuildMerged` 只從 `source_entries_` 重建 → 該來源的 cache 行被整批
+  丟棄 → `RefreshPanelSnapshot` 對縮水的非空 snapshot 跑 usage Reconcile 並 Save → **該來源的 usage.tsv
+  紀錄被永久刪除**（§10.2 使用者資料）＋縮水版寫回 catalog.cache。違反 §FR-008「單一來源失敗保留該來源
+  舊結果」；NR-081 只修 on-demand 守門、NR-063 依賴 `source_entries_` 已有舊值，皆未覆蓋。
+  **覆寫 NR-113 交接區「首輪失敗時 cache row 會留在 snapshot 直到重新驗證」的假設**（新證據：行會被
+  丟棄）。NR-116 修法：啟動 cache load 後 seed `source_entries_`（依 AppSource→CatalogSource，保留
+  `launch_verified=false`），並讓 dedup `Beats` 對同一 stable_id 的 verified 行優先於 unverified 行——
+  失敗來源保留 cache 行（顯示、不可啟動）、成功來源的 fresh verified 行不被未驗證行 dedup 掉。
+  未 commit 於本決策段落；ticket 文件與 tracker 行另 commit。
 
 - 2026-08-09（NR-113～NR-115，第十次全 repo 稽核）：cache 與 icon pack 都是可重建快取，
   但「可重建」不等於「可把未驗證內容當成啟動信任來源」或「可在 Open 時接受超額實體檔案」。
