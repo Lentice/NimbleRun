@@ -153,6 +153,7 @@
 | NR-114 | IconStore 開啟時拒絕超過 whole-pack budget 的實體檔案 | 3 | `done` | NR-075, NR-108 | [NR-114](work-items/NR-114-icon-store-open-budget-guard.md) |
 | NR-115 | Rebuild failure wake-up 失敗仍必須完成 generation | 3 | `done` | NR-100, NR-106 | [NR-115](work-items/NR-115-rebuild-failure-wakeup-reliability.md) |
 | NR-116 | Cold-start cache ＋ 首輪 source failure 保留該來源快取行與 usage | 3 | `done` | NR-011, NR-063, NR-113 | [NR-116](work-items/NR-116-cold-start-cache-source-failure-retention.md) |
+| NR-117 | Message loop 必須正確處理 GetMessageW error，不得 dispatch 未定義 MSG | 3 | `ready` | NR-115 | [NR-117](work-items/NR-117-message-loop-getmessage-error.md) |
 
 ## Dependency lanes
 
@@ -292,6 +293,13 @@ NR-115（rebuild failure wake-up PostMessage failure）── 依賴 NR-100、NR
         覆寫兩項交接區「記錄留在 vector 等下次 drain」的安全假設：醒醒訊息本身失敗時沒有下次事件
 ```
 
+## 稽核修補 lane 9（NR-117，2026-08-09 第十一次 post-implementation audit 產出）
+
+```
+NR-117（GetMessageW error result 被誤當成可 dispatch）── 依賴 NR-115（done）；IMPORTANT；
+        NR-115 重寫 message loop 後，-1 error 只用 truthiness 判斷，會把未定義 MSG 送進 Translate／Dispatch
+```
+
 ## 已否決的方向 — 不要重開
 
 寫新 item 前先讀這節（[AGENTS.md](../AGENTS.md) §Work item authoring rules 要求）。以下方向都已有明確依據被否決；**要重開是允許的，但新 item 內必須寫出覆寫與新證據**，不要在此節之外默默開一個。此節只收「有依據的否決」，純粹的優先序取捨屬於下面的 §計畫決策紀錄。
@@ -305,6 +313,13 @@ NR-115（rebuild failure wake-up PostMessage failure）── 依賴 NR-100、NR
 | 把 FR-004a 的 program-like 判準套用到 FR-005 使用者自訂資料夾 | `docs/design-spec.md:354` | 明文「此判準**不套用於** FR-005 的使用者自訂資料夾」。該來源的把關者是使用者自己勾選的副檔名清單；二次過濾會無聲擋掉使用者手動加入的副檔名。 |
 
 ## 計畫決策紀錄
+
+- 2026-08-09（NR-117，第十一次 post-implementation audit）：獨立驗證 NR-113～NR-116 的 Release
+  build／CTest 全綠後，重新檢查 NR-115 的 message loop。原本的 `while (GetMessageW(...) > 0)`
+  正確把 `-1`（Win32 message retrieval error）與 `0`（WM_QUIT）都排除；NR-115 改成
+  `if (!GetMessageW(...)) break` 後，`-1` 的 C++ truthiness 會使分支不 break，接著以未定義的
+  `MSG` 呼叫 `TranslateMessage`／`DispatchMessage`。這是 NR-115 新引入的 UI lifecycle/correctness
+  回歸，不是重開已完成的 wake-up ticket；NR-117 只修 return-value 分流，不改 event-driven signal。
 
 - 2026-08-09（NR-116，fresh audit 產出）：NR-113～NR-115 完成後對整個 repo 做 fresh read-only audit，
   未在三個新 commit 內找到 critical/important 問題；但追蹤冷啟動路徑發現一個**未覆蓋的 IMPORTANT**
