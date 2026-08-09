@@ -166,4 +166,4 @@ unverified 保留、generation 完成證據、usage 資料損失路徑被關閉�
   identity_dedup）；完整 CTest 25/25 綠（含 lifecycle_check）。
 - **未涵蓋**：跨來源 stable_id 收斂的 collision 僅在 dedup 單元層覆蓋（verified-wins）；`RebuildMerged`
   中失敗來源未驗證行與 healthy 來源 fresh 行同 stable_id 時 fresh 勝、cache 副本被 dedup 丟棄——正確。
-  未對「重複呼叫 seed」設守衛（僅啟動路徑呼叫一次，依 non-goal）。commit：`<controller fills after commit>`
+  未對「重複呼叫 seed」設守衛（僅啟動路徑呼叫一次，依 non-goal）。commit：`491781c`
