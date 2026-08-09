@@ -77,7 +77,8 @@ constexpr UINT kRebuildDoneMessage = WM_APP + 8;
 constexpr UINT kIconReadyMessage = WM_APP + 9;
 // NR-100: a worker could not deliver its rebuild result (PostMessageW failed);
 // a pure wake-up so the UI drains the pending delivery failures as source
-// failures and the generation can still complete. No payload in the message.
+// failures and the generation can still complete. The non-zero wParam/lParam
+// form is a no-allocation fallback for recording a failure.
 constexpr UINT kRebuildDeliveryFailedMessage = WM_APP + 10;
 // NR-011: debounce timer id (500 ms, see FR-008).
 constexpr UINT_PTR kRebuildTimerId = 2;
@@ -1332,6 +1333,79 @@ bool DrainRebuildDeliveryFailures() {
     return applied_any && !g_refresh->IsRebuildInProgress();
 }
 
+// UI-owned completion for failures that happen before a worker can hand off a
+// result. The worker never receives the coordinator pointer; it queues the
+// same failure signal through QueueRebuildSourceFailure below.
+void CompleteRebuildSourceFailure(std::uint64_t generation,
+                                  nimblerun::CatalogSource source) {
+    if (!g_refresh) {
+        return;
+    }
+    if (g_refresh->ApplySourceFailure(generation, source) &&
+        g_refresh->GenerationComplete(generation)) {
+        OnGenerationCompleteRefresh();
+    }
+}
+
+// NR-106: use the existing UI-owned delivery-failure handoff for a source
+// that has no result payload (allocation or registry setup failed). StartRebuild
+// reserves this vector for the current source batch, so the encoded message is
+// only an OS-only fallback if an unexpected append failure still occurs.
+void QueueRebuildSourceFailure(HWND window, std::uint64_t generation,
+                               nimblerun::CatalogSource source) {
+    bool recorded = false;
+    try {
+        std::lock_guard<std::mutex> lock(g_delivery_failure_mutex);
+        g_rebuild_delivery_failures.emplace_back(generation, source);
+        recorded = true;
+    } catch (...) {
+        if (g_diag) {
+            g_diag->Write(L"rebuild", L"exception");
+        }
+    }
+    if (recorded) {
+        PostMessageW(window, kRebuildDeliveryFailedMessage, 0, 0);
+        return;
+    }
+    // No allocation is needed for this direct signal. The receiver validates
+    // the small source enum before applying the UI-owned failure.
+    if (!PostMessageW(window, kRebuildDeliveryFailedMessage,
+                      static_cast<WPARAM>(generation),
+                      static_cast<LPARAM>(source)) &&
+        g_diag) {
+        g_diag->Write(L"rebuild", L"exception");
+    }
+}
+
+// A push_back failure is only handled after its just-started worker is joined.
+// Remove any result/failure that worker may already have posted before the UI
+// completes the source as a setup failure.
+void DiscardPendingRebuildCompletion(std::uint64_t generation,
+                                     nimblerun::CatalogSource source) {
+    {
+        std::lock_guard<std::mutex> lock(nimblerun::g_handoff_mutex);
+        for (auto it = g_rebuild_handoffs.begin(); it != g_rebuild_handoffs.end();) {
+            if (it->second && it->second->generation == generation &&
+                it->second->source == source) {
+                it = g_rebuild_handoffs.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
+    {
+        std::lock_guard<std::mutex> lock(g_delivery_failure_mutex);
+        g_rebuild_delivery_failures.erase(
+            std::remove_if(g_rebuild_delivery_failures.begin(),
+                           g_rebuild_delivery_failures.end(),
+                           [generation, source](const auto& failure) {
+                               return failure.first == generation &&
+                                      failure.second == source;
+                           }),
+            g_rebuild_delivery_failures.end());
+    }
+}
+
 // NR-049: waits for every in-flight rebuild thread. The rebuild threads read
 // g_settings and g_refresh, so this must run before anything that tears those
 // down; WM_DESTROY is that point in practice, and each new rebuild cycle joins
@@ -1377,7 +1451,24 @@ void StartRebuild(HWND window, std::vector<nimblerun::CatalogSource> sources) {
     // the snapshot that was current when the rebuild started -- which is also
     // the semantically correct input: a rebuild reflects the settings that
     // triggered it, not settings applied after it began.
-    const nimblerun::Settings settings_snapshot = g_settings;
+    nimblerun::Settings settings_snapshot;
+    try {
+        settings_snapshot = g_settings;
+        g_rebuild_threads.reserve(g_rebuild_threads.size() + sources.size());
+        std::lock_guard<std::mutex> lock(g_delivery_failure_mutex);
+        g_rebuild_delivery_failures.reserve(g_rebuild_delivery_failures.size() +
+                                             sources.size());
+    } catch (...) {
+        // NR-106: no worker was started, so complete every source directly on
+        // the UI-owned coordinator when setup storage itself cannot grow.
+        if (g_diag) {
+            g_diag->Write(L"rebuild", L"exception");
+        }
+        for (const nimblerun::CatalogSource source : sources) {
+            CompleteRebuildSourceFailure(generation, source);
+        }
+        return;
+    }
     for (const nimblerun::CatalogSource source : sources) {
         std::thread worker;
         try {
@@ -1426,13 +1517,13 @@ void StartRebuild(HWND window, std::vector<nimblerun::CatalogSource> sources) {
                 }
             } catch (...) {
                 if (result == nullptr) {
-                    // NR-097: the result could not be allocated at all; there
-                    // is nothing to deliver and no token to post. Log and drop
-                    // this source for the generation (the coordinator treats a
-                    // missing report as the source having no result this cycle).
+                    // NR-106: the result could not be allocated at all; queue
+                    // the source failure without passing the coordinator to
+                    // this worker.
                     if (g_diag) {
                         g_diag->Write(L"rebuild", L"exception");
                     }
+                    QueueRebuildSourceFailure(window, generation, source);
                     return;
                 }
                 // NR-076: an allocation/enumeration exception must not terminate
@@ -1450,21 +1541,25 @@ void StartRebuild(HWND window, std::vector<nimblerun::CatalogSource> sources) {
             // the receiver finds the token and moves it out. A full message
             // queue (PostMessageW fails) erases the token, which deletes the
             // object -- NR-063's leak guard.
+            std::unique_ptr<RebuildResult> owned(result);
+            bool registered = false;
             {
                 std::lock_guard<std::mutex> lock(nimblerun::g_handoff_mutex);
                 try {
-                    g_rebuild_handoffs[reinterpret_cast<std::uintptr_t>(result)] =
-                        std::unique_ptr<RebuildResult>(result);
+                    const auto [it, inserted] = g_rebuild_handoffs.emplace(
+                        reinterpret_cast<std::uintptr_t>(result), std::move(owned));
+                    registered = inserted;
                 } catch (...) {
-                    // NR-097: a bad_alloc during registry insertion must not
-                    // terminate the process or leak the object. Nothing was
-                    // registered, so drop the result and skip the post.
-                    if (g_diag) {
-                        g_diag->Write(L"rebuild", L"exception");
-                    }
-                    delete result;
-                    return;
                 }
+            }
+            if (!registered) {
+                // NR-106: no registry token exists, so the owned guard releases
+                // the result while the same UI-owned source failure is queued.
+                if (g_diag) {
+                    g_diag->Write(L"rebuild", L"exception");
+                }
+                QueueRebuildSourceFailure(window, generation, source);
+                return;
             }
             if (!PostMessageW(window, kRebuildDoneMessage,
                               static_cast<WPARAM>(generation),
@@ -1476,11 +1571,7 @@ void StartRebuild(HWND window, std::vector<nimblerun::CatalogSource> sources) {
                 // NR-100: the UI thread must still complete this source for the
                 // generation (ApplySourceFailure keeps its old entries). Record
                 // it under its own mutex and send a payload-free wake-up.
-                {
-                    std::lock_guard<std::mutex> lock(g_delivery_failure_mutex);
-                    g_rebuild_delivery_failures.emplace_back(generation, source);
-                }
-                PostMessageW(window, kRebuildDeliveryFailedMessage, 0, 0);
+                QueueRebuildSourceFailure(window, generation, source);
             }
             });
         } catch (...) {
@@ -1490,6 +1581,7 @@ void StartRebuild(HWND window, std::vector<nimblerun::CatalogSource> sources) {
             if (g_diag) {
                 g_diag->Write(L"rebuild", L"exception");
             }
+            CompleteRebuildSourceFailure(generation, source);
             continue;
         }
         try {
@@ -1502,6 +1594,8 @@ void StartRebuild(HWND window, std::vector<nimblerun::CatalogSource> sources) {
                 g_diag->Write(L"rebuild", L"exception");
             }
             worker.join();
+            DiscardPendingRebuildCompletion(generation, source);
+            CompleteRebuildSourceFailure(generation, source);
         }
     }
 }
@@ -2743,7 +2837,18 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
         // kRebuildDoneMessage. Drain the recorded failures as source failures so
         // every source completes exactly once and the generation cannot stall
         // in IsRebuildInProgress() forever (payload-free wake-up).
-        if (DrainRebuildDeliveryFailures()) {
+        if (w_param != 0) {
+            // NR-106: the failure queue's reserved capacity was unexpectedly
+            // unavailable. The worker encoded only the generation and enum;
+            // validate the enum before crossing into the coordinator.
+            const auto source_value = static_cast<std::uintptr_t>(l_param);
+            if (source_value <= static_cast<std::uintptr_t>(
+                                   nimblerun::CatalogSource::UserFolder)) {
+                CompleteRebuildSourceFailure(
+                    static_cast<std::uint64_t>(w_param),
+                    static_cast<nimblerun::CatalogSource>(source_value));
+            }
+        } else if (DrainRebuildDeliveryFailures()) {
             OnGenerationCompleteRefresh();
         }
         InvalidateRect(window, nullptr, FALSE);

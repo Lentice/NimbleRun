@@ -252,6 +252,41 @@ void TestDeliveryFailureCompletesGeneration() {
            "delivered StartMenu entry is kept; no partial wipe");
 }
 
+// NR-106: models a worker that never reached result allocation, handoff
+// registration, or thread start. The UI-owned failure signal still marks that
+// source received, preserves its old entries, and lets healthy sources finish
+// the generation.
+void TestSetupFailureCompletesGeneration() {
+    CatalogRefreshCoordinator c;
+    const std::uint64_t initial =
+        c.BeginGeneration({CatalogSource::StartMenu, CatalogSource::AppsFolder});
+    c.ApplySourceResult(initial, CatalogSource::StartMenu,
+                        {Entry(L"old-start", AppSource::UserStartMenu)});
+    c.ApplySourceResult(initial, CatalogSource::AppsFolder,
+                        {Entry(L"old-app", AppSource::AppsFolder)});
+
+    const std::uint64_t gen =
+        c.BeginGeneration({CatalogSource::StartMenu, CatalogSource::AppsFolder});
+    Expect(c.ApplySourceFailure(gen, CatalogSource::StartMenu),
+           "setup failure completes the source through the coordinator");
+    Expect(c.IsRebuildInProgress(), "healthy source is still allowed to finish");
+    c.ApplySourceResult(gen, CatalogSource::AppsFolder,
+                        {Entry(L"new-app", AppSource::AppsFolder)});
+
+    Expect(c.GenerationComplete(gen), "setup failure does not strand the generation");
+    Expect(!c.IsRebuildInProgress(), "setup failure generation completes");
+    const std::vector<AppEntry> after = c.Snapshot();
+    Expect(after.size() == 2, "old failed-source and new healthy-source entries remain");
+    bool found_old_start = false;
+    bool found_new_app = false;
+    for (const AppEntry& entry : after) {
+        found_old_start = found_old_start || entry.stable_id == L"old-start";
+        found_new_app = found_new_app || entry.stable_id == L"new-app";
+    }
+    Expect(found_old_start && found_new_app,
+           "setup failure preserves the old source while healthy source publishes");
+}
+
 // AppsFolder on-demand rule: no refresh under 10 minutes, refresh when older.
 void TestAppsFolderStaleness() {
     CatalogRefreshCoordinator c;
@@ -626,6 +661,7 @@ int wmain() {
     TestSnapshotIsAtomicAndDeterministic();
     TestNoPartialSnapshotBeforeAllSourcesReport();
     TestDeliveryFailureCompletesGeneration();
+    TestSetupFailureCompletesGeneration();
     TestSnapshotFillsNormalizedName();
     TestSetSnapshotFillsNormalizedName();
     TestSetSnapshotRespectsPrefilledNormalizedName();

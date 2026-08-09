@@ -111,6 +111,48 @@ git diff --name-only
 
 ## Handoff
 
-實作者需記錄每一個 setup failure 的 completion path、ownership table、stale generation／
-shutdown 結果、focused test、build／CTest 與任何未完成的 OS-only 驗證。
+實作（2026-08-09，未 commit）：
 
+### Setup failure completion paths
+
+| 失敗點 | completion path | ownership／結果 |
+|---|---|---|
+| `Settings` snapshot、`g_rebuild_threads.reserve` 或 failure-vector reserve | `StartRebuild` 在 UI thread 對每個 source 呼叫 `CompleteRebuildSourceFailure` | 沒有 worker／payload；`ApplySourceFailure` 保留舊 source entries；最後一個 source 觸發既有 `OnGenerationCompleteRefresh` |
+| `std::thread` 建構 | outer catch 在 UI thread 呼叫 `CompleteRebuildSourceFailure` | worker 未啟動、沒有 join／payload；其他 source 繼續 |
+| worker `RebuildResult` 配置失敗 | worker 呼叫 `QueueRebuildSourceFailure`，寫入既有 `g_rebuild_delivery_failures`，再 post `kRebuildDeliveryFailedMessage` | 無 raw result；UI drain 以 `ApplySourceFailure` 完成該 source；worker 不持有 coordinator pointer |
+| `g_rebuild_handoffs` insert 失敗 | worker 釋放未登記的 `RebuildResult`，再走同一 `QueueRebuildSourceFailure` | registry 沒有 owner；payload 恰好釋放一次；UI 完成 source failure |
+| `g_rebuild_threads.push_back` 失敗 | join local worker；`DiscardPendingRebuildCompletion` 移除該 generation/source 尚未處理的 registry／delivery record；UI 呼叫 `CompleteRebuildSourceFailure` | queued token 之後只會被 receiver 當 unknown token 忽略，避免 success/failure double completion；reserve 使此分支成為 invariant fallback |
+| 既有 `PostMessageW(kRebuildDoneMessage)` 失敗 | 保留 NR-100 的 registry erase，`QueueRebuildSourceFailure` 記錄並喚醒 UI | payload 由 registry erase 釋放一次；UI `ApplySourceFailure` 保留舊結果 |
+
+`QueueRebuildSourceFailure` 的 reserved vector append 若仍發生 OS-only 例外，使用
+`kRebuildDeliveryFailedMessage` 的 generation/source 整數欄位作無配置 fallback；receiver
+先驗證 `CatalogSource` 範圍，再進入 UI-owned coordinator。
+
+### Ownership / stale / shutdown
+
+- 成功 handoff：registry 持有 `RebuildResult`，UI message move＋erase；結果由
+  `ApplySourceResult` 或 `ApplySourceFailure` 消費後釋放。
+- setup／delivery failure：沒有 coordinator pointer 交給 worker；未登記 raw result 由
+  worker `delete`，已登記結果由 registry erase／clear 釋放；failure record 由 mutex
+  保護的 vector swap／erase 消費。
+- stale generation：`ApplySourceFailure`／`ApplySourceResult` 維持既有 generation guard，
+  舊 failure 不覆蓋新 snapshot；`DiscardPendingRebuildCompletion` 只在 push-back
+  fallback 的同 generation/source 上清理。
+- shutdown：既有 `WM_DESTROY` stop→join→message drain→registry clear 未改；worker
+  不 detach，所有在途 payload 仍由 registry 清理一次。
+
+### Focused check / validation
+
+- `tests/unit/catalog_refresh_test.cpp` 新增 `TestSetupFailureCompletesGeneration`：以既有
+  coordinator seam 模擬「source 沒有 result／handoff／worker」，驗證 generation 完成、
+  failed source 舊 entries 保留、healthy source 新 entries 一起發佈。
+- Release configure：通過。
+- `cmake --build build`：通過，無新增 warning。
+- `ctest --test-dir build -R "catalog_refresh|lifecycle" --output-on-failure`：2/2 通過。
+- 完整 CTest：依主 agent 指示在長時間無輸出時停止，尚未取得結果；未 commit、未 push。
+
+### 未完成風險
+
+無安全的 production seam 可直接注入 OS heap exhaustion、`std::thread` 建構失敗或
+Windows queue failure；本次以 reserve invariant、UI failure path 與 deterministic
+coordinator self-check 覆蓋。完整 CTest 請主 agent 接手重跑。
