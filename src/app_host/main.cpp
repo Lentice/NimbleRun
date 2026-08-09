@@ -57,7 +57,10 @@ namespace {
 constexpr wchar_t kWindowClass[] = L"NimbleRun.Phase0Probe";
 constexpr wchar_t kWindowTitle[] = L"NimbleRun";
 constexpr wchar_t kInstanceMutex[] = L"Local\\NimbleRun.SingleInstance";
+constexpr wchar_t kStartupReadyEvent[] = L"Local\\NimbleRun.StartupReady";
 constexpr wchar_t kShowPanelMessageName[] = L"NimbleRun.ShowPanel";
+constexpr DWORD kStartupRendezvousTimeoutMs = 5000;
+constexpr DWORD kStartupTestGateTimeoutMs = 30000;
 
 // Tray icon callback message used by Shell_NotifyIcon.
 constexpr UINT kTrayCallbackMessage = WM_APP + 1;
@@ -172,6 +175,7 @@ bool g_pins_notified = false;
 // NR-058: the main window HWND (tray callback target), set in wWinMain once the
 // window exists; the only UI-thread owner of the tray notices.
 HWND g_main_window = nullptr;
+HANDLE g_test_show_semaphore = nullptr;
 // NR-058: true once Shell_NotifyIconW(NIM_ADD) succeeded, so RefreshPins knows
 // whether a balloon can be shown now or must be deferred to the startup send
 // point (the first pin load runs before the tray icon exists).
@@ -264,6 +268,52 @@ std::vector<std::thread> g_rebuild_threads;
 // the next generation starts clean. The atomic is the only synchronization the
 // enumerators need; no lock is required around it.
 std::atomic<bool> g_rebuild_cancel{false};
+
+std::wstring EnvironmentValue(const wchar_t* name) {
+    const DWORD length = GetEnvironmentVariableW(name, nullptr, 0);
+    if (length == 0) {
+        return {};
+    }
+    std::wstring value(length, L'\0');
+    const DWORD copied = GetEnvironmentVariableW(name, value.data(), length);
+    if (copied == 0 || copied >= length) {
+        return {};
+    }
+    value.resize(copied);
+    return value;
+}
+
+// NR-110: test-only gate proves a second process can launch before the first
+// CreateWindowExW. Both named events are created by the lifecycle test; the
+// release wait is bounded so an interrupted test cannot leave startup hung.
+void WaitForStartupTestGate() {
+    const std::wstring base = EnvironmentValue(L"NIMBLERUN_TEST_STARTUP_GATE");
+    if (base.empty()) {
+        return;
+    }
+    const std::wstring ready_name = base + L".ready";
+    const std::wstring release_name = base + L".release";
+    HANDLE ready = OpenEventW(EVENT_MODIFY_STATE, FALSE, ready_name.c_str());
+    HANDLE release = OpenEventW(SYNCHRONIZE, FALSE, release_name.c_str());
+    if (ready && release) {
+        SetEvent(ready);
+        WaitForSingleObject(release, kStartupTestGateTimeoutMs);
+    }
+    if (ready) {
+        CloseHandle(ready);
+    }
+    if (release) {
+        CloseHandle(release);
+    }
+}
+
+void OpenTestShowSemaphore() {
+    const std::wstring name = EnvironmentValue(L"NIMBLERUN_TEST_SHOW_SEMAPHORE");
+    if (!name.empty()) {
+        g_test_show_semaphore = OpenSemaphoreW(SEMAPHORE_MODIFY_STATE, FALSE,
+                                                name.c_str());
+    }
+}
 
 // NR-017: bounded local diagnostic log under the per-user data dir. Only
 // sanitized stage names, error codes and short details are written; never
@@ -2756,6 +2806,9 @@ LRESULT CALLBACK SearchEditProc(HWND edit, UINT message, WPARAM w_param, LPARAM 
 LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_param) {
     if (message == g_show_panel_message) {
         ShowPanel(window);
+        if (g_test_show_semaphore) {
+            ReleaseSemaphore(g_test_show_semaphore, 1, nullptr);
+        }
         return 0;
     }
     switch (message) {
@@ -3339,15 +3392,28 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         return 1;
     }
 
+    HANDLE startup_ready = CreateEventW(nullptr, TRUE, FALSE, kStartupReadyEvent);
+    if (!startup_ready) {
+        return 1;
+    }
+
     HANDLE mutex = CreateMutexW(nullptr, TRUE, kInstanceMutex);
     if (!mutex) {
+        CloseHandle(startup_ready);
         return 1;
     }
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
-        if (const HWND existing = FindWindowW(kWindowClass, nullptr)) {
+        HWND existing = FindWindowW(kWindowClass, nullptr);
+        if (!existing &&
+            WaitForSingleObject(startup_ready, kStartupRendezvousTimeoutMs) ==
+                WAIT_OBJECT_0) {
+            existing = FindWindowW(kWindowClass, nullptr);
+        }
+        if (existing) {
             PostMessageW(existing, g_show_panel_message, 0, 0);
         }
         CloseHandle(mutex);
+        CloseHandle(startup_ready);
         return 0;
     }
 
@@ -3355,16 +3421,19 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         nullptr,
         COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
     if (FAILED(com_result)) {
+        CloseHandle(startup_ready);
         CloseHandle(mutex);
         return 1;
     }
 
     if (!RegisterMainWindow(instance)) {
         CoUninitialize();
+        CloseHandle(startup_ready);
         CloseHandle(mutex);
         return 1;
     }
 
+    WaitForStartupTestGate();
     const HWND window = CreateWindowExW(
         WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
         kWindowClass,
@@ -3387,10 +3456,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         nullptr);
     if (!window) {
         CoUninitialize();
+        CloseHandle(startup_ready);
         CloseHandle(mutex);
         return 1;
     }
     g_main_window = window;
+    SetEvent(startup_ready);
+    OpenTestShowSemaphore();
 
     // NR-044: let DWM round the panel's corners so it matches the Windows 11
     // flyouts and the panel's own 6 DIP search box (design-spec §4.9). The
@@ -3594,7 +3666,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     Release(g_write_factory);
     Release(g_dash_style);
     Release(g_d2d_factory);
+    if (g_test_show_semaphore) {
+        CloseHandle(g_test_show_semaphore);
+        g_test_show_semaphore = nullptr;
+    }
     CoUninitialize();
+    CloseHandle(startup_ready);
     CloseHandle(mutex);
     return static_cast<int>(message.wParam);
 }

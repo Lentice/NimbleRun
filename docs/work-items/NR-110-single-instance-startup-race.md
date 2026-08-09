@@ -92,6 +92,25 @@ git diff --name-only
 
 ## Handoff
 
-實作者需記錄 startup rendezvous 時序、second-launch ownership、race test 結果、normal
-lifecycle 結果、build／CTest 與任何 OS version 差異。
-
+- 2026-08-09：`src/app_host/main.cpp` 先建立 `Local\\NimbleRun.StartupReady`
+  manual-reset event，再建立既有 `Local\\NimbleRun.SingleInstance` mutex；first
+  instance 在 `CreateWindowExW` 成功並設定 `g_main_window` 後 signal event。second
+  instance 不擁有 mutex；若 `FindWindowW` 尚未找到 HWND，只對同一 event 做一次
+  5 秒 `WaitForSingleObject`，醒來後重試 `FindWindowW`、post 既有 registered
+  show message，關閉自己的 mutex/event handles 後 exit 0。first 的 event/mutex
+  handle 在 startup failure、normal shutdown 均各自關閉；沒有 `ReleaseMutex` 誤操作
+  second handle。
+- deterministic race seam：`tests/integration/lifecycle_check.ps1` 建立唯一 named
+  ready/release events 與 show semaphore，透過 `NIMBLERUN_TEST_STARTUP_GATE` 讓
+  first 停在 `CreateWindowExW` 前；ready signal 後才啟動 second，再 release first。
+  semaphore consumed exactly once，並以 zero-time wait 證明沒有第二個 show request。
+  同一 lifecycle check 仍覆蓋 fresh hidden panel、normal post-HWND second launch
+  exactly once、single resident window 與 tray Exit。
+- 結果：`cmake --build build` Release passed；`ctest --test-dir build -R
+  nimblerun_lifecycle_check --output-on-failure` 1/1 passed（2.59 s）。完整 CTest
+  在最後 test-script assertion 修正後未重跑，交由主 agent review/build。
+- 修改檔案：`src/app_host/main.cpp`、`tests/integration/lifecycle_check.ps1`、
+  本 item 與 `docs/work-items.md` 的 NR-110 tracker row；未動 catalog、icon、
+  layout 或其他 work item status。Win10 22H2／Win11 使用的 CreateEvent/OpenEvent、
+  WaitForSingleObject、CreateMutex、registered message API 均為既有 Win32 API；本次
+  未增加版本特定 API，既有 Windows 10 的 DWM corner fallback 不受影響。
