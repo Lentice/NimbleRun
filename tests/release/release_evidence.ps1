@@ -56,6 +56,13 @@ if ($OutPath -eq "") {
     $OutPath = "$workspace\docs\release-evidence.md"
 }
 
+# NR-104: the registered CTest count (from `ctest -N`) is the single count
+# authority; the header prints it live and the count-consistency check below
+# compares it against what the suite actually ran.
+$ctestCountLine = (ctest --test-dir $buildDir -N 2>$null | Select-String 'Total Tests:' | ForEach-Object { $_.Line.Trim() })
+$registeredTests = 0
+if ($ctestCountLine -match 'Total Tests:\s*(\d+)') { $registeredTests = [int]$matches[1] }
+
 # ---- Header: tool versions and conditions (reproducibility) ----------------
 $header = @()
 $header += "# Release Evidence"
@@ -65,7 +72,7 @@ $header += "- OS: $((Get-CimInstance Win32_OperatingSystem).Caption) build $((Ge
 $header += "- CPU: $env:PROCESSOR_IDENTIFIER"
 $header += "- Debugger attached: $([System.Diagnostics.Debugger]::IsAttached)"
 $header += "- Git commit: $((git -C $workspace rev-parse HEAD 2>$null))"
-$header += "- CTest count: $((ctest --test-dir $buildDir -N 2>$null | Select-String 'Total Tests:' | ForEach-Object { $_.Line.Trim() }))"
+$header += "- CTest count: $ctestCountLine"
 $header += ""
 $header += "## Tool versions"
 $header += ""
@@ -95,6 +102,17 @@ $build = Invoke-Capture 'cmake build' {
 $ctest = Invoke-Capture 'ctest full suite' {
     & ctest --test-dir $buildDir --output-on-failure
 }
+
+# NR-104: count-consistency sanity check. Parse the executed total from the
+# suite output ("out of <N> tests", e.g. "100% tests passed out of 25") and
+# mark the report STALE when it does not match the registered count -- so a
+# future registration change cannot silently produce a stale report again.
+$executedTests = $null
+foreach ($line in $ctest.Lines) {
+    if ($line -match 'out of\s+(\d+)(?:\s*tests?)?') { $executedTests = [int]$matches[1] }
+}
+$stale = ($null -eq $executedTests) -or ($executedTests -ne $registeredTests)
+$executedDisplay = if ($null -eq $executedTests) { 'unparsed' } else { $executedTests }
 
 # ---- Process smoke + soak + measurements ---------------------------------
 # A resident instance's idle thread count and working set, measured while the
@@ -182,7 +200,7 @@ $gate += "## Blocking-threshold gate"
 $gate += ""
 $gate += "| Metric | Blocking threshold | Measured | Verdict |"
 $gate += "|---|---|---|---|"
-$gateFailure = $false
+$gateFailure = $stale
 
 # The idle thread-count threshold now applies to app-owned threads only
 # (design-spec section 9.2, docs/performance-baseline.md): 1 UI thread + 1
@@ -196,6 +214,9 @@ if ($null -ne $threadCount) {
     $gate += "| Idle process thread count | not gated (context only) | $threadCount | recorded |"
 } else {
     $gate += "| Idle process thread count | not gated (context only) | not measured | recorded |"
+}
+if ($stale) {
+    $gate += "| CTest registration vs executed | registered == executed | registered $registeredTests vs executed $executedDisplay | STALE |"
 }
 
 # Sub-threshold items that are not hard gates are recorded as known issues.
@@ -241,6 +262,9 @@ $report = $sections -join "`n"
 Set-Content -LiteralPath $OutPath -Value $report -Encoding utf8
 Write-Output "Evidence written to $OutPath"
 if ($exitFailures) {
+    if ($stale) {
+        Write-Output "STALE: registered CTest count ($registeredTests) differs from the executed count ($executedDisplay). Regenerate after a clean build + ctest run."
+    }
     Write-Output 'One or more gates failed.'
     exit 1
 }

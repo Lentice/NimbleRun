@@ -140,7 +140,7 @@
 | NR-101 | Directory watcher 的 PostMessage 失敗不得遺失 catalog 變更 | 2 | `done` | NR-011, NR-063, NR-065, NR-074 | [NR-101](work-items/NR-101-watcher-notification-delivery.md) |
 | NR-102 | Start Menu 的直接檔案也必須通過 program-like／uninstaller filter | 2 | `done` | NR-005, NR-028 | [NR-102](work-items/NR-102-start-menu-direct-program-filter.md) |
 | NR-103 | PMv2 面板初次定位改用 per-window DPI API | 3 | `done` | NR-015 | [NR-103](work-items/NR-103-pm-dpi-query.md) |
-| NR-104 | Testing guide 與 release evidence 必須反映目前 24 項 CTest | 5 | `ready` | NR-017, NR-056, NR-089 | [NR-104](work-items/NR-104-release-evidence-test-count.md) |
+| NR-104 | Testing guide 與 release evidence 必須反映目前 24 項 CTest | 5 | `done` | NR-017, NR-056, NR-089 | [NR-104](work-items/NR-104-release-evidence-test-count.md) |
 
 ## Dependency lanes
 

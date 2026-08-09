@@ -8,9 +8,9 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-`ctest --test-dir build -N` lists the registered suite (currently 23 checks). They fall into three categories:
+`ctest --test-dir build -N` lists the registered suite (currently 25 checks). They fall into three categories:
 
-- **Unit tests** (`tests/unit/*.cpp`): the bulk of the suite, one executable per library, covering the pure search, ranking, catalog, storage, settings, icons, pins, usage, and diagnostics logic. Keep catalog, storage, and scoring tests free of HWND and Shell COM dependencies wherever possible.
+- **Unit tests** (`tests/unit/*.cpp`): the bulk of the suite, one executable per library, covering the pure search, ranking, catalog, storage, settings, icons, pins, usage, and diagnostics logic. The `nimblerun_catalog_watcher_test` is the exception: it compiles `src/app_host/catalog_watcher.cpp` directly because the watcher is part of the executable, not a library. Keep catalog, storage, and scoring tests free of HWND and Shell COM dependencies wherever possible.
 - **Integration check** (`tests/integration/lifecycle_check.ps1`): registered as the `nimblerun_lifecycle_check` test; launches a real `NimbleRun.exe`, verifies the single-instance wake-up, and the tray Exit terminates cleanly. Also runs under `ctest`.
 - **Release evidence** (`tests/release/release_evidence.ps1`): builds, runs the full suite, samples the idle working set / private bytes / handle count of a settled hidden instance, and regenerates `docs/release-evidence.md`. Run manually before a release with `pwsh -NoProfile -File tests/release/release_evidence.ps1`; it is not registered as a `ctest` test.
 
