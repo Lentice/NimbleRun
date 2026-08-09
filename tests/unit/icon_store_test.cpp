@@ -511,6 +511,29 @@ void TestOverBudgetPack(const fs::path& dir) {
            "over-budget pack rebuilt to the bounded empty-pack size");
 }
 
+// NR-114: a CRC-valid pack whose PHYSICAL size exceeds the whole-pack budget --
+// e.g. valid headers with payload_end == kPayloadStart plus trailing garbage
+// bytes -- must not be accepted as Ready. MapFile rejects the physical file
+// before any mapping is created; Open recreates a bounded empty pack and marks
+// the store recreated so diagnostics can tell this input apart.
+void TestOverBudgetPhysicalFile(const fs::path& dir) {
+    std::vector<std::uint8_t> bytes(kPackByteBudget + 1, 0);
+    for (std::size_t slot = 0; slot < 2; ++slot) {
+        PackHeader header;
+        header.generation = static_cast<std::uint32_t>(1 - slot);
+        header.payload_end = kPayloadStart;
+        EncodeHeader(header, bytes.data() + slot * kHeaderSize);
+    }
+    WriteFileBytes(PackPath(dir), bytes);
+
+    IconStore store(IconStore::IconStorePaths{PackPath(dir)});
+    Expect(store.Open() == StoreState::Ready, "over-budget physical file recreated ready");
+    Expect(store.Stats().recreated, "over-budget physical file marked recreated");
+    Expect(store.Stats().entries == 0, "recreated pack empty");
+    Expect(ReadFileBytes(PackPath(dir)).size() == kPayloadStart,
+           "over-budget physical file rebuilt to the bounded empty-pack size");
+}
+
 // NR-108: the fixed prefix counts toward the budget, and a rejected batch
 // must leave the committed header and physical file untouched.
 void TestWholePackBudget(const fs::path& dir) {
@@ -589,6 +612,7 @@ void RunAll(const fs::path& dir) {
     TestLockedFile(dir);
     TestMaliciousPayloadEnd(dir);
     TestOverBudgetPack(dir);
+    TestOverBudgetPhysicalFile(dir);
     TestWholePackBudget(dir);
     TestRandomFuzz(dir);
 }

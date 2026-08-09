@@ -502,14 +502,26 @@ void TestPackByteBudget() {
                "payload_end == budget is Ok");
         Expect(header.payload_end == kPackByteBudget, "budget boundary payload_end round-trips");
     }
-    // Slot A over the budget, slot B sane but older -> pick the sane slot B.
+    // Slot A over the budget, slot B sane but older. The physical file itself
+    // is kPackByteBudget + 1 bytes, so the NR-114 physical-size rule rejects it
+    // outright -- this overrides the NR-075 dual-header "sane sibling wins"
+    // assumption. The sane-sibling rule still applies for in-budget files: a
+    // file whose size is ≤ budget with one corrupt/over-budget slot still lets
+    // the sane slot win; only the physical file size rule is new.
     {
         const auto file = make_pack(kPackByteBudget + 1, kPayloadStart, kPackByteBudget + 1);
         PackHeader header;
-        Expect(DecodeHeader(file.data(), file.size(), header) == PackStatus::Ok,
-               "over-budget slot A, sane older slot B -> Ok");
-        Expect(header.generation == 0, "picks the sane slot B over the over-budget A");
-        Expect(header.payload_end == kPayloadStart, "sane slot's payload_end wins");
+        Expect(DecodeHeader(file.data(), file.size(), header) == PackStatus::BothHeadersBad,
+               "over-budget physical size -> BothHeadersBad (NR-114 overrides sane sibling)");
+    }
+    // NR-114: a physical file of budget+1 whose headers are entirely sane
+    // (payload_end == kPayloadStart, valid CRC) but carries trailing bytes past
+    // the budget is rejected outright -- trailing bytes must not be accepted.
+    {
+        const auto file = make_pack(kPayloadStart, kPayloadStart, kPackByteBudget + 1);
+        PackHeader header;
+        Expect(DecodeHeader(file.data(), file.size(), header) == PackStatus::BothHeadersBad,
+               "sane headers with over-budget trailing bytes -> BothHeadersBad");
     }
 }
 

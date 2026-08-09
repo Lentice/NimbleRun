@@ -64,6 +64,15 @@ bool IconStore::MapFile() {
     }
     view_size_ = static_cast<std::size_t>(size.QuadPart);
     file_size_ = static_cast<std::uint64_t>(size.QuadPart);
+    // NR-114: an over-budget physical file (e.g. valid headers + trailing bytes,
+    // or a bloated file) must never be mapped or accepted as Ready. icons.cache is
+    // a rebuildable accelerator (design-spec §FR-009), so the caller recreates it.
+    // Rejected here, before CreateFileMappingW, so no oversized mapping is created.
+    if (static_cast<std::uint64_t>(size.QuadPart) > kPackByteBudget) {
+        Unmap();  // closes the handle
+        SetLastError(ERROR_FILE_TOO_LARGE);
+        return false;
+    }
     if (view_size_ == 0) {
         // An empty (or just-created) file: leave no mapping. DecodeHeader
         // classifies size < kPayloadStart as Absent without touching data.
@@ -200,14 +209,21 @@ IconStore::StoreState IconStore::Open() {
             break;
         }
     } else {
-        // MapFile failed. Only a missing file is recoverable by creating one;
-        // anything else (locked, permission) disables the store permanently.
-        if (GetLastError() != ERROR_FILE_NOT_FOUND) {
+        const DWORD map_error = GetLastError();
+        if (map_error == ERROR_FILE_TOO_LARGE) {
+            // NR-114: physical file exceeds the whole-pack budget; it is a
+            // rebuildable cache corruption, so recreate a bounded empty pack.
+            // stats_.recreated lets diagnostics distinguish this input; the next
+            // ScanIndex (after CreateEmptyPack + MapFile below) preserves it.
+            stats_.recreated = true;
+            WriteLog(L"icon-store", L"over-budget-recreated");
+        } else if (map_error != ERROR_FILE_NOT_FOUND) {
             WriteLog(L"icon-store", L"open-failed");
             state_ = StoreState::Disabled;
             return state_;
+        } else {
+            WriteLog(L"icon-store", L"created");
         }
-        WriteLog(L"icon-store", L"created");
     }
 
     if (CreateEmptyPack() && MapFile()) {

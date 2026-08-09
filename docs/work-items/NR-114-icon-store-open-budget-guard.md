@@ -104,3 +104,30 @@ git diff --name-only
 
 實作者需記錄 exact-boundary 與 trailing-bytes fixture、Open state transition、重建後 physical size、
 header／CRC 結果、memory mapping 是否在拒絕前建立、build／CTest 與未涵蓋的 OS file-lock／mapping failure path。
+
+實作（2026-08-09，single clean worker）：
+
+- **guard 形狀**：`IconStore::MapFile`（`src/icons/icon_store.cpp:67-75`）在 `GetFileSizeEx` 成功、`CreateFileMappingW`
+  之前拒絕 `physical size > kPackByteBudget`（`Unmap()` 後 `SetLastError(ERROR_FILE_TOO_LARGE)` 回 false）——
+  不建立超額 mapping。`Open()` 的 MapFile-failed 分支先擷取 `GetLastError()`，`ERROR_FILE_TOO_LARGE` 分支設
+  `stats_.recreated = true`＋log `over-budget-recreated`，落入既有 `CreateEmptyPack() && MapFile()` 重建路徑；
+  其餘錯誤維持 `open-failed`→Disabled、`ERROR_FILE_NOT_FOUND`→created。未新增 `StoreState`／`PackStatus` 值。
+- **pure-format 守衛**：`DecodeHeader`（`icon_pack_format.cpp:110-113`）在 `size < kPayloadStart → Absent` 之後加
+  `size > kPackByteBudget → BothHeadersBad`，讓格式層自衛。**覆寫 NR-075 dual-header「sane sibling wins」的
+  實體大小假設**：physical size 超過 budget 時整檔拒絕；in-budget 檔案內單槽 over-budget 仍由 sane slot 取勝
+  （該規則保留）。`kPackByteBudget` 為唯一 32 MiB 常數，未新增第二個 magic number；`max_bytes_` 不用作 guard。
+- **fixture**：
+  - `icon_pack_format_test`：`TestPackByteBudget` case 3（physical budget+1、slot B sane）期望由 Ok 翻轉為
+    `BothHeadersBad`（附 NR-114 override 註解）；新增 trailing-bytes case（physical budget+1、雙槽
+    `payload_end == kPayloadStart`、CRC 正確 → `BothHeadersBad`）；exact boundary（size==budget、payload_end==budget → Ok）保留。
+  - `icon_store_test`：新增 `TestOverBudgetPhysicalFile`——雙槽 `payload_end == kPayloadStart` 且 CRC 正確的
+    `budget+1` 實體檔 → `Open()==Ready`＋`recreated==true`＋entries==0＋檔重建為恰 `kPayloadStart` bytes。
+- **Open state transition**：over-budget 實體檔 → MapFile 拒絕（未建 mapping）→ recreated 分支 → bounded empty pack
+  → Ready。`ScanIndex` 保留 `stats_.recreated`。
+- **既有測試回歸**：`TestOverBudgetPack`（NR-075）現在先被 MapFile 實體大小規則攔下（payload_end 不再觸及），
+  結果相同（Ready＋recreated＋重建為 kPayloadStart）；`TestMaliciousPayloadEnd` 檔案小，仍由 DecodeHeader
+  slot 檢查驅動重建，兩者皆綠。
+- **build／CTest**：Release x64（LLVM-MinGW＋Ninja）無新增 warning；focused 3/3 綠（icon_pack_format、
+  icon_store、icon_worker）；完整 CTest 25/25 綠（含 lifecycle_check）。
+- **未涵蓋**：OS file-lock／mapping failure 仍走既有 `open-failed`→Disabled 路徑（未改）；`Compact`／`GrowView`
+  產生的檔案永遠 ≤ budget，guard 不會誤傷合法 pack。commit：`<controller fills after commit>`

@@ -103,6 +103,13 @@ PackStatus DecodeHeader(const std::uint8_t* data, std::size_t size, PackHeader& 
     if (size < kPayloadStart) {
         return PackStatus::Absent;
     }
+    // NR-114: a physical file over the whole-pack budget is rejected outright --
+    // valid headers with trailing bytes must not be accepted. Legit packs never
+    // exceed kPackByteBudget (Flush/GrowView cap at it), so this only rejects
+    // pathological input. Classified as BothHeadersBad so Open recreates it.
+    if (size > kPackByteBudget) {
+        return PackStatus::BothHeadersBad;
+    }
     bool any_magic = false;
     bool any_valid = false;
     std::size_t best_slot = 0;
