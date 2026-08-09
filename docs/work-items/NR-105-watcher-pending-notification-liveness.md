@@ -98,6 +98,37 @@ git diff --name-only
 
 ## Handoff
 
-實作者需記錄 wake/retry integration、post outcome table、無後續 filesystem event 的
-focused test 結果、shutdown 結果、build／CTest 結果與任何未完成的人工驗收。
+實作（2026-08-09）：
 
+- **wake/retry integration**：`ReadDirectoryChangesW` 的 directory handle 改用
+  `FILE_FLAG_OVERLAPPED`，每個 watcher thread 建立一個 completion event。沒有
+  `pending_notify` 時以 `WaitForSingleObject(INFINITE)` 等待 filesystem completion；
+  retained intent 存在時才以 1 s、2 s、4 s…最多 30 s 的條件式退避 timeout 喚醒
+  `PostNotification`。這不是 idle timer 或 polling；成功 post／invalid HWND 清除
+  pending 後立即回到無限 OS wait。`Stop()` 仍以 `CancelIoEx` 喚醒 overlapped read，
+  再 join thread。
+
+- **post outcome table**：
+  - normal change：`pending_notify = 1`；full-rescan：提升為 `2`，不會被 normal 降級。
+  - `PostMessageW` 成功：送出既有 `wParam`／`lParam`，清除 pending。
+  - 暫時失敗：保留 coalesced intent；條件式 recovery wait 會在沒有 filesystem event
+    時重試，queue 恢復後仍走既有 host message path。
+  - invalid／destroyed HWND：清除 pending、安靜停止送訊；不在 teardown 後重送。
+  - `Stop()`／`ERROR_OPERATION_ABORTED`：離開 loop；completion handle 關閉後由既有
+    owner join，沒有 detached thread。
+
+- **focused test**：`TestPendingNotificationRecoversWithoutEvent` 填滿 message-only
+  window 的 thread queue，觸發一次檔案變更使 `PostMessageW` 失敗，等待 bounded retry
+  完成後清空 queue；不再產生 filesystem event，仍收到 normal notification。既有
+  `TestWatchStopsQuietly` 同時覆蓋 `Stop()` 後不再通知與 invalid HWND teardown 不 hang。
+  測試 fixture 改用 CTest working directory，避免此環境 `%TEMP%` ACL 拒絕建立目錄。
+
+- **驗證**：Release configure／build 通過，無新增 warning；
+  `ctest --test-dir build -R catalog_watcher --output-on-failure`：1/1；
+  `ctest --test-dir build -R "catalog_watcher|catalog_refresh" --output-on-failure`：
+  2/2（提升權限重跑以允許既有 `%TEMP%` fixture）；
+  `ctest --test-dir build --output-on-failure`：25/25 全綠。
+
+- **未完成風險**：沒有另外製造 64 KiB directory-notification overflow 的獨立測試；
+  full-rescan 使用同一個 retained/coalescing/recovery 狀態機，既有 overflow／error
+  episode 來源邏輯未改。未做人工長時間實機 queue 壓力測試。

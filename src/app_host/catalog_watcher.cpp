@@ -14,11 +14,13 @@ constexpr DWORD kBufferBytes = 64 * 1024;
 // NR-101: retained delivery intent levels and the bounded post-retry backoff.
 // A failed PostMessageW (full queue, teardown race) must not silently lose a
 // change; the intent is coalesced into watch.pending_notify and re-delivered on
-// the next WatchLoop iteration.
+// the next recovery wait or WatchLoop iteration.
 constexpr int kNotifyChange = 1;
 constexpr int kNotifyFullRescan = 2;
 constexpr int kPostRetries = 2;
 constexpr DWORD kPostRetrySleepMs = 250;
+constexpr DWORD kPendingNotifyRetryInitialMs = 1000;
+constexpr DWORD kPendingNotifyRetryMaxMs = 30000;
 
 // NR-101: delivers a change/full-rescan intent to the host through the existing
 // message path, retaining it when the post fails. Coalescing lets a full rescan
@@ -27,6 +29,7 @@ constexpr DWORD kPostRetrySleepMs = 250;
 // (teardown) stops delivery quietly.
 void PostNotification(CatalogWatcher::Watch& watch, int level) {
     if (!watch.window || !IsWindow(watch.window)) {
+        watch.pending_notify.store(0);
         return;  // teardown: never deliver to a destroyed HWND; Stop() joins
     }
     int pending = watch.pending_notify.load();
@@ -51,34 +54,37 @@ void PostNotification(CatalogWatcher::Watch& watch, int level) {
 
 void WatchLoop(std::shared_ptr<CatalogWatcher::Watch> watch) {
     std::vector<BYTE> buffer(kBufferBytes);
+    const HANDLE completion = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (!completion) {
+        return;
+    }
+    OVERLAPPED overlapped{};
+    overlapped.hEvent = completion;
     // NR-074: one full-rescan notice per failure episode. A persistent error
     // (root removed, access denied) must not post a marker every second -- that
     // drives a 1 Hz rebuild loop in the host (§FR-008/NFR-002).
     bool reported = false;
+    DWORD pending_retry_ms = kPendingNotifyRetryInitialMs;
     for (;;) {
-        // NR-101: re-deliver an intent a failed post retained earlier. This runs
-        // on the next event / overflow / error cycle, so recovery is event-driven
-        // (no timer). PostNotification guards an invalid window itself.
+        // NR-101/105: re-deliver an intent a failed post retained earlier.
+        // PostNotification guards an invalid window itself.
         if (watch->pending_notify.load() != 0) {
             PostNotification(*watch, watch->pending_notify.load());
         }
-        DWORD bytes_returned = 0;
-        const BOOL ok = ReadDirectoryChangesW(
+        ResetEvent(completion);
+        const BOOL started = ReadDirectoryChangesW(
             watch->directory,
             buffer.data(),
             static_cast<DWORD>(buffer.size()),
             watch->recursive ? TRUE : FALSE,
             kNotifyFilter,
-            &bytes_returned,
             nullptr,
+            &overlapped,
             nullptr);
-        if (watch->stop.load()) {
-            return;
-        }
-        if (ok == FALSE) {
-            const DWORD error = GetLastError();
-            if (error == ERROR_OPERATION_ABORTED || watch->stop.load()) {
-                return;  // CancelIoEx from Stop(): normal shutdown
+        const DWORD start_error = started == FALSE ? GetLastError() : ERROR_SUCCESS;
+        if (started == FALSE && start_error != ERROR_IO_PENDING) {
+            if (start_error == ERROR_OPERATION_ABORTED || watch->stop.load()) {
+                break;  // CancelIoEx from Stop(): normal shutdown
             }
             // ERROR_INVALID_PARAMETER (root not a directory / too small buffer)
             // or a transient failure: report a full rescan and back off instead
@@ -92,6 +98,49 @@ void WatchLoop(std::shared_ptr<CatalogWatcher::Watch> watch) {
             Sleep(1000);
             continue;
         }
+
+        for (;;) {
+            const DWORD wait_ms = watch->pending_notify.load() != 0
+                                      ? pending_retry_ms
+                                      : INFINITE;
+            const DWORD wait = WaitForSingleObject(completion, wait_ms);
+            if (wait == WAIT_TIMEOUT) {
+                PostNotification(*watch, watch->pending_notify.load());
+                if (watch->pending_notify.load() != 0) {
+                    // ponytail: conditional exponential wait, capped at 30s;
+                    // no idle wakeups when there is no retained intent.
+                    pending_retry_ms = pending_retry_ms < kPendingNotifyRetryMaxMs
+                                           ? pending_retry_ms * 2
+                                           : kPendingNotifyRetryMaxMs;
+                } else {
+                    pending_retry_ms = kPendingNotifyRetryInitialMs;
+                }
+                continue;
+            }
+            if (wait != WAIT_OBJECT_0) {
+                CloseHandle(completion);
+                return;
+            }
+            break;
+        }
+        if (watch->stop.load()) {
+            break;
+        }
+
+        DWORD bytes_returned = 0;
+        if (GetOverlappedResult(watch->directory, &overlapped, &bytes_returned, FALSE) == FALSE) {
+            const DWORD error = GetLastError();
+            if (error == ERROR_OPERATION_ABORTED || watch->stop.load()) {
+                break;  // CancelIoEx from Stop(): normal shutdown
+            }
+            if (!reported) {
+                PostNotification(*watch, kNotifyFullRescan);
+            }
+            reported = true;
+            Sleep(1000);
+            continue;
+        }
+        pending_retry_ms = kPendingNotifyRetryInitialMs;
         reported = false;
         if (bytes_returned == 0) {
             // Buffer overflow: the event list is incomplete, rescan the source.
@@ -100,6 +149,7 @@ void WatchLoop(std::shared_ptr<CatalogWatcher::Watch> watch) {
         }
         PostNotification(*watch, kNotifyChange);
     }
+    CloseHandle(completion);
 }
 
 } // namespace
@@ -127,7 +177,7 @@ void CatalogWatcher::SetRoots(const std::vector<std::wstring>& roots,
             FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
             nullptr,
             OPEN_EXISTING,
-            FILE_FLAG_BACKUP_SEMANTICS,
+            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED,
             nullptr);
         if (watch->directory == INVALID_HANDLE_VALUE) {
             continue;  // root missing/unreadable: skip this watch, keep others

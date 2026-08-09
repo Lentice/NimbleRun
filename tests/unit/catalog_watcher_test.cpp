@@ -1,9 +1,8 @@
 // NR-101: CatalogWatcher delivers directory-change notifications as posted
 // messages and stops delivering quietly once the notify window is gone. Pure
 // Win32 test with a message-only window and a temp directory; no visible UI.
-// Post-failure retention is an OS-only path (a PostMessageW to a live window
-// cannot be forced to fail deterministically) and is covered by code inspection
-// of PostNotification, mirroring how NR-097/NR-098 handled OS-only paths.
+// Post-failure retention is exercised by filling the target thread's message
+// queue, which makes the next PostMessageW fail without changing the watcher.
 #include "app_host/catalog_watcher.h"
 
 #include <windows.h>
@@ -19,6 +18,7 @@ namespace {
 
 constexpr wchar_t kTestClass[] = L"NimbleRun.CatalogWatcherTest";
 constexpr UINT kWatchChangedMessage = WM_APP + 100;
+constexpr UINT kFillerMessage = WM_APP + 101;
 HINSTANCE g_instance = nullptr;
 
 void Expect(bool condition, const char* message) {
@@ -41,7 +41,7 @@ HWND CreateMessageWindow() {
 
 fs::path TestDir() {
     const fs::path dir =
-        fs::temp_directory_path() / L"NimbleRunTest" / std::to_wstring(GetCurrentProcessId());
+        fs::current_path() / L"NimbleRunWatcherTest" / std::to_wstring(GetCurrentProcessId());
     fs::create_directories(dir);
     return dir;
 }
@@ -89,6 +89,20 @@ bool AnyNotificationIn(HWND window, DWORD wait_ms) {
     return false;
 }
 
+void FillMessageQueue(HWND window) {
+    int count = 0;
+    while (PostMessageW(window, kFillerMessage, 0, 0) != FALSE) {
+        ++count;
+    }
+    Expect(count >= 1000, "message queue can be filled for post-failure test");
+}
+
+void DrainFillerMessages(HWND window) {
+    MSG msg{};
+    while (PeekMessageW(&msg, window, kFillerMessage, kFillerMessage, PM_REMOVE)) {
+    }
+}
+
 // Arms the watch: SetRoots starts the watcher thread asynchronously, so a single
 // file could be created before ReadDirectoryChangesW is armed and its event
 // missed. Keep creating files until a change notification arrives (the watch is
@@ -114,6 +128,27 @@ void TestWatchDeliversChange() {
         WriteWatchFile(dir / L"trigger.txt");
         Expect(ReceiveChange(window, 5000),
                "a normal change arrives with the watch index and lParam 0");
+        watcher.Stop();
+    }
+    DestroyWindow(window);
+    fs::remove_all(dir);
+}
+
+void TestPendingNotificationRecoversWithoutEvent() {
+    const fs::path dir = TestDir();
+    const HWND window = CreateMessageWindow();
+    {
+        nimblerun::CatalogWatcher watcher(window, kWatchChangedMessage);
+        watcher.SetRoots({dir}, {true});
+        Expect(ArmWatch(window, dir), "watch is live before post-failure recovery");
+
+        FillMessageQueue(window);
+        WriteWatchFile(dir / L"post-failure.txt");
+        Sleep(700);  // let the bounded PostNotification retries fail
+        DrainFillerMessages(window);
+
+        Expect(ReceiveChange(window, 5000),
+               "a retained notification recovers without another filesystem event");
         watcher.Stop();
     }
     DestroyWindow(window);
@@ -167,8 +202,9 @@ int wmain() {
     g_instance = GetModuleHandleW(nullptr);
 
     TestWatchDeliversChange();
+    TestPendingNotificationRecoversWithoutEvent();
     TestWatchStopsQuietly();
 
-    std::printf("NR-101 catalog watcher check PASSED\n");
+    std::printf("NR-101/NR-105 catalog watcher check PASSED\n");
     return 0;
 }
