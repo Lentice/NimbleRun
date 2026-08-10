@@ -169,6 +169,64 @@ void TestFullRescanThrottleAndWatchMap() {
     Expect(scheduled == 2, "throttled marker is deferred through debounce");
 }
 
+void TestChangeThrottle() {
+    CatalogRefreshCoordinator refresh;
+    std::atomic<int> enumerations = 0;
+    std::vector<Posted> posts;
+    std::mutex posts_mutex;
+    int scheduled = 0;
+    RebuildPipeline pipeline(
+        refresh, [] { return Settings{}; }, [&](UINT message, WPARAM w_param, LPARAM l_param) {
+            std::lock_guard<std::mutex> lock(posts_mutex);
+            posts.push_back({message, w_param, l_param});
+            return true;
+        },
+        [&](CatalogSource source, const Settings& settings, std::atomic<bool>* cancel) {
+            ++enumerations;
+            return Enumerate(source, settings, cancel);
+        }, [] {}, [] {}, [&] { ++scheduled; });
+
+    pipeline.Request({CatalogSource::StartMenu}, RebuildReason::Change);
+    Sleep(550);
+    pipeline.OnDebounceTimer();
+    Expect(WaitForPosts(posts, posts_mutex, 1), "event burst starts one rebuild");
+    Posted first{};
+    {
+        std::lock_guard<std::mutex> lock(posts_mutex);
+        first = posts.front();
+    }
+    pipeline.OnResultMessage(first.w_param, first.l_param);
+    for (int i = 0; i < 100 && refresh.IsRebuildInProgress(); ++i) Sleep(5);
+    Expect(enumerations.load() == 1, "one event burst produces one rebuild");
+
+    pipeline.Request({CatalogSource::StartMenu}, RebuildReason::Change);
+    Sleep(550);
+    pipeline.OnDebounceTimer();
+    Expect(enumerations.load() == 1,
+           "pulsed change inside the 1 s window starts no rebuild");
+    Expect(scheduled == 3, "throttled event arms and re-arms the debounce timer");
+
+    Sleep(1100);
+    pipeline.OnDebounceTimer();
+    Expect(WaitForPosts(posts, posts_mutex, 2), "throttled event starts once the gate opens");
+    Expect(enumerations.load() == 2, "throttled change is not lost");
+
+    Posted second{};
+    {
+        std::lock_guard<std::mutex> lock(posts_mutex);
+        second = posts[1];
+    }
+    pipeline.OnResultMessage(second.w_param, second.l_param);
+    for (int i = 0; i < 100 && refresh.IsRebuildInProgress(); ++i) Sleep(5);
+    Sleep(1100);
+    pipeline.Request({CatalogSource::StartMenu}, RebuildReason::Change);
+    Sleep(550);
+    pipeline.OnDebounceTimer();
+    Expect(WaitForPosts(posts, posts_mutex, 3),
+           "change at least one second after the previous start starts a rebuild");
+    Expect(enumerations.load() == 3, "each separated change starts its own rebuild");
+}
+
 void TestShutdownBounded() {
     CatalogRefreshCoordinator refresh;
     HANDLE gate = CreateEventW(nullptr, TRUE, FALSE, nullptr);
@@ -205,6 +263,7 @@ int wmain() {
     TestDeliveryFailureCompletesOnce();
     TestCacheFailureRetention();
     TestFullRescanThrottleAndWatchMap();
+    TestChangeThrottle();
     TestShutdownBounded();
     return 0;
 }

@@ -91,8 +91,8 @@ public:
     std::optional<CatalogSource> SourceForIndex(int index) const;
 
 private:
-    static constexpr std::int64_t kFullRescanMinIntervalMs = 1000;
-    static constexpr std::int64_t kFullRescanNever = -1;
+    static constexpr std::int64_t kRebuildStartMinIntervalMs = 1000;
+    static constexpr std::int64_t kNoRebuildStart = -1;
     static constexpr UINT kRebuildDoneMessage = WM_APP + 8;
     static constexpr UINT kRebuildDeliveryFailedMessage = WM_APP + 10;
 
@@ -115,7 +115,7 @@ private:
     HANDLE failure_event_ = nullptr;
     std::vector<std::thread> workers_;
     std::atomic<bool> cancel_{false};
-    std::unordered_map<CatalogSource, std::int64_t> last_full_rescan_ms_;
+    std::unordered_map<CatalogSource, std::int64_t> last_rebuild_start_ms_;
     std::vector<RebuildWatchSource> watch_sources_;
     std::uint64_t completed_generation_ = 0;
     bool cache_writes_disabled_ = false;

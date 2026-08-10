@@ -91,3 +91,34 @@ ctest --test-dir build -R "rebuild_pipeline" --output-on-failure
 ```
 
 完成後在文件底部補齊本 item 的 Handoff 交接備註。
+
+## Handoff（2026-08-10）
+
+- 實作內容（3 檔，~35+ / 8- 行）：
+  - `src/app_host/rebuild_pipeline.h`：`AcceptFullRescan` 對應的常數改名為
+    `kRebuildStartMinIntervalMs`／`kNoRebuildStart`；map 改名為
+    `last_rebuild_start_ms_`（決策 4，改名語義為「距上次重建啟動」）。
+  - `src/app_host/rebuild_pipeline.cpp:17-19`：`AcceptFullRescan` 改名為
+    `AcceptRebuildStart`（同一 per-source ≥1 s 閘門，Change 與 FullRescan 共用）。
+  - `rebuild_pipeline.cpp` `Request` 的 Change 分支（原 `:77-79`）：套同一閘門；
+    被閘時仍呼叫 `NotifySourceEvent`（pending 保留、事件不丟），且底部的
+    `schedule_debounce_` 照常武裝計時器。
+  - `rebuild_pipeline.cpp` `OnDebounceTimer`（原 `:228-235`）：每次 tick 對
+    due sources 逐 source 重查閘門，放行者才 `Start` 並記錄啟動時刻；被閘或
+    rebuild 進行中則 `schedule_debounce_` 再武裝——被閘事件在下一個週期、閘門
+    放行後自然啟動（不丟）。
+- 決策覆核：決策 2「閘門在 `Request` 的 Change 分支、不在 `Start`」照辦
+  （`Start` 與 `Explicit` 路徑零改動）；但 Change 事件經 `NotifySourceEvent`
+  後永遠不會在 `Request` 內立即 due（debounce 剛重置），實際的啟動守門點在
+  `OnDebounceTimer`——item 文件「`OnDebounceTimer` 的既有再檢查在閘門放行後
+  啟動」一句即指此處，實作時補上再武裝以維持「不丟」語意。`ShouldStartRebuild`
+  語意、500 ms debounce 常數、`MarkSourceFullRescan` 語意皆未動（non-goals）。
+- 測試：`tests/unit/rebuild_pipeline_test.cpp` 新增 `TestChangeThrottle`
+  （沿用 FullRescan throttle 測試的實時 sleep 模擬）：
+  - 事件叢集 → 一次 rebuild（debounce 照舊）；
+  - 上次啟動後 <1 s 的脈衝 Change → 閘門內 debounce tick 不啟動（≤1 次/秒）；
+  - 閘門放行後（Sleep 1100）→ 被閘事件在下一個 debounce 週期啟動（不丟）；
+  - ≥1 s 分隔的事件 → 各啟動一次。
+- 驗證：Release Ninja llvm-mingw 建置零新增 warning（`main.cpp:1389` 的
+  `target_size` unused warning 為既有，stash 對照確認）；CTest 31/31 全綠
+  （數量不變）；`-R rebuild_pipeline` 單測通過（~4.2 s）。

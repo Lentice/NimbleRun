@@ -14,7 +14,7 @@ std::int64_t NowMs() {
     return static_cast<std::int64_t>(GetTickCount64());
 }
 
-bool AcceptFullRescan(std::int64_t last, std::int64_t now) {
+bool AcceptRebuildStart(std::int64_t last, std::int64_t now) {
     return last == -1 || now - last >= 1000;
 }
 
@@ -64,18 +64,30 @@ void RebuildPipeline::Request(std::vector<CatalogSource> sources, RebuildReason 
     }
     if (reason == RebuildReason::FullRescan) {
         const CatalogSource source = sources.front();
-        const auto it = last_full_rescan_ms_.find(source);
-        const std::int64_t last = it == last_full_rescan_ms_.end()
-                                      ? kFullRescanNever
+        const auto it = last_rebuild_start_ms_.find(source);
+        const std::int64_t last = it == last_rebuild_start_ms_.end()
+                                      ? kNoRebuildStart
                                       : it->second;
-        if (AcceptFullRescan(last, now)) {
-            last_full_rescan_ms_[source] = now;
+        if (AcceptRebuildStart(last, now)) {
+            last_rebuild_start_ms_[source] = now;
             refresh_.MarkSourceFullRescan(source);
         } else {
             refresh_.NotifySourceEvent(source, now);
         }
     } else {
-        refresh_.NotifySourceEvent(sources.front(), now);
+        const CatalogSource source = sources.front();
+        const auto it = last_rebuild_start_ms_.find(source);
+        const std::int64_t last = it == last_rebuild_start_ms_.end()
+                                      ? kNoRebuildStart
+                                      : it->second;
+        if (AcceptRebuildStart(last, now)) {
+            refresh_.NotifySourceEvent(source, now);
+        } else {
+            // NR-147: throttled Change event -- never dropped. The source stays
+            // pending and the debounce timer is armed below; OnDebounceTimer
+            // starts the rebuild once the per-source 1 s gate opens.
+            refresh_.NotifySourceEvent(source, now);
+        }
     }
     if (refresh_.ShouldStartRebuild(now)) {
         Start(refresh_.DueSources(now));
@@ -227,9 +239,29 @@ LRESULT RebuildPipeline::OnDeliveryFailureMessage(WPARAM w_param, LPARAM l_param
 
 void RebuildPipeline::OnDebounceTimer() {
     const std::int64_t now = NowMs();
-    if (refresh_.ShouldStartRebuild(now)) {
-        Start(refresh_.DueSources(now));
-    } else if (!refresh_.DueSources(now).empty() && schedule_debounce_) {
+    const std::vector<CatalogSource> due = refresh_.DueSources(now);
+    std::vector<CatalogSource> to_start;
+    for (const CatalogSource source : due) {
+        const auto it = last_rebuild_start_ms_.find(source);
+        const std::int64_t last = it == last_rebuild_start_ms_.end()
+                                      ? kNoRebuildStart
+                                      : it->second;
+        if (AcceptRebuildStart(last, now)) {
+            // NR-147: the gate is a rebuild-start gate, so record when the
+            // rebuild actually starts, not when the event was accepted.
+            last_rebuild_start_ms_[source] = now;
+            to_start.push_back(source);
+        }
+    }
+    if (!to_start.empty() && !refresh_.IsRebuildInProgress() &&
+        to_start.size() == due.size()) {
+        Start(std::move(to_start));
+        return;
+    }
+    // Re-arm while any due source was not started: a rebuild is already
+    // running, or a per-source gate (NR-147) is still closed -- the next tick
+    // picks the pending source up once the gate opens.
+    if (schedule_debounce_ && !due.empty()) {
         schedule_debounce_();
     }
 }
