@@ -2076,7 +2076,10 @@ void ShowItemMenu(HWND window, int cell, POINT screen_pos) {
             AppendMenuW(menu, MF_STRING, kCmdForgetRecent,
                         context_menu_strings::kRemoveFromRecent);
         }
-        if (nimblerun::IsPathIdentity(entry.launch_identity)) {
+        // NR-113/NR-148: share the launch boundary -- cache-sourced rows
+        // (launch_verified=false) must not drive Shell UI on paths the user
+        // never enumerated.
+        if (nimblerun::IsPathIdentity(entry.launch_identity) && entry.launch_verified) {
             AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
             AppendMenuW(menu, MF_STRING, kCmdOpenLocation,
                         context_menu_strings::kOpenFileLocation);

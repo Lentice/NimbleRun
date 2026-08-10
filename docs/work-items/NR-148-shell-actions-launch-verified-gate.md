@@ -77,8 +77,21 @@ ctest --test-dir build --output-on-failure
 ```
 
 ```powershell
-rg -n -A 6 "IsPathIdentity\(entry.launch_identity\)" src/app_host/main.cpp
+rg -n -A 6 "IsPathIdentity\(entry\.launch_identity\)" src/app_host/main.cpp
 # expect: 條件含 launch_verified
 ```
 
 完成後在文件底部補齊本 item 的 Handoff 交接備註。
+
+## Handoff
+
+- 2026-08-10 完成（NR-148, commit `NR-148: share launch_verified gate with shell menu actions`）。
+- 變更：`src/app_host/main.cpp:2082` — `ShowItemMenu` 的 Shell 動作分支
+  `IsPathIdentity(entry.launch_identity)` → `IsPathIdentity(entry.launch_identity) && entry.launch_verified`，
+  附 NR-113/NR-148 註解（與啟動共用同一守門，形狀同 `src/launch/shell_launch.cpp:8`）。
+- 驗證：Release（llvm-mingw/Ninja）build 成功；新 warnings 0（既有
+  `main.cpp:1389 unused variable 'target_size'` 為 NR-120/NR-133 時代引入，stash 重編證實
+  與本 item 無關）；CTest 31/31 全綠（數量不變）。
+- 追蹤確認：`AppEntry` 為可複製 value（`app_entry.h:37`，欄位皆 std::wstring/bool/int）；
+  `catalog_cache.cpp:166` 讀回時設 `launch_verified = false`，cache-sourced 列在
+  `ShowItemMenu` 路徑可讀，守門生效。

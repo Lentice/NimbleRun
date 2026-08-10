@@ -184,7 +184,7 @@
 | NR-145 | 死碼 sequel：SlotRect 死參數、QueueDepth／Clear／EraseIf／kJoinTimeoutMs | 3 | `done` | — | [NR-145](work-items/NR-145-dead-code-cleanup-sequel.md) |
 | NR-146 | ShowPanel GetMonitorInfoW 未檢查＋shutdown 逾時 detach 後 pipeline 不得銷毀 | 3 | `done` | — | [NR-146](work-items/NR-146-lifecycle-robustness-guards.md) |
 | NR-147 | watcher Change 路徑補限流（NR-130 只蓋 FullRescan 的半邊） | 2 | `done` | — | [NR-147](work-items/NR-147-watcher-change-throttle.md) |
-| NR-148 | 「開啟檔案位置／內容」與啟動共用 launch_verified 守門 | 2 | `ready` | — | [NR-148](work-items/NR-148-shell-actions-launch-verified-gate.md) |
+| NR-148 | 「開啟檔案位置／內容」與啟動共用 launch_verified 守門 | 2 | `done` | — | [NR-148](work-items/NR-148-shell-actions-launch-verified-gate.md) |
 
 ## Dependency lanes
 
