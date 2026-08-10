@@ -1,4 +1,5 @@
 #include "catalog/app_filter.h"
+#include "catalog/directory_walker.h"
 #include "catalog/stable_id.h"
 #include "catalog/start_menu_catalog.h"
 
@@ -195,61 +196,6 @@ void ProcessFile(const std::wstring& path, AppSource source, std::vector<AppEntr
     out.push_back(std::move(entry));
 }
 
-// Returns false only when the walk started but did not finish cleanly
-// (NR-091): a mid-walk FindNextFileW failure, including a recursive child's,
-// poisons the whole source so the caller keeps the old entries. A missing or
-// unreadable directory is still a clean skip (NR-063 empty-walk success). A
-// set `cancel` token also yields false at the next safe iteration boundary
-// (NR-098), so the collected prefix is never committed as a complete source.
-bool EnumerateDirectoryRecursive(const std::wstring& directory, AppSource source,
-                                 std::vector<AppEntry>& out,
-                                 std::atomic<bool>* cancel,
-                                 std::size_t& corrupt_links) {
-    if (cancel && cancel->load()) {
-        return false;  // NR-098: cancelled before this subtree: report failure
-    }
-    const std::wstring pattern = directory + L"\\*";
-    WIN32_FIND_DATAW find_data{};
-    const HANDLE find = FindFirstFileW(pattern.c_str(), &find_data);
-    if (find == INVALID_HANDLE_VALUE) {
-        return true;  // missing/unreadable directory: skip this subtree, keep others
-    }
-    bool failed = false;
-    do {
-        if (cancel && cancel->load()) {
-            failed = true;  // NR-098: cancelled mid-walk: no partial commit
-            break;
-        }
-        const std::wstring name = find_data.cFileName;
-        if (name == L"." || name == L"..") {
-            continue;
-        }
-        const std::wstring full = directory + L"\\" + name;
-        if ((find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
-            if ((find_data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0) {
-                // ponytail: junctions/symlinks are not followed so a loop cannot
-                // recurse forever; reparse-point app dirs are not a real source.
-                if (!EnumerateDirectoryRecursive(full, source, out, cancel, corrupt_links)) {
-                    failed = true;  // NR-091: a child's failure must reach the caller
-                }
-            }
-            continue;
-        }
-        if (!AcceptExtension(full)) {
-            continue;
-        }
-        ProcessFile(full, source, out, corrupt_links);
-    } while (FindNextFileW(find, &find_data) != FALSE);
-    // NR-091: FALSE is a clean end only when it means the list ran out; any
-    // other error (I/O, access) means this directory was not fully read, so the
-    // collected prefix must not be committed as a complete source.
-    if (GetLastError() != ERROR_NO_MORE_FILES) {
-        failed = true;
-    }
-    FindClose(find);
-    return !failed;
-}
-
 std::wstring KnownFolderPath(REFKNOWNFOLDERID folder) {
     wchar_t* buffer = nullptr;
     if (FAILED(SHGetKnownFolderPath(folder, KF_FLAG_DEFAULT, nullptr, &buffer))) {
@@ -311,7 +257,13 @@ bool EnumerateProgramsDirectory(const std::wstring& root, AppSource source,
         return false;  // source-level failure (design-spec §FR-008)
     }
     std::size_t count = 0;
-    const bool ok = EnumerateDirectoryRecursive(root, source, out, cancel, count);
+    const bool ok = WalkDirectory(
+        root, {true, cancel},
+        [&](const std::wstring& path, DWORD) {
+            if (AcceptExtension(path)) {
+                ProcessFile(path, source, out, count);
+            }
+        });
     if (corrupt_links != nullptr) {
         *corrupt_links += count;
     }

@@ -12,9 +12,9 @@ namespace nimblerun {
 
 // Result of one UserFolder enumeration pass. entries are plain copyable
 // AppEntry values with no Shell COM pointer retained. source_ok is false when
-// an open directory's walk failed mid-enumeration (a FindNextFileW error other
-// than the clean ERROR_NO_MORE_FILES end, including a recursive child's,
-// NR-092); the caller keeps the source's old entries in that case
+// an open directory's walk failed mid-enumeration (an enumeration error other
+// than the clean end, including a recursive child's, NR-092); the caller keeps
+// the source's old entries in that case
 // (design-spec §FR-008). Missing, unreadable and non-local roots, bad
 // subdirectories and anomalous files are still clean skips that never clear
 // source_ok (NR-063). skipped_directories counts those unopenable roots and

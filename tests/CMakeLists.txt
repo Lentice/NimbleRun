@@ -30,6 +30,7 @@ set(NIMBLERUN_TESTS
     "nimblerun_settings_ui_test|unit/settings_editor_test.cpp|nimblerun_settings nimblerun_usage"
     "nimblerun_startup_option_test|unit/startup_option_test.cpp|nimblerun_settings"
     "nimblerun_catalog_refresh_test|unit/catalog_refresh_test.cpp|nimblerun_catalog"
+    "nimblerun_directory_walker_test|unit/directory_walker_test.cpp|nimblerun_catalog"
     # NR-018. Named nimblerun_pinning_test (not *_pin_store_*) so `ctest -R pinning`
     # matches the CTest name regex.
     "nimblerun_pinning_test|unit/pin_store_test.cpp|nimblerun_pins nimblerun_panel_model"
@@ -41,7 +42,7 @@ set(NIMBLERUN_TESTS
 # The exception block below must stay in its original registration position so
 # ctest test numbers do not shift; the loop is split around it.
 list(SUBLIST NIMBLERUN_TESTS 0 10 NIMBLERUN_TESTS_HEAD)
-list(SUBLIST NIMBLERUN_TESTS 10 12 NIMBLERUN_TESTS_TAIL)
+list(SUBLIST NIMBLERUN_TESTS 10 13 NIMBLERUN_TESTS_TAIL)
 
 foreach(entry IN LISTS NIMBLERUN_TESTS_HEAD)
     string(REPLACE "|" ";" parts "${entry}")

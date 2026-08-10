@@ -57,6 +57,7 @@ target_link_libraries(nimblerun_hotkey
 
 add_library(nimblerun_catalog STATIC
     src/catalog/app_filter.cpp
+    src/catalog/directory_walker.cpp
     src/catalog/start_menu_catalog.cpp
     src/catalog/appsfolder_catalog.cpp
     src/catalog/user_folder_catalog.cpp
