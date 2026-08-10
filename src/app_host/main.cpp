@@ -120,6 +120,11 @@ constexpr wchar_t kOpenFileLocation[] = L"Open file location";
 // (valid filesystem paths only, same gate as Open file location).
 constexpr wchar_t kProperties[] = L"Properties";
 constexpr wchar_t kRemoveFromRecent[] = L"Remove from recent";
+// NR-157: app-level commands shared by the tray menu and the panel's
+// empty-area context menu (NR-060).
+constexpr wchar_t kRefreshApps[] = L"Refresh Apps";
+constexpr wchar_t kSettings[] = L"Settings";
+constexpr wchar_t kAbout[] = L"About";
 } // namespace context_menu_strings
 
 // NR-020: centralized English row/hint strings (design-spec §4.2/§4.3).
@@ -1927,37 +1932,34 @@ void RemoveTrayIcon(HWND window) {
     Shell_NotifyIconW(NIM_DELETE, &nid);
 }
 
-// Non-blocking one-time reminder when the default hotkey cannot be registered.
-// The tray stays fully functional; the Settings entry is the persistent fix path.
-void ShowHotkeyConflictNotice(HWND window) {
+// Shared NOTIFYICONDATAW info-balloon filler for the one-shot tray balloons
+// below; the only info-balloon filling in this file.
+void ShowInfoBalloon(HWND window, std::wstring_view text) {
     NOTIFYICONDATAW nid{};
     nid.cbSize = sizeof(nid);
     nid.hWnd = window;
     nid.uID = kTrayIconId;
     nid.uFlags = NIF_INFO;
     wcsncpy(nid.szInfoTitle, L"NimbleRun", sizeof(nid.szInfoTitle) / sizeof(nid.szInfoTitle[0]) - 1);
-    wcsncpy(nid.szInfo,
-        L"Alt+Space is already in use. Open Settings to choose another global hotkey.",
-        sizeof(nid.szInfo) / sizeof(nid.szInfo[0]) - 1);
+    wcsncpy(nid.szInfo, text.data(),
+            sizeof(nid.szInfo) / sizeof(nid.szInfo[0]) - 1);
     nid.dwInfoFlags = NIIF_NONE;
     Shell_NotifyIconW(NIM_MODIFY, &nid);
 }
 
+// Non-blocking one-time reminder when the default hotkey cannot be registered.
+// The tray stays fully functional; the Settings entry is the persistent fix path.
+void ShowHotkeyConflictNotice(HWND window) {
+    ShowInfoBalloon(
+        window,
+        L"Alt+Space is already in use. Open Settings to choose another global hotkey.");
+}
+
 // NR-058: single non-blocking balloon for startup store-load failures
-// (design-spec §10.4/§11). Same NOTIFYICONDATAW info-balloon filling as
-// ShowHotkeyConflictNotice. The caller clears the flags after sending, so a
+// (design-spec §10.4/§11). The caller clears the flags after sending, so a
 // process shows at most one such balloon.
 void ShowLoadIssueNotice(HWND window, const std::wstring& text) {
-    NOTIFYICONDATAW nid{};
-    nid.cbSize = sizeof(nid);
-    nid.hWnd = window;
-    nid.uID = kTrayIconId;
-    nid.uFlags = NIF_INFO;
-    wcsncpy(nid.szInfoTitle, L"NimbleRun", sizeof(nid.szInfoTitle) / sizeof(nid.szInfoTitle[0]) - 1);
-    wcsncpy(nid.szInfo, text.c_str(),
-            sizeof(nid.szInfo) / sizeof(nid.szInfo[0]) - 1);
-    nid.dwInfoFlags = NIIF_NONE;
-    Shell_NotifyIconW(NIM_MODIFY, &nid);
+    ShowInfoBalloon(window, text);
 }
 
 void DispatchTrayCommand(HWND window, UINT command) {
@@ -1982,15 +1984,22 @@ void DispatchTrayCommand(HWND window, UINT command) {
     }
 }
 
+// NR-157: Refresh Apps / Settings / About, shared by the tray menu and the
+// panel's empty-area context menu (NR-060). Command ids match
+// DispatchTrayCommand.
+void AppendAppCommands(HMENU menu) {
+    AppendMenuW(menu, MF_STRING, kCmdRefresh, context_menu_strings::kRefreshApps);
+    AppendMenuW(menu, MF_STRING, kCmdSettings, context_menu_strings::kSettings);
+    AppendMenuW(menu, MF_STRING, kCmdAbout, context_menu_strings::kAbout);
+}
+
 void ShowTrayMenu(HWND window) {
     const HMENU menu = CreatePopupMenu();
     if (!menu) {
         return;
     }
     AppendMenuW(menu, MF_STRING, kCmdOpen, L"Open NimbleRun");
-    AppendMenuW(menu, MF_STRING, kCmdRefresh, L"Refresh Apps");
-    AppendMenuW(menu, MF_STRING, kCmdSettings, L"Settings");
-    AppendMenuW(menu, MF_STRING, kCmdAbout, L"About");
+    AppendAppCommands(menu);
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, kCmdExit, L"Exit");
 
@@ -2724,9 +2733,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
             if (!menu) {
                 return 0;
             }
-            AppendMenuW(menu, MF_STRING, kCmdRefresh, L"Refresh Apps");
-            AppendMenuW(menu, MF_STRING, kCmdSettings, L"Settings");
-            AppendMenuW(menu, MF_STRING, kCmdAbout, L"About");
+            AppendAppCommands(menu);
 
             POINT cursor{};
             GetCursorPos(&cursor);

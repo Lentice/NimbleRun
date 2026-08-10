@@ -81,3 +81,29 @@ rg -n "NIF_INFO" src/app_host/main.cpp
 ```
 
 完成後在文件底部補齊本 item 的 Handoff 交接備註。
+
+## Handoff（2026-08-10，NR-157 done）
+
+實作（2026-08-10）：
+
+- **（1）tray balloon 填表共用**：`ShowInfoBalloon(HWND window, std::wstring_view
+  text)`（`main.cpp:1935-1945`）取代兩份 NIF_INFO 填表——標題 `L"NimbleRun"` 與
+  `NIIF_NONE` 保留在共用函式內（兩呼叫端原值相同，故不需參數化）。
+  `ShowHotkeyConflictNotice`（`main.cpp:1948-1952`）與 `ShowLoadIssueNotice`
+  （`main.cpp:1957-1959`，forward declaration 於 `main.cpp:1160` 不變）維持薄包裝；
+  三處呼叫端（`main.cpp:1222`／`3194`／`3204`）零改動。`NIF_INFO` 全文僅
+  `main.cpp:1942` 一處。
+- **（2）app 命令共用**：`context_menu_strings`（`main.cpp:115-131`）新增
+  `kRefreshApps`／`kSettings`／`kAbout` 三字串；`AppendAppCommands(HMENU)`
+  （`main.cpp:1987-1993`）以原命令 id（`kCmdRefresh=2`／`kCmdSettings=3`／
+  `kCmdAbout=4`）與集中字串建三項。`ShowTrayMenu`（`main.cpp:1996-2009`，於
+  `L"Open NimbleRun"` 之後、分隔線之前）與面板空白區 `WM_RBUTTONDOWN`
+  （`main.cpp:2730-2740`）皆改用 `AppendAppCommands`。`DispatchTrayCommand`、
+  分隔線、順序、`TrackPopupMenu` 流程全部未動。`L"Refresh Apps"` 字面值僅
+  `main.cpp:125` 一處。
+- **驗證**：Release Ninja llvm-mingw configure＋build 通過，零新增 warning（唯一
+  warning 為既有 `main.cpp:1405` 未使用 `target_size`，stash 對照確認與本 item 無
+  關，本 item 後行號位移至 1410）；`ctest --test-dir build --output-on-failure`：
+  31/31 全綠（數量不變）。grep 驗證：`"Refresh Apps"` 於 `main.cpp:125`（集中字串）；
+  `NIF_INFO` 於 `main.cpp:1942`（`ShowInfoBalloon`）。
+- **未完成風險**：無。純共用抽取，命令 id／順序／分派路徑逐字保持原樣。
