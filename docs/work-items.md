@@ -176,7 +176,7 @@
 | NR-137 | 兩份逐字相同的遞迴目錄走訪收斂為 `DirectoryWalker`（同一 bug 修過兩次） | 2 | `done` | NR-063, NR-091, NR-092, NR-098, NR-124 | [NR-137](work-items/NR-137-directory-walker-module.md) |
 | NR-138 | Icon 請求狀態收斂為 `IconRequestSession`＋prewarm 直接取 entries | 3 | `done` | NR-012, NR-032, NR-099, NR-109, NR-114 | [NR-138](work-items/NR-138-icon-request-session.md) |
 | NR-139 | 偽造的 `kRebuildDeliveryFailedMessage` 可使常駐 process 當場終止（`.at()` throw） | 3 | `done` | — | [NR-139](work-items/NR-139-delivery-failure-message-crash.md) |
-| NR-140 | settings.ini 行數上限＋catalog_root 上限＋hotkey 長度上限（watcher 執行緒爆炸面） | 1 | `ready` | — | [NR-140](work-items/NR-140-settings-ini-row-caps.md) |
+| NR-140 | settings.ini 行數上限＋catalog_root 上限＋hotkey 長度上限（watcher 執行緒爆炸面） | 1 | `done` | — | [NR-140](work-items/NR-140-settings-ini-row-caps.md) |
 | NR-141 | SplitLines 在 materialize 前行數守門（16 MB 檔 → 400-500 MB 暫態配置） | 1 | `ready` | — | [NR-141](work-items/NR-141-splitlines-line-cap-before-alloc.md) |
 | NR-142 | catalog_refresh 判定收斂：HasDueRebuild≡DueSources、兩個 Apply 的 event-clear≡ | 3 | `ready` | — | [NR-142](work-items/NR-142-catalog-refresh-duplicate-predicates.md) |
 | NR-143 | §4.8 搜尋結果列缺「自常用清單移除」（RecentStartIndex 搜尋態 -1） | 3 | `ready` | — | [NR-143](work-items/NR-143-search-row-remove-from-recent.md) |

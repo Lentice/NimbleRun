@@ -238,6 +238,71 @@ void TestOversizeFileCorrupt(const std::wstring& dir) {
     Expect(fs::exists(dir + L"\\settings.ini.corrupt"), "oversize file preserved");
 }
 
+// NR-140: settings.ini is untrusted input (design-spec §10.4) and every
+// catalog_root becomes a watcher thread at startup, so 33 roots are whole-file
+// Corrupt -- and the live settings fall back to DefaultSettings, never a
+// partial parse (NR-080 contract).
+void TestCatalogRootCap(const std::wstring& dir) {
+    std::string content = "schema=1\n";
+    for (int i = 0; i < 33; ++i) {
+        content += "catalog_root=C:\\root|true\n";
+    }
+    WriteBytes(dir + L"\\settings.ini", content);
+    SettingsStore store(dir);
+    Settings loaded;
+    Expect(store.Load(loaded) == SettingsLoadResult::Corrupt, "33 roots reports Corrupt");
+    Expect(loaded.hotkey == L"Alt+Space", "over-cap load resets to the default hotkey");
+    Expect(loaded.catalog_roots.empty(), "over-cap load keeps no roots");
+    Expect(!fs::exists(dir + L"\\settings.ini"), "over-cap file moved aside");
+    Expect(fs::exists(dir + L"\\settings.ini.corrupt"), "over-cap file preserved");
+}
+
+// NR-140: 32 roots is the maximum that loads; every root is preserved.
+void TestCatalogRootMaxOk(const std::wstring& dir) {
+    // Paths avoid \r/\n/\t/\\ sequences: UnescapeText treats them as escapes.
+    std::string content = "schema=1\n";
+    for (int i = 0; i < 32; ++i) {
+        content += "catalog_root=C:\\Tools" + std::to_string(i) + "|true\n";
+    }
+    WriteBytes(dir + L"\\settings.ini", content);
+    SettingsStore store(dir);
+    Settings loaded;
+    Expect(store.Load(loaded) == SettingsLoadResult::Loaded, "32 roots loads");
+    Expect(loaded.catalog_roots.size() == 32, "all 32 roots preserved");
+    Expect(loaded.catalog_roots[0].path == L"C:\\Tools0", "first root preserved");
+    Expect(loaded.catalog_roots[31].path == L"C:\\Tools31", "last root preserved");
+}
+
+// NR-140: a hotkey value longer than kMaxHotkeyLength never reaches
+// ParseHotkey's per-'+' vector; over-limit is the same whole-file Corrupt.
+void TestHotkeyLengthCap(const std::wstring& dir) {
+    std::string content = "schema=1\nhotkey=";
+    content.append(257, 'A');
+    content += "\n";
+    WriteBytes(dir + L"\\settings.ini", content);
+    SettingsStore store(dir);
+    Settings loaded;
+    Expect(store.Load(loaded) == SettingsLoadResult::Corrupt, "257-char hotkey reports Corrupt");
+    Expect(loaded.hotkey == L"Alt+Space", "over-long hotkey resets to the default");
+    Expect(!fs::exists(dir + L"\\settings.ini"), "over-long hotkey file moved aside");
+    Expect(fs::exists(dir + L"\\settings.ini.corrupt"), "over-long hotkey file preserved");
+}
+
+// NR-140 extra evidence: the original DoS shape -- 100k roots -- is rejected
+// by the same cap, so StartWatchers never sees a single root.
+void TestCatalogRootCap100k(const std::wstring& dir) {
+    std::string content = "schema=1\n";
+    content.reserve(3 * 100000);
+    for (int i = 0; i < 100000; ++i) {
+        content += "catalog_root=C:\\root|true\n";
+    }
+    WriteBytes(dir + L"\\settings.ini", content);
+    SettingsStore store(dir);
+    Settings loaded;
+    Expect(store.Load(loaded) == SettingsLoadResult::Corrupt, "100k roots reports Corrupt");
+    Expect(loaded.catalog_roots.empty(), "100k-root load keeps no roots");
+}
+
 void TestNewerSchema(const std::wstring& dir) {
     const std::string content = "schema=99\nrecent_count=30\n";
     WriteBytes(dir + L"\\settings.ini", content);
@@ -445,6 +510,10 @@ int wmain() {
     TestCorrupt(MakeTempDir("corrupt"));
     TestCorruptMidFileUsesDefaults(MakeTempDir("midcorrupt"));
     TestOversizeFileCorrupt(MakeTempDir("oversize"));
+    TestCatalogRootCap(MakeTempDir("rootcap"));
+    TestCatalogRootMaxOk(MakeTempDir("rootmax"));
+    TestHotkeyLengthCap(MakeTempDir("hotkeycap"));
+    TestCatalogRootCap100k(MakeTempDir("rootcap100k"));
     TestNewerSchema(MakeTempDir("newer"));
     TestNewerSchemaSaveRefused(MakeTempDir("newersave"));
     TestMissingLoadSaveWritesFile(MakeTempDir("writable_missing"));

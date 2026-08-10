@@ -96,4 +96,32 @@ ctest --test-dir build --output-on-failure
 ctest --test-dir build -R "settings_store" --output-on-failure
 ```
 
-完成後在文件底部補齊本 item 的 Handoff 交接備註。
+## Handoff
+
+### 實作與順序
+
+- 兩個上限常數在 `settings_store.cpp` 的 anonymous namespace：
+  `kMaxCatalogRoots = 32`、`kMaxHotkeyLength = 256`，並附 NR-140 出處註解。
+- `Load` 迴圈前置 `std::size_t catalog_root_count = 0;`；`catalog_root` 分支第一行
+  `if (++catalog_root_count > kMaxCatalogRoots)` → `PreserveCorrupt(directory_, kFileName);`
+  `out = DefaultSettings(); return SettingsLoadResult::Corrupt;`（與 `:185-191` 既有
+  mid-file corrupt 同形）。計數在 key 比對時累加、與路徑是否合法無關——未驗證的
+  root 也是惡意面的一部分。
+- `hotkey` 分支先查 `value.size() > kMaxHotkeyLength`（檢查的是 **UnescapeText 後**
+  的值，與送進 `ParseHotkey` 的值一致）→ 同 Corrupt 路徑。
+- 不引入 helper、不重排迴圈、未動 `SplitLines`／`ReadVersionedLines`（NR-141 範圍）。
+
+### 測試與文件證據
+
+- `tests/unit/settings_store_test.cpp` 新增四函式：
+  `TestCatalogRootCap`（33 root → Corrupt＋`out` 全 Default＋`settings.ini.corrupt` 保留）、
+  `TestCatalogRootMaxOk`（32 root → Loaded，首尾 root 在）、
+  `TestHotkeyLengthCap`（257 字元 → Corrupt）、`TestCatalogRootCap100k`（10 萬 root
+  的原始 DoS 形狀 → Corrupt，即 acceptance 2 的證據）。既有測試零改動，CTest
+  registration 維持 31（assertion 加在既有 target 內）。
+- **測試陷阱（本 session 發現）**：`UnescapeText`（`storage/atomic_text_file.h:133`）
+  把 `\r`／`\n`／`\t`／`\\`／`\=` 當跳脫——測試檔裡 `C:\root0` 會被解成含 CR 的
+  畸形路徑而被 `IsLocalAbsolutePath` 丟棄。max-ok 案例改用 `C:\Tools0..31`
+  （`\T` 非跳脫序列）；`\r`-free 是既有測試也用 `C:\Valid` 的原因。
+- 驗證：Release x64（llvm-mingw + Ninja）build 零新增 warning；full CTest 31/31
+  全綠（settings_store 專注 `-R nimblerun_settings_test` 亦綠）。

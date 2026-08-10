@@ -21,6 +21,12 @@ namespace {
 
 constexpr std::wstring_view kFileName = L"settings.ini";
 constexpr int kSchemaVersion = 1;
+// NR-140: settings.ini is untrusted input (design-spec §10.4). Caps keep a
+// crafted file from spawning a watcher thread per root at startup (each root
+// becomes a CreateFileW + std::thread in main.cpp StartWatchers) and from
+// pushing a huge value through ParseHotkey's per-'+' vector.
+constexpr std::size_t kMaxCatalogRoots = 32;
+constexpr std::size_t kMaxHotkeyLength = 256;
 
 bool ParseInt(std::wstring_view text, int& out) {
     const std::wstring value = Trim(text);
@@ -170,6 +176,7 @@ SettingsLoadResult SettingsStore::Load(Settings& out) const {
     }
 
     bool extensions_replaced = false;
+    std::size_t catalog_root_count = 0;
     for (std::size_t i = 0; i < lines.size(); ++i) {
         const std::wstring line = Trim(lines[i]);
         if (line.empty()) {
@@ -194,6 +201,13 @@ SettingsLoadResult SettingsStore::Load(Settings& out) const {
         const std::wstring value = UnescapeText(Trim(line.substr(equals + 1)));
 
         if (key == L"hotkey") {
+            // NR-140: over-long hotkey values are whole-file Corrupt, never a
+            // trimmed guess (NR-080: non-Loaded out holds DefaultSettings).
+            if (value.size() > kMaxHotkeyLength) {
+                PreserveCorrupt(directory_, kFileName);
+                out = DefaultSettings();
+                return SettingsLoadResult::Corrupt;
+            }
             if (!value.empty()) {
                 out.hotkey = value;
             }
@@ -217,6 +231,14 @@ SettingsLoadResult SettingsStore::Load(Settings& out) const {
                 out.include_windows_apps = *parsed;
             }
         } else if (key == L"catalog_root") {
+            // NR-140: each root becomes a watcher thread at startup
+            // (main.cpp StartWatchers), so the row cap is a startup-DoS guard.
+            // Over-limit is whole-file Corrupt (NR-080: no partial state).
+            if (++catalog_root_count > kMaxCatalogRoots) {
+                PreserveCorrupt(directory_, kFileName);
+                out = DefaultSettings();
+                return SettingsLoadResult::Corrupt;
+            }
             // Format: <escaped path>|<recursive 0/1>. '|' cannot appear in a
             // Windows path, so it is a safe separator.
             const std::size_t bar = value.find(L'|');
