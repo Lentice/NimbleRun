@@ -108,9 +108,6 @@ public:
     // post-rebuild choke point. Not for adding or removing entries.
     std::vector<AppEntry>& MutableSnapshot() { return merged_; }
 
-    // Best-known entries per source.
-    const std::vector<AppEntry>& SourceEntries(CatalogSource source) const;
-
     // Replaces the whole merged snapshot directly (startup cache load).
     void SetSnapshot(std::vector<AppEntry> merged);
 
@@ -144,6 +141,10 @@ private:
     // (the BeginGeneration timestamp snapshot is unchanged). Shared by
     // ApplySourceResult and ApplySourceFailure.
     void ClearPendingIfEventUnchanged(CatalogSource source, std::int64_t snapshot_value);
+    // NR-139: true only when `generation` is the current one and `source` is an
+    // active source of it. Shared forged-message guard of ApplySourceResult and
+    // ApplySourceFailure.
+    bool IsActiveGenerationSource(std::uint64_t generation, CatalogSource source) const;
 
     std::unordered_map<CatalogSource, std::vector<AppEntry>> source_entries_;
     std::unordered_map<CatalogSource, bool> pending_;

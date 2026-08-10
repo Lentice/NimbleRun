@@ -111,15 +111,7 @@ bool CatalogRefreshCoordinator::ApplySourceResult(std::uint64_t generation,
                                                   CatalogSource source,
                                                   std::vector<AppEntry> entries,
                                                   const GenerationDiagnostics& diagnostics) {
-    if (generation != generation_) {
-        return false;  // a newer rebuild started; this worker is stale
-    }
-    // NR-139: the snapshot holds only active sources; a forged
-    // kRebuildDeliveryFailedMessage can name a matching-generation source that
-    // is not in the active set. Reject it before touching any state -- the
-    // normal path guarantees membership, so find() never misses there.
-    const auto snapshot = generation_event_snapshot_.find(source);
-    if (snapshot == generation_event_snapshot_.end()) {
+    if (!IsActiveGenerationSource(generation, source)) {
         return false;
     }
     // NR-124: fold the enumerator's counts into the generation diagnostics. A
@@ -128,7 +120,7 @@ bool CatalogRefreshCoordinator::ApplySourceResult(std::uint64_t generation,
     generation_diagnostics_.corrupt_links += diagnostics.corrupt_links;
     generation_diagnostics_.skipped_directories += diagnostics.skipped_directories;
     source_entries_[source] = std::move(entries);
-    ClearPendingIfEventUnchanged(source, snapshot->second);
+    ClearPendingIfEventUnchanged(source, generation_event_snapshot_.at(source));
     received_[source] = true;
     if (GenerationComplete(generation)) {
         RebuildMerged();
@@ -138,16 +130,10 @@ bool CatalogRefreshCoordinator::ApplySourceResult(std::uint64_t generation,
 
 bool CatalogRefreshCoordinator::ApplySourceFailure(std::uint64_t generation,
                                                    CatalogSource source) {
-    if (generation != generation_) {
+    if (!IsActiveGenerationSource(generation, source)) {
         return false;
     }
-    // NR-139: same forged-message guard as ApplySourceResult -- a non-active
-    // source is not this generation's business, so reject it without throwing.
-    const auto snapshot = generation_event_snapshot_.find(source);
-    if (snapshot == generation_event_snapshot_.end()) {
-        return false;
-    }
-    ClearPendingIfEventUnchanged(source, snapshot->second);
+    ClearPendingIfEventUnchanged(source, generation_event_snapshot_.at(source));
     received_[source] = true;  // the source's old entries stay; others still apply
     if (GenerationComplete(generation)) {
         RebuildMerged();
@@ -155,16 +141,21 @@ bool CatalogRefreshCoordinator::ApplySourceFailure(std::uint64_t generation,
     return true;
 }
 
+bool CatalogRefreshCoordinator::IsActiveGenerationSource(std::uint64_t generation,
+                                                         CatalogSource source) const {
+    if (generation != generation_) {
+        return false;  // a newer rebuild started; this worker is stale
+    }
+    // NR-139: the snapshot holds only active sources; a forged
+    // kRebuildDeliveryFailedMessage can name a matching-generation source that
+    // is not in the active set. Reject it before touching any state -- the
+    // normal path guarantees membership, so find() never misses there.
+    return generation_event_snapshot_.find(source) != generation_event_snapshot_.end();
+}
+
 void CatalogRefreshCoordinator::RecordAppsFolderSuccess(std::int64_t now_ms) {
     last_appsfolder_success_ms_ = now_ms;
     appsfolder_has_success_ = true;
-}
-
-const std::vector<AppEntry>& CatalogRefreshCoordinator::SourceEntries(
-    CatalogSource source) const {
-    static const std::vector<AppEntry> kEmpty;
-    const auto it = source_entries_.find(source);
-    return it == source_entries_.end() ? kEmpty : it->second;
 }
 
 void CatalogRefreshCoordinator::SetSnapshot(std::vector<AppEntry> merged) {

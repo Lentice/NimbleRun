@@ -70,3 +70,26 @@ rg -n "SourceEntries|IsActiveGenerationSource" src/catalog
 ```
 
 完成後在文件底部補齊本 item 的 Handoff 交接備註。
+
+## Handoff
+
+實作（2026-08-10）：
+
+- **SourceEntries 死碼刪除**：`catalog_refresh.cpp` 的
+  `CatalogRefreshCoordinator::SourceEntries`（含 `static const kEmpty` 回退值）與
+  `catalog_refresh.h:112` 宣告一併刪除。grep `SourceEntries` 於 src/ 與 tests/ 零命中
+  （殘留的 `SeedSourceEntriesFromSnapshot` 是不同方法，有呼叫者，未動）。
+- **防偽守門抽共用 helper**：新增私有 const 成員
+  `bool IsActiveGenerationSource(std::uint64_t generation, CatalogSource source) const`，
+  header 宣告於 `ClearPendingIfEventUnchanged` 旁（同既有 private helper 風格）。
+  `ApplySourceResult` 與 `ApplySourceFailure` 的開頭守門改為
+  `if (!IsActiveGenerationSource(generation, source)) return false;`；原 NR-139 註解
+  （forged `kRebuildDeliveryFailedMessage`）與「newer rebuild started」註解搬入 helper
+  body，兩份拷貝合併為一份。後續 `generation_event_snapshot_.at(source)` 因 find 守門
+  已過而保證命中，與原本的 `snapshot->second` 行為一致。
+- **驗證**：Release Ninja llvm-mingw configure＋build 通過；`catalog_refresh.cpp` 零
+  warning（build 全程唯一 warning 是 `main.cpp:1395` 既有未使用 `target_size`，與本
+  item 無關）；`ctest --test-dir build --output-on-failure`：31/31 全綠（數量不變）；
+  `ctest --test-dir build -R "catalog_refresh|rebuild_pipeline" --output-on-failure`：
+  2/2。
+- **未完成風險**：無。純 refactor，零行為變更。
