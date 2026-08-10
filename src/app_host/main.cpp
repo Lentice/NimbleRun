@@ -9,6 +9,7 @@
 #include "app_host/hotkey.h"
 #include "app_host/message_loop.h"
 #include "app_host/panel_model.h"
+#include "app_host/snapshot_assembler.h"
 #include "app_host/settings_dialog.h"
 #include "catalog/app_filter.h"
 #include "catalog/appsfolder_catalog.h"
@@ -184,7 +185,7 @@ bool g_pins_notified = false;
 // window exists; the only UI-thread owner of the tray notices.
 HWND g_main_window = nullptr;
 HANDLE g_test_show_semaphore = nullptr;
-// NR-058: true once Shell_NotifyIconW(NIM_ADD) succeeded, so RefreshPins knows
+// NR-058: true once Shell_NotifyIconW(NIM_ADD) succeeded, so the host knows
 // whether a balloon can be shown now or must be deferred to the startup send
 // point (the first pin load runs before the tray icon exists).
 bool g_tray_icon_active = false;
@@ -259,6 +260,7 @@ HBRUSH g_search_bg_brush = nullptr;
 // messages, and enumeration runs on short-lived background threads whose
 // results come back through kRebuildDoneMessage.
 nimblerun::CatalogRefreshCoordinator* g_refresh = nullptr;
+nimblerun::CatalogSnapshotAssembler* g_snapshot_assembler = nullptr;
 nimblerun::CatalogWatcher* g_watcher = nullptr;
 
 std::wstring EnvironmentValue(const wchar_t* name) {
@@ -946,9 +948,10 @@ void ClearDroppedIconRequests() {
     }
 }
 
-// Defined below, next to the panel-refresh path it is also part of; the launch
-// path needs it before that point.
-void StampRankingFields();
+// Defined below, next to the panel-refresh path it is also part of; launch and
+// pin-edit paths need the same derived-field update. Only pin edits refresh
+// visible rows; launch keeps the old stamp-only path.
+void UpdateSnapshotRanking(bool pins_changed);
 
 // NR-036: the single hide path. Every way the panel disappears (Esc second
 // stage, WM_KILLFOCUS auto-hide, hide-after-launch, hotkey/tray toggle) funnels
@@ -1018,7 +1021,7 @@ void ActivateRow(std::size_t index, HWND window) {
         // The new score has to reach the snapshot the next search reads. With
         // hide-after-launch off the panel stays open, so waiting for the next
         // show would rank the app the user just launched on its old score.
-        StampRankingFields();
+        UpdateSnapshotRanking(false);
     }
     if (g_hide_after_launch) {
         HidePanel(window);
@@ -1242,129 +1245,46 @@ void LogStoreLoad(const wchar_t* stage, const wchar_t* result_name) {
     }
 }
 
-// NR-018: reload pins from the store, reconcile them against the current
-// catalog snapshot (30-day retention, last_seen refresh; design-spec §FR-011),
-// persist any change, and mirror the ordered pin list into the panel model.
-// Called when the panel opens (restart / external edit) and whenever the
-// catalog snapshot is swapped.
-void RefreshPins() {
-    if (!g_pins || !g_refresh || !g_model) {
+// NR-058: the assembler is HWND-free; the host turns its pure pin-load result
+// into the existing log and one-shot tray balloon path.
+void HandlePinLoadResult(const nimblerun::CatalogSnapshotAssembler::Result& result) {
+    const nimblerun::PinLoadResult pin_result = result.pin_load_result;
+    if (pin_result != nimblerun::PinLoadResult::Loaded) {
+        LogStoreLoad(L"pins_load", StoreLoadResultName(pin_result));
+    }
+    if (!result.pin_load_notice || g_pins_notified) {
         return;
     }
-    const nimblerun::PinLoadResult result = g_pins->Load();
-    if (result == nimblerun::PinLoadResult::Missing) {
-        // First run: the file does not exist yet, which is normal. Still log
-        // one line (decision #5), but never set a flag or show a balloon.
-        LogStoreLoad(L"pins_load", StoreLoadResultName(result));
-    } else if (result == nimblerun::PinLoadResult::Corrupt ||
-               result == nimblerun::PinLoadResult::NewerSchema) {
-        LogStoreLoad(L"pins_load", StoreLoadResultName(result));
-        if (!g_pins_notified) {
-            g_pins_notified = true;
-            if (g_tray_icon_active && g_main_window) {
-                const std::wstring text = nimblerun::StoreLoadNoticeText(
-                    StoreLoadIssueFor(result));
-                if (!text.empty()) {
-                    ShowLoadIssueNotice(g_main_window, text);
-                }
-            } else {
-                // The first pin load runs before the tray icon exists (startup
-                // RefreshPanelSnapshot); the startup send point shows the
-                // balloon once the icon is in place.
-                g_store_load_issues |= StoreLoadIssueFor(result);
-            }
+    g_pins_notified = true;
+    const unsigned issue = StoreLoadIssueFor(pin_result);
+    if (g_tray_icon_active && g_main_window) {
+        const std::wstring text = nimblerun::StoreLoadNoticeText(issue);
+        if (!text.empty()) {
+            ShowLoadIssueNotice(g_main_window, text);
         }
-    }
-    // NR-072: a newer-schema file is another build's data -- never touch it
-    // (design-spec §10.4); a corrupt load must not let a partial parse become
-    // the live file. Only a Loaded (or Missing) store may be reconciled and
-    // persisted. This also stops an empty pins_ from clobbering favorites.txt.
-    if (result == nimblerun::PinLoadResult::Loaded ||
-        result == nimblerun::PinLoadResult::Missing) {
-        g_pins->Reconcile(g_refresh->Snapshot(),
-                          static_cast<std::int64_t>(std::time(nullptr)));
-        g_pins->Save();
-    }
-    g_model->SetPins(g_pins->Records());
-}
-
-// design-spec §4.5: among equal text matches the order is pinned first, then
-// higher usage score. Both fields live on AppEntry but are derived from the pin
-// and usage stores, so they have to be stamped onto the merged snapshot after
-// anything that changes either store -- and after every rebuild, which
-// recomputes the snapshot from the source entries and drops them. Without this
-// the two tie-breaks in SearchApps compare zero against zero and a
-// just-launched app keeps sinking below alphabetically luckier ones.
-//
-// One linear pass over the snapshot with a hashed score lookup; the pin list is
-// a handful of entries, so it is scanned directly.
-void StampRankingFields() {
-    if (!g_refresh || !g_usage) {
-        return;
-    }
-    const std::int64_t now = static_cast<std::int64_t>(std::time(nullptr));
-    std::unordered_map<std::wstring_view, int> scores;
-    scores.reserve(g_usage->Records().size());
-    for (const nimblerun::UsageRecord& record : g_usage->Records()) {
-        scores.emplace(record.stable_id, nimblerun::UsageScore(record, now));
-    }
-    const std::vector<std::wstring> pins =
-        g_pins ? g_pins->OrderedPins() : std::vector<std::wstring>{};
-    for (nimblerun::AppEntry& entry : g_refresh->MutableSnapshot()) {
-        const auto score = scores.find(entry.stable_id);
-        entry.usage_score = score == scores.end() ? 0 : score->second;
-        entry.is_pinned =
-            std::find(pins.begin(), pins.end(), entry.stable_id) != pins.end();
+    } else {
+        // The first pin load runs before the tray icon exists; the startup send
+        // point shows the balloon once the icon is in place.
+        g_store_load_issues |= issue;
     }
 }
 
-// NR-011: repoints the panel model at the coordinator's current snapshot and
-// refreshes the recent list, so a swapped-in catalog appears immediately.
+// NR-011: the assembler repoints the model at the coordinator's current
+// snapshot and refreshes the recent list, so a swapped-in catalog appears
+// immediately. Accessibility remains a host concern because it owns HWND.
 void RefreshPanelSnapshot() {
-    if (!g_model || !g_refresh || !g_usage) {
+    if (!g_snapshot_assembler) {
         return;
     }
-    // NR-083: one stable_id -> snapshot index, built once for this refresh so
-    // the recent-list resolution and the panel model's pin resolution do not
-    // each linear-scan the whole catalog (O(recent_count x catalog) and
-    // O(pin_count x catalog) on the ShowPanel hot path). The keys are views
-    // into the current snapshot vector, which RebuildMerged replaces wholesale
-    // on the next completed generation, so the index lives only for the
-    // duration of this function: set before the first RefreshRows trigger
-    // (RefreshPins -> SetPins), cleared after SetRecent.
-    std::unordered_map<std::wstring_view, std::size_t> snapshot_index;
-    snapshot_index.reserve(g_refresh->Snapshot().size());
-    for (std::size_t i = 0; i < g_refresh->Snapshot().size(); ++i) {
-        snapshot_index.emplace(g_refresh->Snapshot()[i].stable_id, i);
-    }
-    g_model->SetCatalogIndex(&snapshot_index);
-    // Pins are loaded first because they feed the is_pinned stamp.
-    RefreshPins();
-    // NR-061: drops usage records for apps no longer in the catalog before
-    // ranking runs, so an uninstalled app cannot reappear in the recent region
-    // with its old score after a reinstall. Guarded on a non-empty snapshot:
-    // reconciling against an empty one during startup would wipe every record.
-    if (!g_refresh->Snapshot().empty() && g_usage->Reconcile(g_refresh->Snapshot())) {
-        g_usage->Save();
-    }
-    StampRankingFields();
-    g_model->SetCatalog(&g_refresh->MutableSnapshot());
-    std::vector<nimblerun::UsageRecord> recent_records = g_usage->Recent(g_settings.recent_count);
-    std::vector<nimblerun::AppEntry> recent_entries;
-    recent_entries.reserve(recent_records.size());
-    for (const nimblerun::UsageRecord& record : recent_records) {
-        const auto found = snapshot_index.find(record.stable_id);
-        if (found != snapshot_index.end()) {
-            recent_entries.push_back(g_refresh->Snapshot()[found->second]);
-        }
-    }
-    // SetRecent is last, so its RefreshRows is the one that decides the visible
-    // rows; RefreshPins above already handed the pin list to the model.
-    g_model->SetRecent(std::move(recent_entries));
-    // NR-083: the index views die with this function's snapshot reference;
-    // drop the hint so no later RefreshRows dereferences it.
-    g_model->SetCatalogIndex(nullptr);
+    const auto result = g_snapshot_assembler->Refresh();
+    HandlePinLoadResult(result);
     SyncAccessibility(g_main_window);
+}
+
+void UpdateSnapshotRanking(bool pins_changed) {
+    if (g_snapshot_assembler) {
+        g_snapshot_assembler->OnPinsChanged(pins_changed);
+    }
 }
 
 // NR-100: the single post-generation-completion choke point. Runs only when the
@@ -2220,12 +2140,9 @@ void ShowItemMenu(HWND window, int cell, POINT screen_pos) {
                         static_cast<std::int64_t>(std::time(nullptr)));
         }
         if (g_pins->Save()) {
-            // The catalog's is_pinned stamp drives the §4.5 pinned-first
-            // tie-break in search results, so it has to follow the store.
-            StampRankingFields();
-            // Refresh just the pin region: SetPins rebuilds the empty-query
-            // rows so the entry moves into/out of the pinned region.
-            g_model->SetPins(g_pins->Records());
+            // Refresh the derived ranking fields and pin region through the
+            // same assembler path used by drag reorder.
+            UpdateSnapshotRanking(true);
             // NR-031: the pin count drives the derived LRU cap; re-derive it.
             if (g_icon_cache) {
                 g_icon_cache->SetMaxItems(nimblerun::IconCacheCapacityFor(
@@ -2795,7 +2712,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
                         entry == -1 ? row : entry)].stable_id);
                 }
                 if (g_pins && g_pins->ReorderPresent(order) && g_pins->Save()) {
-                    g_model->SetPins(g_pins->Records());
+                    UpdateSnapshotRanking(true);
                 }
             }
             // Else: dragging and dropped outside the pinned region (gap < 0)
@@ -3184,8 +3101,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         LogStoreLoad(L"usage_load", StoreLoadResultName(usage_result));
     }
 
-    // NR-018: the pin store is reloaded and reconciled in RefreshPins(); only
-    // the (non-owning) pointer is kept so the model and host share one store.
+    // NR-018/NR-134: the assembler owns pin loading, reconciliation, ranking,
+    // and panel publication; the host keeps only non-owning store pointers for
+    // launch and explicit pin-edit paths.
     nimblerun::PinStore pins(data_directory);
     g_pins = &pins;
 
@@ -3194,6 +3112,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     // NR-029: the empty-query grid is a fixed 6-column layout (design-spec
     // §4.9); the constant is set once and Columns() switches by query state.
     model.SetGridColumns(nimblerun::layout::kGridColumns);
+    nimblerun::CatalogSnapshotAssembler snapshot_assembler(
+        refresh, usage, pins, model, g_settings);
+    g_snapshot_assembler = &snapshot_assembler;
     RefreshPanelSnapshot();
 
     // NR-012: bounded decoded-bitmap cache + Shell-backed provider. NR-032: the

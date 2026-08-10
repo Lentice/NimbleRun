@@ -170,7 +170,7 @@
 | NR-131 | Token 交接註冊表收斂為模組，rebuild 停止借用 icon worker 的 mutex | 3 | `done` | NR-077, NR-127 | [NR-131](work-items/NR-131-handoff-registry-module.md) |
 | NR-132 | Rebuild 編排抽成 RebuildPipeline（九個全域／五啟動點／四完成點） | 3 | `done` | NR-131, NR-100, NR-115, NR-116, NR-118, NR-123, NR-130 | [NR-132](work-items/NR-132-rebuild-pipeline-module.md) |
 | NR-133 | Slot 幾何單一來源 `SlotRect`／`SlotAtPointDip`（四份拷貝、footer 界已分歧） | 3 | `done` | NR-064, NR-082, NR-120 | [NR-133](work-items/NR-133-slot-geometry-single-source.md) |
-| NR-134 | Snapshot 組裝順序契約要有擁有者：`CatalogSnapshotAssembler` | 3 | `ready` | NR-061, NR-072, NR-083, NR-116 | [NR-134](work-items/NR-134-snapshot-assembly-module.md) |
+| NR-134 | Snapshot 組裝順序契約要有擁有者：`CatalogSnapshotAssembler` | 3 | `done` | NR-061, NR-072, NR-083, NR-116 | [NR-134](work-items/NR-134-snapshot-assembly-module.md) |
 | NR-135 | `wWinMain` RAII 收尾（`HandleGuard`＋`ComGuard`）與刪除 `message_loop.h` | 3 | `ready` | NR-051, NR-117 | [NR-135](work-items/NR-135-winmain-raii-and-message-loop-inline.md) |
 | NR-136 | 釘選拖曳狀態機收斂為 `PinDragState`（六全域／五 handler／四份重置） | 3 | `ready` | NR-039, NR-046 | [NR-136](work-items/NR-136-pin-drag-state-module.md) |
 | NR-137 | 兩份逐字相同的遞迴目錄走訪收斂為 `DirectoryWalker`（同一 bug 修過兩次） | 2 | `done` | NR-063, NR-091, NR-092, NR-098, NR-124 | [NR-137](work-items/NR-137-directory-walker-module.md) |

@@ -42,6 +42,10 @@ public:
     // hint (pin resolution falls back to the linear scan).
     void SetCatalogIndex(const std::unordered_map<std::wstring_view, std::size_t>* index);
 
+    // NR-134: exposes the borrowed-index state so the assembler's lifetime
+    // contract can be asserted without reaching into model internals.
+    bool HasCatalogIndex() const { return catalog_index_ != nullptr; }
+
     // Replaces the recent list (used when usage changes or a snapshot swaps).
     void SetRecent(std::vector<AppEntry> recent);
 
