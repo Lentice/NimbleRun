@@ -82,4 +82,21 @@ rg -n "kDebounceMs" src/catalog/catalog_refresh.cpp
 # expect: 只在 DueSources（與 helper）出現
 ```
 
+## Handoff 交接備註
+
+完成於 2026-08-10（NR-139 commit 8455e4a 之後）：
+
+- 實作變更僅兩檔：`src/catalog/catalog_refresh.cpp`、`src/catalog/catalog_refresh.h`。
+  - `HasDueRebuild` 收斂為 `return !DueSources(now_ms).empty();`（刪除逐字重複的迴圈本體）。
+  - 新增私有成員 `ClearPendingIfEventUnchanged(CatalogSource, std::int64_t snapshot_value)`，
+    `ApplySourceResult`／`ApplySourceFailure` 各改一行呼叫（`ClearPendingIfEventUnchanged(source, snapshot->second)`）。
+    snapshot 值由呼叫端傳入，NR-139 的 `.find()` forged-message guard 與 `.end()` 早退留在兩個
+    Apply 內原封不動，防偽保護未被抽走。
+  - NR-065 註解（合併兩份措辭）搬進 helper；`rebuild_pipeline.cpp` 未動。
+- 驗證：Release（Ninja + llvm-mingw）build 零新增 warning；full `ctest` 31/31 全綠（數量不變）；
+  聚焦 `-R "catalog_refresh|rebuild_pipeline"` 2/2 全綠。`rg kDebounceMs` 僅命中 DueSources 的
+  predicate 一處（helper 不觸及 debounce）。
+- 行為零變更：generation 語意、debounce 語意、BeginGeneration snapshot、NR-065 event-clear
+  語意皆由既有測試覆蓋且未改動。未新增測試（純重構）。
+
 完成後在文件底部補齊本 item 的 Handoff 交接備註。

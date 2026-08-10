@@ -140,6 +140,10 @@ public:
 
 private:
     void RebuildMerged();
+    // NR-065: clear pending_ only when no event arrived after the scan started
+    // (the BeginGeneration timestamp snapshot is unchanged). Shared by
+    // ApplySourceResult and ApplySourceFailure.
+    void ClearPendingIfEventUnchanged(CatalogSource source, std::int64_t snapshot_value);
 
     std::unordered_map<CatalogSource, std::vector<AppEntry>> source_entries_;
     std::unordered_map<CatalogSource, bool> pending_;

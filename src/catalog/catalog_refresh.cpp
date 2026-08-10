@@ -28,15 +28,7 @@ void CatalogRefreshCoordinator::MarkSourceFullRescan(CatalogSource source) {
 }
 
 bool CatalogRefreshCoordinator::HasDueRebuild(std::int64_t now_ms) const {
-    for (const CatalogSource source : kSources) {
-        const auto event = last_event_ms_.find(source);
-        if (pending_.count(source) != 0 && pending_.at(source) &&
-            event != last_event_ms_.end() &&
-            (event->second == kNever || now_ms - event->second >= kDebounceMs)) {
-            return true;
-        }
-    }
-    return false;
+    return !DueSources(now_ms).empty();
 }
 
 std::vector<CatalogSource> CatalogRefreshCoordinator::DueSources(std::int64_t now_ms) const {
@@ -100,6 +92,21 @@ std::uint64_t CatalogRefreshCoordinator::BeginGeneration(std::vector<CatalogSour
     return generation_;
 }
 
+void CatalogRefreshCoordinator::ClearPendingIfEventUnchanged(
+    CatalogSource source, std::int64_t snapshot_value) {
+    // NR-065: clear pending only when no event arrived after the scan started
+    // (the BeginGeneration timestamp snapshot is unchanged). An event mid-scan
+    // keeps pending set, and the existing 500 ms debounce timer picks the
+    // source up for a second, fresher rebuild instead of dropping the change;
+    // a failed scan must not drop an in-flight event either.
+    const auto event = last_event_ms_.find(source);
+    const std::int64_t current =
+        event == last_event_ms_.end() ? kNoEventSentinel : event->second;
+    if (current == snapshot_value) {
+        pending_[source] = false;
+    }
+}
+
 bool CatalogRefreshCoordinator::ApplySourceResult(std::uint64_t generation,
                                                   CatalogSource source,
                                                   std::vector<AppEntry> entries,
@@ -121,16 +128,7 @@ bool CatalogRefreshCoordinator::ApplySourceResult(std::uint64_t generation,
     generation_diagnostics_.corrupt_links += diagnostics.corrupt_links;
     generation_diagnostics_.skipped_directories += diagnostics.skipped_directories;
     source_entries_[source] = std::move(entries);
-    // NR-065: clear pending only when no event arrived after the scan started
-    // (the BeginGeneration timestamp snapshot is unchanged). An event mid-scan
-    // keeps pending set, and the existing 500 ms debounce timer picks the
-    // source up for a second, fresher rebuild instead of dropping the change.
-    const auto event = last_event_ms_.find(source);
-    const std::int64_t current =
-        event == last_event_ms_.end() ? kNoEventSentinel : event->second;
-    if (current == snapshot->second) {
-        pending_[source] = false;
-    }
+    ClearPendingIfEventUnchanged(source, snapshot->second);
     received_[source] = true;
     if (GenerationComplete(generation)) {
         RebuildMerged();
@@ -149,14 +147,7 @@ bool CatalogRefreshCoordinator::ApplySourceFailure(std::uint64_t generation,
     if (snapshot == generation_event_snapshot_.end()) {
         return false;
     }
-    // NR-065: same conditional clear as ApplySourceResult -- a failure must not
-    // drop an event that arrived while the failed scan was in flight.
-    const auto event = last_event_ms_.find(source);
-    const std::int64_t current =
-        event == last_event_ms_.end() ? kNoEventSentinel : event->second;
-    if (current == snapshot->second) {
-        pending_[source] = false;
-    }
+    ClearPendingIfEventUnchanged(source, snapshot->second);
     received_[source] = true;  // the source's old entries stay; others still apply
     if (GenerationComplete(generation)) {
         RebuildMerged();
