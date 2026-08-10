@@ -29,6 +29,7 @@ void TestRegistry() {
     const auto clear_one = registry.Register(std::make_unique<Value>(1));
     const auto clear_two = registry.Register(std::make_unique<Value>(2));
     registry.Clear();
+    Expect(registry.Empty(), "clear releases every value");
     Expect(registry.Take(clear_one) == nullptr && registry.Take(clear_two) == nullptr,
            "clear releases all values");
 

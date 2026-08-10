@@ -643,11 +643,16 @@ void TestFailedPostErasesHandoffAndLeaksNothing() {
             std::lock_guard<std::mutex> lock(nimblerun::g_icon_dropped_keys_mutex);
             dropped = !nimblerun::g_icon_dropped_keys.empty();
         }
-        if (dropped || GetTickCount() >= drain_deadline) {
+        if (nimblerun::g_icon_handoffs.Empty() && dropped) {
+            break;
+        }
+        if (GetTickCount() >= drain_deadline) {
             break;
         }
         Sleep(2);
     }
+    Expect(nimblerun::g_icon_handoffs.Empty(),
+           "failed post erases the icon handoff payload");
     std::set<std::wstring> pending{L"gone|48"};
     for (const std::wstring& key : nimblerun::TakeIconDroppedKeys()) {
         pending.erase(key);
