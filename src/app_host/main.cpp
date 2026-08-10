@@ -680,6 +680,12 @@ bool CreateDeviceResources(HWND window) {
     return brushes;
 }
 
+float ClientHeightDip(HWND window, float scale) {
+    RECT client{};
+    GetClientRect(window, &client);
+    return static_cast<float>(std::max(0L, client.bottom - client.top)) / scale;
+}
+
 // NR-020/NR-029: model item index for a physical client point, or -1 when it
 // is not on any visible row (list) or cell (grid). Grid cells map through
 // FirstVisibleRow() + row_index * Columns() + col_index; cells past RowCount()
@@ -700,10 +706,7 @@ int CellAtPoint(HWND window, int x, int y) {
     // hit-test SlotAtPointDip (NR-133), the same geometry the renderer paints;
     // the caller converts physical px to DIP via layout.scale and applies the
     // model's FirstVisibleRow() offset and Rows().size() bounds below.
-    RECT client{};
-    GetClientRect(window, &client);
-    const float client_height_dip =
-        static_cast<float>(std::max(0L, client.bottom - client.top)) / layout.scale;
+    const float client_height_dip = ClientHeightDip(window, layout.scale);
     const int slot = nimblerun::layout::SlotAtPointDip(
         static_cast<float>(x) / layout.scale,
         static_cast<float>(y) / layout.scale,
@@ -712,7 +715,7 @@ int CellAtPoint(HWND window, int x, int y) {
         return -1;
     }
     const int index = g_model->FirstVisibleRow() + slot;
-    return index < static_cast<int>(g_model->Rows().size()) ? index : -1;
+    return index >= 0 && index < static_cast<int>(g_model->Rows().size()) ? index : -1;
 }
 
 // NR-046: pinned row count of the current view, 0 when there is no pinned
@@ -760,8 +763,6 @@ void UpdateViewportRows(HWND window) {
     if (!g_model) {
         return;
     }
-    RECT client{};
-    GetClientRect(window, &client);
     const nimblerun::layout::LayoutPx layout =
         nimblerun::layout::LayoutForDpi(GetDpiForWindow(window));
     // NR-120: the row area ends at the footer band's top edge, never the client
@@ -769,8 +770,7 @@ void UpdateViewportRows(HWND window) {
     // below 488 DIP and the path bar + key hints stay visible (design-spec
     // §4.2/§4.9). Pure DIP geometry, matching the D2D renderer's coordinate
     // space; a full-height client yields the same 8 list / 4 grid rows.
-    const float client_height_dip =
-        static_cast<float>(std::max(0L, client.bottom - client.top)) / layout.scale;
+    const float client_height_dip = ClientHeightDip(window, layout.scale);
     g_model->SetViewportRows(nimblerun::layout::ViewportRowsForHeightDip(
         client_height_dip, g_model->Columns()));
     SyncAccessibility(window);
@@ -823,11 +823,7 @@ void SyncAccessibility(HWND window) {
     // NR-120: the footer band is pinned to the client bottom (same rule the
     // renderer and UpdateViewportRows use), so the reported bounds match where
     // the band actually paints when the panel is clamped below 488 DIP.
-    RECT client_rect{};
-    GetClientRect(window, &client_rect);
-    const float client_height_dip =
-        static_cast<float>(std::max(0L, client_rect.bottom - client_rect.top)) /
-        layout.scale;
+    const float client_height_dip = ClientHeightDip(window, layout.scale);
     const float footer_top_dip = nimblerun::layout::FooterTopDip(client_height_dip);
     const float footer_bottom_dip = footer_top_dip +
         (nimblerun::layout::kPanelHeightDip - nimblerun::layout::kFooterTopDip);
@@ -2697,8 +2693,7 @@ void OpenKeyboardItemMenu(HWND window) {
     }
     RECT client{};
     GetClientRect(window, &client);
-    const float client_height_dip =
-        static_cast<float>(std::max(0L, client.bottom - client.top)) / layout.scale;
+    const float client_height_dip = ClientHeightDip(window, layout.scale);
     const nimblerun::layout::SlotRectDip slot = nimblerun::layout::SlotRect(
         rel, g_model->Columns(), client_height_dip);
     int left = static_cast<int>(std::lround(slot.left * layout.scale));

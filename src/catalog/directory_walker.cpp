@@ -1,11 +1,9 @@
 #include "catalog/directory_walker.h"
 
 namespace nimblerun {
-namespace {
-
-bool Walk(const std::wstring& directory, const WalkOptions& options,
-          const FileVisitor& on_file,
-          const MissingDirectoryHook& on_missing_directory) {
+bool WalkDirectory(const std::wstring& directory, const WalkOptions& options,
+                   const FileVisitor& on_file,
+                   const DirectoryUnavailableHook& on_directory_unavailable) {
     if (options.cancel && options.cancel->load()) {
         return false;  // NR-098: cancelled before this subtree: report failure
     }
@@ -13,8 +11,8 @@ bool Walk(const std::wstring& directory, const WalkOptions& options,
     WIN32_FIND_DATAW find_data{};
     const HANDLE find = FindFirstFileW(pattern.c_str(), &find_data);
     if (find == INVALID_HANDLE_VALUE) {
-        if (on_missing_directory) {
-            on_missing_directory();
+        if (on_directory_unavailable) {
+            on_directory_unavailable();
         }
         return true;  // missing/unreadable directory: skip this subtree
     }
@@ -35,7 +33,7 @@ bool Walk(const std::wstring& directory, const WalkOptions& options,
                 (find_data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0) {
                 // ponytail: junctions/symlinks are not followed so a loop cannot
                 // recurse forever; reparse-point app dirs are not a real source.
-                if (!Walk(full, options, on_file, on_missing_directory)) {
+                if (!WalkDirectory(full, options, on_file, on_directory_unavailable)) {
                     failed = true;  // NR-091/092: child failure reaches caller
                 }
             }
@@ -51,14 +49,6 @@ bool Walk(const std::wstring& directory, const WalkOptions& options,
     }
     FindClose(find);
     return !failed;
-}
-
-} // namespace
-
-bool WalkDirectory(const std::wstring& directory, const WalkOptions& options,
-                   const FileVisitor& on_file,
-                   const MissingDirectoryHook& on_missing_directory) {
-    return Walk(directory, options, on_file, on_missing_directory);
 }
 
 } // namespace nimblerun

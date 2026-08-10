@@ -148,3 +148,12 @@ rg -n "kFooterTopDip|kCellWidthDip|kCellHeightDip|kGridLeftDip|kRowHeightDip" sr
   `nimblerun_lifecycle_check` 通過。完整 CTest 在受限 sandbox 下有既存 Temp 目錄
   寫入權限失敗，另有 `nimblerun_startup_option_test` 因相同環境限制失敗，非本 item
   編譯或行為回歸。
+- main.cpp 的幾何常數殘留不屬於 slot 幾何：`:2007` 是 icon 在 SlotRect 內的置中，
+  `:2089`／`:2195` 是空狀態提示的行高，`:2139`／`:2158`／`:2182` 是 tile、文字與
+  quick-select 內距，`:2229`／`:2322` 是 footer 與 path bar 的群組排版；它們沒有
+  再決定 slot 的外框或命中邊界。
+- 144 DPI 的 px→DIP 轉換現在與 D2D 的 DIP geometry 共用同一個浮點路徑，邊界像素
+  可能比舊的整數除法落入相鄰 slot；這是消除 px/DIP 分歧的刻意行為收斂，與 clamp
+  footer 一樣屬於本 item 的正確性修正，不是隨機 UI 變更。
+- `SlotRect` 的 `client_height_dip` 是 item 明確要求的對稱簽章，讓正向幾何與反向
+  命中 API 共享相同 client-height 輸入；正向矩形本身不需讀取它，故保留 `(void)`。

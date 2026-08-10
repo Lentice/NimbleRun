@@ -41,7 +41,7 @@ user_folder `:81-84` 計 `skipped_directories`，NR-124）。
    **純值＋Win32 檔案 API，無 Shell COM、無 HWND**。
 4. 介面用 **per-file visitor**（`std::function` 或 template callback，擇一並在交接區說明取捨；
    熱路徑上 template 較省，但兩個呼叫點都不是內迴圈）。缺失目錄的 hook 用一個可選的
-   `on_missing_directory` callback 涵蓋 user_folder 的計數需求；start_menu 不傳。
+   `on_directory_unavailable` callback 涵蓋 user_folder 的計數需求；start_menu 不傳。
 5. **行為零變更**，三條語意逐條原封搬移，**註解連同 NR-091／NR-092／NR-098 編號一起帶走**。
 6. 不預留「將來第三個來源」的任何參數。`recursive` 旗標是**現有需求**（user_folder 每個 root
    有自己的 recursive 設定，start_menu 恆為 true），不是投機。
@@ -86,7 +86,7 @@ user_folder `:81-84` 計 `skipped_directories`，NR-124）。
    // 回傳 false 只在「走訪開始但未乾淨結束」（NR-091/092）或取消（NR-098）。
    bool WalkDirectory(const std::wstring& directory, const WalkOptions& options,
                       const FileVisitor& on_file,
-                      const MissingDirectoryHook& on_missing = {});
+                      const DirectoryUnavailableHook& on_directory_unavailable = {});
    ```
 
 2. 兩個枚舉器改用它，各自只留過濾與 `ProcessFile`；兩份走訪本體刪除（各約 40 行）。
@@ -94,7 +94,7 @@ user_folder `:81-84` 計 `skipped_directories`，NR-124）。
    - 正常遞迴走訪回傳 true 且拜訪到所有檔案
    - `recursive=false` 時不進子目錄
    - **走訪中途取消**：回 false，且呼叫端不得提交部分結果（NR-098）
-   - 缺失／不可讀目錄：回 true（乾淨略過）且 `on_missing` 被呼叫一次（NR-063／NR-124）
+   - 缺失／不可讀目錄：回 true（乾淨略過）且 `on_directory_unavailable` 被呼叫一次（NR-063／NR-124）
    - reparse point 不被遞迴（若環境難以建立 junction，改以明確記錄的方式驗證分支，
      並在交接區寫明如何驗證）
    依 NR-055 的 list-plus-loop 註冊到 `tests/CMakeLists.txt`，依 NR-129 用 `test_util.h`。
@@ -136,9 +136,9 @@ rg -n "FindFirstFileW|FindNextFileW|ERROR_NO_MORE_FILES" src
 ```cpp
 struct WalkOptions { bool recursive = true; std::atomic<bool>* cancel = nullptr; };
 using FileVisitor = std::function<void(const std::wstring&, DWORD)>;
-using MissingDirectoryHook = std::function<void()>;
+using DirectoryUnavailableHook = std::function<void()>;
 bool WalkDirectory(const std::wstring&, const WalkOptions&, const FileVisitor&,
-                   const MissingDirectoryHook& = {});
+                   const DirectoryUnavailableHook& = {});
 ```
 
 採用 `std::function` per-file visitor，因為 visitor 需要同時傳遞路徑與
