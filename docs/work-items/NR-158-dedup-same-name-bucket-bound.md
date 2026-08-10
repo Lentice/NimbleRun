@@ -74,4 +74,77 @@ ctest --test-dir build --output-on-failure
 ctest --test-dir build -R dedup --output-on-failure
 ```
 
-完成後在文件底部補齊本 item 的 Handoff 交接備註。
+## Handoff
+
+實作者需記錄：上限值與依據、超限路徑與既有歧義語意的對應、合法資料逐位元不變的證明、
+timing 量測（6k／20k，改動前後）、build／CTest 結果。
+
+### 交接區（2026-08-11，實作完成）
+
+**改了哪些檔**
+
+- `src/catalog/dedup.cpp` — 新增 `constexpr std::size_t kMaxSameNameRows = 5000;`
+  （anonymous namespace，含 NR-158 註解）；分桶掃描改為：桶內超過 5000 行的部分直接
+  `ambiguous[indices[x]] = true`（超限行逐行標記，無 pair 比較），僅前 5000 行保留既有
+  兩兩比較（`y` 上限同樣截在 5000）。修正 `dedup.cpp:98` 原 ponytail 註解的數字謊言
+  （原宣稱「kMaxCacheRows 與 FR-003 的 5k 有界 n」，實際 cache 上限是 `kMaxCacheRows =
+  20000`）——註解重寫並引用 NR-158。
+- `tests/unit/identity_dedup_test.cpp` — 新增 `TestSameNameBucketBound`：6000 個同名 App
+  （stable_id 各異）有界時間完成；兩個 fixture 斷言守語意（見下）。
+- `docs/work-items.md` — NR-158 行 `ready` → `done`。
+- 本檔 Handoff 節（此交接區）。
+
+`src/catalog/catalog_cache.h`（`kMaxCacheRows` 未動）、`src/catalog/dedup.h`、
+`src/app_host/main.cpp` 皆未動。
+
+**上限值與依據**
+
+`kMaxSameNameRows = 5000`（item Decisions §1 定案值）。超過 5000 個同名 App 是畸形資料
+（FR-003 的合法枚舉量級是 <5k 總 catalog）；此守門只管延遲，不管資料——超限行直接走既有
+`UnjudgeableNameCollision` 分派（標 `ambiguous`、計入 `ambiguous_kept`），與「配對成功時
+歧義計數本來就會產生」同義，不改變合法資料的任何結果。
+
+**超限路徑與既有語意的對應（合法資料逐位元不變的證明）**
+
+改動只影響「桶內第 5001 行以後」的處理：桶 ≤ 5000 行時 `compared == indices.size()`，
+超限標記迴圈為空、兩兩比較迴圈與改動前逐位元相同（同一 predicate、同一 pair 子集），
+故 `ambiguous` 標記集合、`ambiguous_kept`、`removed_duplicates`、輸出順序皆不變——
+既有全部 dedup 案例（NR-121 的 `TestBucketedAmbiguityMatchesAllPairs` 參考實作比對、
+`TestPackagedAppAmbiguityKept`、verified/unverified 混合、順序案例）全綠即證明。
+stable_id 合併 pass（`Beats`）一字未動。
+
+`TestSameNameBucketBound` 兩段斷言：
+
+1. 6000 行全 path（無 Shell 側）：`ambiguous_kept == 1000`——前 5000 行與 pre-fix 相同
+   （全不標），1000 行超限是守門的直接標記（pre-fix 在此 fixture 為 0，故此斷言會攔截
+   移除守門的回歸）。
+2. 6000 行中第 0 行改為 AppsFolder（Shell 側）：`ambiguous_kept == 6000`——與 pre-fix
+   全對掃描的結果完全相同（該 Shell 行的 pair 標記全部前 5000 行，超限行已預標），證明
+   桶內比較語意未被守門破壞。
+
+**timing 量測（Release x64、LLVM-MinGW 22.1.8，同名桶、stable_id 為短字串）**
+
+獨立 probe（與測試同 flags：`-O3 -DNDEBUG -std=c++20 -Wall -Wextra -Wpedantic`）量測：
+
+| 輸入（全同名、distinct stable_id） | pre-fix | post-fix（本改動） |
+|---|---|---|
+| 6,000 行 | ≈ 36 ms（1,800 萬對） | ≈ 26 ms（1,250 萬對＋1,000 直接標記） |
+| 20,000 行（`kMaxCacheRows`） | ≈ 499 ms（2 億對） | ≈ 30 ms（1,250 萬對＋15,000 直接標記） |
+
+20k 行約 16.7 倍改善；比較次數與桶總大小無關（有界於 O(5000²)）。測試內實測 6,000 行
+27 ms（含測試 fixture 構建），門檻 `elapsed_us / 1000 < 1000`（1 s，約實測 37 倍餘裕）只攔截
+量級回歸——語意由 `ambiguous_kept` 斷言把守。真實 cache 的 stable_id 是 40+ 字元 hash，
+pre-fix 的 0.5–2 s 停頓估計即該輸入下的情況；post-fix 的比較次數與字串長度無關，收斂更快。
+
+**build／CTest 結果**
+
+- `cmake -S . -B build -G Ninja -D"CMAKE_TOOLCHAIN_FILE=cmake/llvm-mingw.cmake"
+  -DCMAKE_BUILD_TYPE=Release`：configure 成功。
+- `cmake --build build`：成功，**無任何 warning**（`-Wall -Wextra -Wpedantic`）。
+- `ctest --test-dir build --output-on-failure`：**31/31 全綠**（數量與改動前相同，
+  未新增測試 target——新案例加在既有 `nimblerun_identity_dedup_test` 內）。
+- `ctest --test-dir build -R dedup --output-on-failure`：**1/1 通過**。
+
+**未完成事項**
+
+- 手動驗收（真實畸形 catalog.cache 冷啟動）不屬 Agent 範圍。

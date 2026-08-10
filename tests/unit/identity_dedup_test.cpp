@@ -366,6 +366,47 @@ void TestDedup5000Timing() {
     Expect(elapsed_us / 1000 < 50, "5000-entry dedup stays under 50 ms");
 }
 
+// NR-158: a crafted catalog holding 6000 same-name apps (distinct stable ids)
+// must not stall the UI thread with the unbound in-bucket O(n^2) scan (18M
+// pairs at 6000 rows, ~200M at the kMaxCacheRows cap). The bucket cap marks
+// rows past kMaxSameNameRows ambiguous directly, bounding comparisons at
+// 5000^2/2. Legal data (<5000 same-name rows) is untouched: the first 5000
+// rows here carry exactly the marks the pre-fix scan gave them (all-path
+// rows: none), and the 1000 overflow rows are the guard's direct marks.
+void TestSameNameBucketBound() {
+    std::vector<AppEntry> big;
+    big.reserve(6000);
+    for (int i = 0; i < 6000; ++i) {
+        big.push_back(Entry(L"id" + std::to_wstring(i), L"App", AppSource::UserFolder,
+                            L"C:\\A\\app" + std::to_wstring(i) + L".exe"));
+    }
+
+    const auto start = steady_clock::now();
+    const DedupResult out = DeduplicateCatalog(big);
+    const auto elapsed_us =
+        duration_cast<microseconds>(steady_clock::now() - start).count();
+
+    std::wprintf(L"NR-158: DeduplicateCatalog over 6000 same-name entries took %lld us (%lld ms), kept %zu\n",
+                 elapsed_us, elapsed_us / 1000, out.entries.size());
+    Expect(out.entries.size() == 6000, "same-name bound: all distinct apps kept");
+    Expect(out.removed_duplicates == 0, "same-name bound: nothing removed");
+    Expect(out.ambiguous_kept == 1000, "same-name bound: overflow rows marked ambiguous");
+    Expect(elapsed_us / 1000 < 1000, "6000 same-name dedup stays under 1 s");
+
+    {
+        // One Shell-side row among the 6000: pre-fix that row's pairs mark
+        // every same-name entry ambiguous, and the bounded scan must land on
+        // the same count (its pairs mark all of the first 5000; the overflow
+        // rows are pre-marked).
+        std::vector<AppEntry> mixed = big;
+        mixed[0] = Entry(L"shell", L"App", AppSource::AppsFolder,
+                         L"shell:AppsFolder\\Microsoft.App_8wekyb3d8bbwe!App");
+        const DedupResult out = DeduplicateCatalog(mixed);
+        Expect(out.entries.size() == 6000, "same-name bound: mixed input keeps all");
+        Expect(out.ambiguous_kept == 6000, "same-name bound: Shell row marks everything");
+    }
+}
+
 } // namespace
 
 int wmain() {
@@ -382,6 +423,7 @@ int wmain() {
     TestEmptyInput();
     TestBucketedAmbiguityMatchesAllPairs();
     TestDedup5000Timing();
+    TestSameNameBucketBound();
     std::printf("NR-007 identity and dedup check PASSED\n");
     return 0;
 }

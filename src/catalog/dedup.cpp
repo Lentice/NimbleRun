@@ -10,6 +10,16 @@
 namespace nimblerun {
 namespace {
 
+// NR-158: latency guard for the name-collision scan. A same-name bucket of n
+// kept entries costs O(n^2) pair comparisons with no cap: a crafted
+// catalog.cache at the kMaxCacheRows = 20000 cap filled with one display_name
+// (distinct stable ids) is ~200M pairs, a 0.5-2 s UI-thread stall on cold
+// start and on each generation completion that retains cache rows. More than
+// 5000 apps sharing one display name is malformed data (FR-003's <5k scale),
+// so rows past this cap skip pair comparison and are marked ambiguous
+// directly, bounding the scan at O(kMaxSameNameRows^2).
+constexpr std::size_t kMaxSameNameRows = 5000;
+
 // Lower wins (better launch/icon quality, design-spec §FR-007). The AppsFolder
 // item is the Shell-canonical identity with high-quality icons; the user's own
 // Start Menu shortcut precedes a user-folder file, which precedes an all-users
@@ -95,14 +105,24 @@ DedupResult DeduplicateCatalog(const std::vector<AppEntry>& entries) {
     for (std::size_t i = 0; i < result.entries.size(); ++i) {
         buckets[ToLower(result.entries[i].display_name)].push_back(i);
     }
-    // ponytail: a pathological bucket of n same-named kept entries still costs
-    // O(n^2) trivial comparisons -- inherent, every such pair may be ambiguous.
-    // The cache row cap (kMaxCacheRows) and FR-003 bound n.
+    // NR-158: a same-name bucket past kMaxSameNameRows is malformed data (the
+    // cache row cap is kMaxCacheRows = 20000, not FR-003's 5k), so rows past
+    // it are marked ambiguous directly -- the UnjudgeableNameCollision
+    // disposition, exactly what a genuinely ambiguous pair would do -- instead
+    // of pair-compared. The residual in-bucket scan over the first
+    // kMaxSameNameRows stays pairwise because every such pair may genuinely be
+    // ambiguous; the cap bounds the whole bucket at O(kMaxSameNameRows^2).
     for (const auto& bucket : buckets) {
         const std::vector<std::size_t>& indices = bucket.second;
-        for (std::size_t x = 0; x < indices.size(); ++x) {
+        const std::size_t compared = indices.size() < kMaxSameNameRows
+                                         ? indices.size()
+                                         : kMaxSameNameRows;
+        for (std::size_t x = compared; x < indices.size(); ++x) {
+            ambiguous[indices[x]] = true;
+        }
+        for (std::size_t x = 0; x < compared; ++x) {
             const AppEntry& a = result.entries[indices[x]];
-            for (std::size_t y = x + 1; y < indices.size(); ++y) {
+            for (std::size_t y = x + 1; y < compared; ++y) {
                 const AppEntry& b = result.entries[indices[y]];
                 if (a.stable_id != b.stable_id &&
                     (a.source == AppSource::AppsFolder) !=
