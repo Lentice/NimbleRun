@@ -78,4 +78,30 @@ rg -n "g_diag = nullptr|kWatchChangedMessage" src/app_host/main.cpp
 # expect: g_diag = nullptr 在收尾一處；kWatchChangedMessage 的 drain 在 SetWatchSources 後
 ```
 
-完成後在文件底部補齊本 item 的 Handoff 交接備註。
+## Handoff（2026-08-10，NR-156 done）
+
+實作（2026-08-10）：
+
+- **（a）`g_diag` 收尾置空**：`wWinMain` 的 pipeline 收尾塊（NR-146 的 timeout
+  leak／正常 reset）之後、`com.reset()` 之前，`main.cpp:3280` 新增
+  `g_diag = nullptr;`（NR-156 註解引用 NR-146 契約）。置空點在 message loop 之後
+  的**最後一處 UI 執行緒使用**（`g_diag->Write` 最晚出現於 loop 內 `main.cpp:3228`）
+  之後，正常路徑無後續 `g_diag` 消費者。`on_exception_` 回呼
+  （`main.cpp:3072-3074`）內建 `if (g_diag)` null 檢查（已逐點確認
+  `rebuild_pipeline.cpp` 全數 `on_exception_()` 呼叫皆有 `if (on_exception_)` 守門，
+  回呼本體再守 `g_diag`），detached worker 晚到的 catch 路徑因此變 no-op。
+- **（b）舊 watch 索引 drain**：`StartWatchers` 簽名改為 `void StartWatchers(HWND
+  window)`（兩呼叫端 `main.cpp:2442` 設定套用路徑與 `main.cpp:3147` 啟動路徑都傳
+  `window`）。`SetWatchSources` 換表後、`g_watcher->SetRoots` 之前（`main.cpp:1303-1314`）
+  依 WM_DESTROY 形狀以 `PeekMessageW` 排空 `kWatchChangedMessage`（`MSG leftover{}`
+  + PM_REMOVE，同 `main.cpp:2831-2833` 的 icon drain）。drain 點與換表之間只可能由
+  仍持舊 root 的 watcher thread post 訊息，故排空的恰是舊 set 的訊息；`SetRoots` 之後
+  新訊息帶新表索引。未加 watch-generation 戳記（依決策 2）。
+- **驗證**：Release Ninja llvm-mingw configure＋build 通過，零新增 warning（唯一
+  warning 為既有 `main.cpp:1395` 未使用 `target_size`，stash 對照確認與本 item 無
+  關，本 item 後行號位移至 1405）；`ctest --test-dir build --output-on-failure`：
+  31/31 全綠（數量不變）。grep 驗證：`g_diag = nullptr` 於 `main.cpp:3280`；
+  drain loop 於 `main.cpp:1310-1313`（`SetWatchSources` 後、`SetRoots` 前）。
+- **未完成風險**：無。兩處皆一行級防護，正常路徑（無設定變更、無 hung）零行為變更。
+  已知窄窗口：逾時路徑下 detached worker 在 `wWinMain` 已置空 `g_diag` 但 process
+  退出前仍會碰到 null 回呼——該行為是 NR-146 已決策的契約（release 即契約）。

@@ -1273,7 +1273,7 @@ void StartRebuild(HWND, std::vector<nimblerun::CatalogSource> sources) {
 
 // NR-011: (re)starts directory watchers and records an explicit index-to-source
 // table. The table retains entries even when CatalogWatcher skips a failed root.
-void StartWatchers() {
+void StartWatchers(HWND window) {
     if (!g_watcher) return;
     std::vector<std::wstring> roots;
     std::vector<bool> recursive;
@@ -1301,6 +1301,16 @@ void StartWatchers() {
         add_root(root.path, root.recursive, nimblerun::CatalogSource::UserFolder);
     }
     if (g_rebuild_pipeline) g_rebuild_pipeline->SetWatchSources(std::move(sources));
+    // NR-156: kWatchChangedMessage carries a 1-based index into the watch
+    // table. After a settings apply the table has been swapped but messages
+    // queued by the OLD watch set may still be pending; dispatching them
+    // against the new table rebuilds the wrong source. Drain them between the
+    // table swap and the root swap (mirrors the WM_DESTROY drain shape below;
+    // no generation stamps -- the drain closes the window).
+    MSG leftover{};
+    while (PeekMessageW(&leftover, window, kWatchChangedMessage,
+                        kWatchChangedMessage, PM_REMOVE)) {
+    }
     g_watcher->SetRoots(roots, recursive);
 }
 
@@ -2439,7 +2449,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
             g_settings = reloaded;
             g_hide_after_launch = reloaded.hide_after_launch;
             if (applied) {
-                StartWatchers();
+                StartWatchers(window);
                 RefreshPanelSnapshot();
                 // NR-031: recent_count (and the pin list) changed the derived
                 // LRU cap; re-derive it after settings are applied.
@@ -3134,7 +3144,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     // NR-011: directory watchers over Programs + configured user folders.
     nimblerun::CatalogWatcher watcher(window, kWatchChangedMessage);
     g_watcher = &watcher;
-    StartWatchers();
+    StartWatchers(window);
 
     // Search input as a child EDIT control; subclassed to route keys to the model.
     // NR-023: created at the origin (geometry is set by RepositionSearchEdit
@@ -3262,6 +3272,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     } else {
         g_rebuild_pipeline.reset();
     }
+    // NR-156: g_diag points at a stack local destroyed when wWinMain returns.
+    // NR-146's timeout path leaked the pipeline so detached workers keep a live
+    // `this`, but their on_exception_ callback (main.cpp:3072) dereferences
+    // g_diag; null it after the last UI-thread use so a late callback becomes a
+    // no-op (the callback checks for null) instead of touching freed memory.
+    g_diag = nullptr;
     com.reset();
     return static_cast<int>(message.wParam);
 }
