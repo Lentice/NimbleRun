@@ -1,3 +1,5 @@
+#include "test_util.h"
+
 #include "pins/pin_store.h"
 
 #include "app_host/panel_model.h"
@@ -22,13 +24,6 @@ using nimblerun::PinLoadResult;
 using nimblerun::PinStore;
 
 namespace {
-
-void Expect(bool condition, const char* message) {
-    if (!condition) {
-        std::fprintf(stderr, "FAILED: %s\n", message);
-        std::exit(1);
-    }
-}
 
 std::wstring MakeTempDir(const char* label) {
     wchar_t buffer[MAX_PATH];

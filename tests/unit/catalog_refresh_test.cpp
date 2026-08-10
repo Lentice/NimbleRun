@@ -1,3 +1,5 @@
+#include "test_util.h"
+
 #include "catalog/catalog_cache.h"
 #include "catalog/catalog_refresh.h"
 #include "search/search_engine.h"
@@ -22,13 +24,6 @@ using nimblerun::LoadCatalogCache;
 using nimblerun::SaveCatalogCache;
 
 namespace {
-
-void Expect(bool condition, const char* message) {
-    if (!condition) {
-        std::fprintf(stderr, "FAILED: %s\n", message);
-        std::exit(1);
-    }
-}
 
 AppEntry Entry(std::wstring id, AppSource source) {
     AppEntry entry;

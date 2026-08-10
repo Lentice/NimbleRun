@@ -1,3 +1,5 @@
+#include "test_util.h"
+
 #include "catalog/start_menu_catalog.h"
 
 #include <windows.h>
@@ -25,13 +27,6 @@ using nimblerun::EnumerateProgramsDirectory;
 using nimblerun::EnumerateStartMenuCatalog;
 
 namespace {
-
-void Expect(bool condition, const char* message) {
-    if (!condition) {
-        std::fprintf(stderr, "FAILED: %s\n", message);
-        std::exit(1);
-    }
-}
 
 std::wstring MakeTempDir(const char* label) {
     wchar_t buffer[MAX_PATH];

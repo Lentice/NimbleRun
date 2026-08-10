@@ -4,6 +4,8 @@
 // and the provider -- a second session on the same pack never touches the
 // provider. The store points at %TEMP%\NimbleRunTest\<pid>, never the real
 // %LOCALAPPDATA%\NimbleRun.
+#include "test_util.h"
+
 #include "icons/icon_cache.h"
 #include "icons/icon_pack_format.h"
 #include "icons/icon_store.h"
@@ -46,13 +48,6 @@ namespace {
 constexpr wchar_t kTestClass[] = L"NimbleRun.IconWorkerTest";
 constexpr UINT kReadyMessage = WM_APP + 100;
 HINSTANCE g_instance = nullptr;
-
-void Expect(bool condition, const char* message) {
-    if (!condition) {
-        std::fprintf(stderr, "FAILED: %s\n", message);
-        std::exit(1);
-    }
-}
 
 AppEntry Entry(const std::wstring& stable_id) {
     AppEntry entry;

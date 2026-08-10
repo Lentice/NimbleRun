@@ -1,3 +1,5 @@
+#include "test_util.h"
+
 #include "settings/settings_store.h"
 
 #include "catalog/catalog_cache.h"
@@ -31,13 +33,6 @@ using nimblerun::VersionedReadStatus;
 using nimblerun::UserDataDirFromLocalAppData;
 
 namespace {
-
-void Expect(bool condition, const char* message) {
-    if (!condition) {
-        std::fprintf(stderr, "FAILED: %s\n", message);
-        std::exit(1);
-    }
-}
 
 std::wstring MakeTempDir(const char* label) {
     wchar_t buffer[MAX_PATH];

@@ -1,3 +1,5 @@
+#include "test_util.h"
+
 #include "search/search_engine.h"
 
 #include <chrono>
@@ -21,18 +23,6 @@ using std::chrono::steady_clock;
 namespace {
 
 int g_failures = 0;
-
-// NR-048: the repo-standard check. The standard assert macro compiles out
-// under the -DNDEBUG that CMAKE_BUILD_TYPE=Release sets, which is exactly the
-// configuration AGENTS.md tells you to validate with -- so this file's checks
-// used to vanish in the only build that matters. Never reintroduce the macro
-// here.
-void Expect(bool condition, const char* message) {
-    if (!condition) {
-        std::fprintf(stderr, "FAIL: %s\n", message);
-        ++g_failures;
-    }
-}
 
 } // namespace
 

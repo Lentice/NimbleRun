@@ -1,3 +1,5 @@
+#include "test_util.h"
+
 #include "catalog/stable_id.h"
 #include "catalog/user_folder_catalog.h"
 #include "settings/settings_store.h"
@@ -24,13 +26,6 @@ using nimblerun::NormalizePathKey;
 using nimblerun::Settings;
 
 namespace {
-
-void Expect(bool condition, const char* message) {
-    if (!condition) {
-        std::fprintf(stderr, "FAILED: %s\n", message);
-        std::exit(1);
-    }
-}
 
 std::wstring MakeTempDir(const char* label) {
     wchar_t buffer[MAX_PATH];

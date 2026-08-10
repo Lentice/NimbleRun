@@ -8,6 +8,8 @@
 // without modifiers is invalid input, and pure-modifier presses produce
 // nothing.
 
+#include "test_util.h"
+
 #include "settings/hotkey_capture.h"
 
 #include "settings/settings_editor.h"  // FormatHotkey / ParseHotkey
@@ -21,13 +23,6 @@ namespace {
 
 using nimblerun::HotkeyBinding;
 using nimblerun::HotkeyCaptureState;
-
-void Expect(bool condition, const char* message) {
-    if (!condition) {
-        std::fprintf(stderr, "FAILED: %s\n", message);
-        std::exit(1);
-    }
-}
 
 // Feeds a full sequence and returns the captured binding (or asserts there
 // was none).

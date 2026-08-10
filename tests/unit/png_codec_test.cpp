@@ -1,3 +1,5 @@
+#include "test_util.h"
+
 #include "icons/png_codec.h"
 
 #include <windows.h>
@@ -14,13 +16,6 @@ using nimblerun::EncodeIconPng;
 using nimblerun::IconBitmap;
 
 namespace {
-
-void Expect(bool condition, const char* message) {
-    if (!condition) {
-        std::fprintf(stderr, "FAILED: %s\n", message);
-        std::exit(1);
-    }
-}
 
 std::uint32_t Alpha(std::uint32_t px) { return (px >> 24) & 0xFFu; }
 std::uint32_t Red(std::uint32_t px) { return (px >> 16) & 0xFFu; }

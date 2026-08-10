@@ -1,3 +1,5 @@
+#include "test_util.h"
+
 #include "catalog/stable_id.h"
 #include "launch/shell_launch.h"
 
@@ -19,13 +21,6 @@ using nimblerun::LaunchResult;
 using nimblerun::NormalizePathKey;
 
 namespace {
-
-void Expect(bool condition, const char* message) {
-    if (!condition) {
-        std::fprintf(stderr, "FAILED: %s\n", message);
-        std::exit(1);
-    }
-}
 
 std::wstring MakeTempDir(const char* label) {
     wchar_t buffer[MAX_PATH];

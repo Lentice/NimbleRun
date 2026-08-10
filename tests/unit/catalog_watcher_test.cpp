@@ -3,6 +3,8 @@
 // Win32 test with a message-only window and a temp directory; no visible UI.
 // Post-failure retention is exercised by filling the target thread's message
 // queue, which makes the next PostMessageW fail without changing the watcher.
+#include "test_util.h"
+
 #include "app_host/catalog_watcher.h"
 
 #include <windows.h>
@@ -20,13 +22,6 @@ constexpr wchar_t kTestClass[] = L"NimbleRun.CatalogWatcherTest";
 constexpr UINT kWatchChangedMessage = WM_APP + 100;
 constexpr UINT kFillerMessage = WM_APP + 101;
 HINSTANCE g_instance = nullptr;
-
-void Expect(bool condition, const char* message) {
-    if (!condition) {
-        std::fprintf(stderr, "FAILED: %s\n", message);
-        std::exit(1);
-    }
-}
 
 HWND CreateMessageWindow() {
     WNDCLASSEXW wc{};

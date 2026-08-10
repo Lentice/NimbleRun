@@ -6,6 +6,8 @@
 // and the centralized English string keys. No dialog clicks are required; the
 // model is what the dialog calls into.
 
+#include "test_util.h"
+
 #include "app_host/hotkey.h"
 #include "settings/settings_editor.h"
 #include "settings/settings_store.h"
@@ -41,13 +43,6 @@ using nimblerun::Theme;
 using nimblerun::UsageStore;
 
 namespace {
-
-void Expect(bool condition, const char* message) {
-    if (!condition) {
-        std::fprintf(stderr, "FAILED: %s\n", message);
-        std::exit(1);
-    }
-}
 
 std::wstring MakeTempDir(const char* label) {
     wchar_t buffer[MAX_PATH];

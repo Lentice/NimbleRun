@@ -7,6 +7,8 @@
 // per-user scoping, moved-EXE detection and re-creation, and the settings
 // editor round-trip independent of the hotkey swap.
 
+#include "test_util.h"
+
 #include "app_host/hotkey.h"
 #include "settings/settings_editor.h"
 #include "settings/settings_store.h"
@@ -37,13 +39,6 @@ using nimblerun::StartupOptionRegistry;
 using nimblerun::StartupStatus;
 
 namespace {
-
-void Expect(bool condition, const char* message) {
-    if (!condition) {
-        std::fprintf(stderr, "FAILED: %s\n", message);
-        std::exit(1);
-    }
-}
 
 std::wstring TestSubkey() {
     return L"Software\\NimbleRunTest\\" + std::to_wstring(GetCurrentProcessId());

@@ -1,3 +1,5 @@
+#include "test_util.h"
+
 #include "usage/usage_store.h"
 
 #include "catalog/app_entry.h"
@@ -20,13 +22,6 @@ using nimblerun::UsageRecord;
 using nimblerun::UsageStore;
 
 namespace {
-
-void Expect(bool condition, const char* message) {
-    if (!condition) {
-        std::fprintf(stderr, "FAILED: %s\n", message);
-        std::exit(1);
-    }
-}
 
 std::wstring MakeTempDir(const char* label) {
     wchar_t buffer[MAX_PATH];

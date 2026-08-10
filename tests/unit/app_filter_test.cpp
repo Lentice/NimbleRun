@@ -3,6 +3,8 @@
 // Pure value logic: the module never includes <windows.h>, so this test builds
 // and runs without creating a window or initializing COM.
 
+#include "test_util.h"
+
 #include "catalog/app_filter.h"
 
 #include <cstdio>
@@ -12,13 +14,6 @@
 using nimblerun::IsProgramLikeTarget;
 
 namespace {
-
-void Expect(bool condition, const char* message) {
-    if (!condition) {
-        std::fprintf(stderr, "FAILED: %s\n", message);
-        std::exit(1);
-    }
-}
 
 void ExpectProgramLike(const wchar_t* target, const char* message) {
     Expect(IsProgramLikeTarget(target), message);

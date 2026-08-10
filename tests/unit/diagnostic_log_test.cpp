@@ -1,3 +1,5 @@
+#include "test_util.h"
+
 #include "diagnostics/diagnostic_log.h"
 #include "diagnostics/load_notice.h"
 #include "storage/atomic_text_file.h"
@@ -17,13 +19,6 @@ namespace fs = std::filesystem;
 using nimblerun::DiagnosticLog;
 
 namespace {
-
-void Expect(bool condition, const char* message) {
-    if (!condition) {
-        std::fprintf(stderr, "FAILED: %s\n", message);
-        std::exit(1);
-    }
-}
 
 std::wstring TempDir() {
     wchar_t buffer[MAX_PATH];

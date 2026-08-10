@@ -161,11 +161,11 @@
 | NR-122 | favorites/usage 無行數上限：load O(n²)＋Reconcile O(pins×catalog)＋ReadAllBytes 無上限 | 1 | `ready` | NR-057, NR-072, NR-080, NR-096 | [NR-122](work-items/NR-122-store-row-caps-and-hash-loads.md) |
 | NR-123 | Rebuild thread join 無界：hung Shell call 卡死關閉（§9.4） | 3 | `ready` | NR-049, NR-077, NR-098 | [NR-123](work-items/NR-123-rebuild-join-bounded-wait.md) |
 | NR-124 | §11 診斷缺口：損壞捷徑／缺失資料夾靜默略過、dedup 歧義計數丟棄 | 3 | `ready` | NR-054, NR-063, NR-090, NR-091, NR-092 | [NR-124](work-items/NR-124-catalog-diagnostic-gaps.md) |
-| NR-125 | design-spec §4.1／FR-002 回寫 NR-088 的 Win 鍵決策 | 4 | `ready` | NR-086, NR-088, NR-094 | [NR-125](work-items/NR-125-spec-winkey-sync.md) |
+| NR-125 | design-spec §4.1／FR-002 回寫 NR-088 的 Win 鍵決策 | 4 | `done` | NR-086, NR-088, NR-094 | [NR-125](work-items/NR-125-spec-winkey-sync.md) |
 | NR-126 | 文件殘餘同步：§4.6 公式、§10.2 格式、testing/roadmap、註解、release-evidence | 5 | `ready` | NR-056, NR-061, NR-094, NR-104 | [NR-126](work-items/NR-126-docs-residual-sync.md) |
 | NR-127 | 路徑／解析／常數 helper 重複拷貝收斂（×3/×3/×5 等） | 3 | `ready` | NR-057 | [NR-127](work-items/NR-127-duplicate-helper-convergence.md) |
 | NR-128 | 死碼與 test-only API 移除（g_last_hotkey_error、GetStartupStatus、Resolve 等） | 3 | `ready` | NR-127 | [NR-128](work-items/NR-128-dead-code-removal.md) |
-| NR-129 | 25 份逐字相同的測試 Expect helper 收斂 | 3 | `ready` | NR-055 | [NR-129](work-items/NR-129-shared-test-expect-helper.md) |
+| NR-129 | 25 份逐字相同的測試 Expect helper 收斂 | 3 | `done` | NR-055 | [NR-129](work-items/NR-129-shared-test-expect-helper.md) |
 | NR-130 | 同 user DoS 面：full-rescan 限流＋single-instance 靜默退出 | 1 | `ready` | NR-002, NR-077, NR-110 | [NR-130](work-items/NR-130-same-user-dos-surface.md) |
 
 ## Dependency lanes

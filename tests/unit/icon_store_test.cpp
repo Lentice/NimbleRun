@@ -6,6 +6,8 @@
 // The pack layout is exercised through icon_pack_format's own encode functions
 // to simulate torn writes and corruption without a second implementation.
 
+#include "test_util.h"
+
 #include "icons/icon_pack_format.h"
 #include "icons/icon_store.h"
 
@@ -37,13 +39,6 @@ using nimblerun::PackHeader;
 using StoreState = nimblerun::IconStore::StoreState;
 
 namespace {
-
-void Expect(bool condition, const char* message) {
-    if (!condition) {
-        std::fprintf(stderr, "FAILED: %s\n", message);
-        std::exit(1);
-    }
-}
 
 fs::path TempDir() {
     const fs::path dir =

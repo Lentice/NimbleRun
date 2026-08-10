@@ -6,6 +6,8 @@
 // ShouldDispatchMessage so the three outcomes are checked without driving the
 // real Win32 message loop (an OS-level -1 cannot be injected safely).
 
+#include "test_util.h"
+
 #include "app_host/message_loop.h"
 
 #include <cstdio>
@@ -14,13 +16,6 @@
 using nimblerun::ShouldDispatchMessage;
 
 namespace {
-
-void Expect(bool condition, const char* message) {
-    if (!condition) {
-        std::fprintf(stderr, "FAILED: %s\n", message);
-        std::exit(1);
-    }
-}
 
 } // namespace
 

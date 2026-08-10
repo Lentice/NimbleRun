@@ -9,6 +9,8 @@
 // probe at the end) so the test is deterministic on machines where another
 // launcher already owns Alt+Space.
 
+#include "test_util.h"
+
 #include "app_host/hotkey.h"
 
 #include <windows.h>
@@ -20,13 +22,6 @@ namespace {
 
 using nimblerun::GlobalHotkey;
 using nimblerun::HotkeyBinding;
-
-void Expect(bool condition, const char* message) {
-    if (!condition) {
-        std::fprintf(stderr, "FAILED: %s\n", message);
-        std::exit(1);
-    }
-}
 
 void Section(const char* name) {
     std::printf("== %s ==\n", name);

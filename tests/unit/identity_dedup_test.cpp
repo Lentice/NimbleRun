@@ -1,3 +1,5 @@
+#include "test_util.h"
+
 #include "catalog/dedup.h"
 #include "catalog/stable_id.h"
 
@@ -15,13 +17,6 @@ using nimblerun::HashStableId;
 using nimblerun::NormalizePathKey;
 
 namespace {
-
-void Expect(bool condition, const char* message) {
-    if (!condition) {
-        std::fprintf(stderr, "FAILED: %s\n", message);
-        std::exit(1);
-    }
-}
 
 // Builds a pure-value fixture the way the catalog sources produce one:
 // stable_id is the normalized identity hashed by the source of the same kind.

@@ -1,3 +1,5 @@
+#include "test_util.h"
+
 #include "catalog/appsfolder_catalog.h"
 #include "catalog/stable_id.h"
 
@@ -18,13 +20,6 @@ using nimblerun::BuildAppsFolderEntry;
 using nimblerun::EnumerateAppsFolderCatalog;
 
 namespace {
-
-void Expect(bool condition, const char* message) {
-    if (!condition) {
-        std::fprintf(stderr, "FAILED: %s\n", message);
-        std::exit(1);
-    }
-}
 
 // The GUID expansion itself, against the live Shell. FOLDERID_ProgramFilesX64
 // exists on every supported target (Windows 10 22H2 / 11 x64), so the success

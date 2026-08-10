@@ -1,3 +1,5 @@
+#include "test_util.h"
+
 #include "app_host/panel_model.h"
 #include "search/search_engine.h"
 #include "ui/panel_layout.h"
@@ -44,13 +46,6 @@ using nimblerun::ui::kQuickSelectDigits;
 using nimblerun::ui::kQuickSelectSlotCount;
 
 namespace {
-
-void Expect(bool condition, const char* message) {
-    if (!condition) {
-        std::fprintf(stderr, "FAILED: %s\n", message);
-        std::exit(1);
-    }
-}
 
 AppEntry Entry(std::wstring id, std::wstring name) {
     AppEntry entry;

@@ -1,3 +1,5 @@
+#include "test_util.h"
+
 #include "icons/icon_pack_format.h"
 #include "catalog/stable_id.h"
 
@@ -32,13 +34,6 @@ using nimblerun::VerifyPayload;
 namespace {
 
 const std::uint8_t kPayloadBytes[4] = {0xDE, 0xAD, 0xBE, 0xEF};
-
-void Expect(bool condition, const char* message) {
-    if (!condition) {
-        std::fprintf(stderr, "FAILED: %s\n", message);
-        std::exit(1);
-    }
-}
 
 PackEntry ValidEntry() {
     PackEntry entry;

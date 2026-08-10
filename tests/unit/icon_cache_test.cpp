@@ -1,3 +1,5 @@
+#include "test_util.h"
+
 #include "icons/icon_cache.h"
 
 #include <cstdio>
@@ -12,13 +14,6 @@ using nimblerun::IconKey;
 using nimblerun::IconProvider;
 
 namespace {
-
-void Expect(bool condition, const char* message) {
-    if (!condition) {
-        std::fprintf(stderr, "FAILED: %s\n", message);
-        std::exit(1);
-    }
-}
 
 AppEntry Entry(const std::wstring& stable_id) {
     AppEntry entry;
