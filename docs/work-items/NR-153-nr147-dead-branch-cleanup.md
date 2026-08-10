@@ -87,3 +87,25 @@ rg -n "kRebuildStartMinIntervalMs" src/app_host
 ```
 
 完成後在文件底部補齊本 item 的 Handoff 交接備註。
+
+## Handoff
+
+- 完成日期：2026-08-10。
+- 變更檔：`src/app_host/rebuild_pipeline.cpp`、`src/app_host/rebuild_pipeline.h`、
+  `docs/work-items.md`。
+- 摘要：Change 分支刪掉 if/else 與 `last` 查找，只留一行
+  `refresh_.NotifySourceEvent(source, now)` ＋ NR-147 註解（限流在
+  `OnDebounceTimer`，此處事件絕不丟）。`AcceptRebuildStart` 改為 class 的
+  private static member（free function 無法存取 private 常數），引用既有
+  `kNoRebuildStart`（header 早已存在，無需新定義）與 `kRebuildStartMinIntervalMs`。
+  語意零變更：`kRebuildStartMinIntervalMs = 1000`、`kNoRebuildStart = -1` 值不變。
+- 驗證：Release llvm-mingw Ninja build 零新增 warning（rebuild_pipeline 無警告；
+  `main.cpp:1395` 的 `target_size` unused-variable 警告為既有問題，非本 item
+  引入）；full ctest 31/31 全綠（數量不變）；focused
+  `ctest -R rebuild_pipeline` 通過。`rg kRebuildStartMinIntervalMs src/app_host`
+  命中 2 處（header 宣告 + AcceptRebuildStart 引用）。
+- 交接備註：`AcceptRebuildStart` 現在是 private static member，定義在
+  `rebuild_pipeline.cpp:19-21`，宣告在 `rebuild_pipeline.h:103`。若未來
+  `OnDebounceTimer` 的限流常數需要調整，改 `kRebuildStartMinIntervalMs` 一處即可。
+- 已檢查：無重開「已否決的方向」；`docs/work-items/` 無 NR-153 以外的重複檔案。
+- Commit：見 repo log（NR-153: remove NR-147 dead branch and use named throttle constants）。

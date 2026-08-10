@@ -100,6 +100,7 @@ private:
     void QueueFailure(std::uint64_t generation, CatalogSource source);
     void CompleteIfReady(std::uint64_t generation);
     bool DrainFailures();
+    static bool AcceptRebuildStart(std::int64_t last, std::int64_t now);
 
     CatalogRefreshCoordinator& refresh_;
     SettingsSnapshot settings_;

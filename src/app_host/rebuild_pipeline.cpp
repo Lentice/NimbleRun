@@ -14,11 +14,11 @@ std::int64_t NowMs() {
     return static_cast<std::int64_t>(GetTickCount64());
 }
 
-bool AcceptRebuildStart(std::int64_t last, std::int64_t now) {
-    return last == -1 || now - last >= 1000;
-}
-
 } // namespace
+
+bool RebuildPipeline::AcceptRebuildStart(std::int64_t last, std::int64_t now) {
+    return last == kNoRebuildStart || now - last >= kRebuildStartMinIntervalMs;
+}
 
 RebuildPipeline::RebuildPipeline(CatalogRefreshCoordinator& refresh,
                                  SettingsSnapshot settings,
@@ -76,18 +76,9 @@ void RebuildPipeline::Request(std::vector<CatalogSource> sources, RebuildReason 
         }
     } else {
         const CatalogSource source = sources.front();
-        const auto it = last_rebuild_start_ms_.find(source);
-        const std::int64_t last = it == last_rebuild_start_ms_.end()
-                                      ? kNoRebuildStart
-                                      : it->second;
-        if (AcceptRebuildStart(last, now)) {
-            refresh_.NotifySourceEvent(source, now);
-        } else {
-            // NR-147: throttled Change event -- never dropped. The source stays
-            // pending and the debounce timer is armed below; OnDebounceTimer
-            // starts the rebuild once the per-source 1 s gate opens.
-            refresh_.NotifySourceEvent(source, now);
-        }
+        // NR-147: throttle is enforced in OnDebounceTimer; events are never
+        // dropped here.
+        refresh_.NotifySourceEvent(source, now);
     }
     if (refresh_.ShouldStartRebuild(now)) {
         Start(refresh_.DueSources(now));
