@@ -71,6 +71,14 @@ inline std::string EncodeUtf8(std::wstring_view text) {
 // a multi-GB allocation on a hot path. Single source for all stores.
 inline constexpr std::size_t kMaxReadBytes = 16 * 1024 * 1024;
 
+// NR-141: a line-count cap, complementary to the per-store row caps of NR-121/
+// NR-122. kMaxReadBytes bounds bytes, not lines: a 16 MB file of single-\n
+// lines is ~8M lines, and SplitLines materializes one std::wstring per line
+// before any per-store check runs -- a ~400-500 MB transient allocation on the
+// UI thread. This is a memory guard, not a data guard; the per-store caps
+// still enforce what a legal file may contain. 1M is 50x the ~20k legal rows.
+inline constexpr std::size_t kMaxLines = 1'000'000;
+
 inline bool ReadAllBytes(const std::wstring& path, std::string& out) {
     const HANDLE file = CreateFileW(path.c_str(), GENERIC_READ,
         FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -294,6 +302,18 @@ inline VersionedReadStatus ReadVersionedLines(std::wstring_view directory,
     }
     if (text.front() == L'\uFEFF') {
         text.erase(text.begin());
+    }
+
+    // NR-141: count newlines before SplitLines allocates the line vector -- an
+    // over-cap file must never pay for millions of std::wstring allocations on
+    // the UI thread (memory guard; the NR-121/122 per-store caps are the data
+    // guard). Early bail: once past kMaxLines the rest of the file is not
+    // counted, the answer is already known.
+    std::size_t newline_count = 0;
+    for (const wchar_t c : text) {
+        if (c == L'\n' && ++newline_count > kMaxLines) {
+            return VersionedReadStatus::Malformed;
+        }
     }
 
     const std::vector<std::wstring> all_lines = SplitLines(text);

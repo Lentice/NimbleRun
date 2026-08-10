@@ -83,4 +83,37 @@ ctest --test-dir build --output-on-failure
 ctest --test-dir build -R "settings_store" --output-on-failure
 ```
 
-完成後在文件底部補齊本 item 的 Handoff 交接備註。
+## Handoff 交接備註
+
+### 實作（commit `NR-141: line-count guard before line vector allocation`）
+
+- `src/storage/atomic_text_file.h`：`kMaxLines = 1'000'000`（inline constexpr
+  std::size_t，放在 `kMaxReadBytes` 旁）；`ReadVersionedLines` 在 BOM strip 後、
+  `SplitLines(text)` 前掃描 `text` 數 `\n`，超過 `kMaxLines` 即早退
+  `return VersionedReadStatus::Malformed;`（計數在超過上限那一格就停，不數完
+  整個檔案）。`SplitLines` 簽名與寫入端未動。
+- 測試（`tests/unit/settings_store_test.cpp`，兩個新函式，CTest registration
+  維持 31）：
+  - `TestLineCountCap`：1,100,001 行 `x=1`（unknown key，避開 NR-140 的
+    catalog_root cap；約 2.2 MB < 16 MB read cap）→ `Load` 回 `Corrupt`
+    （Malformed → PreserveCorrupt 路徑，`settings.ini.corrupt` 保留）。用
+    1,100,001 而非 2,000,000 行，避免測試檔寫入與檔案 I/O 變慢（2.2 MB 已
+    足以超過 kMaxLines 並證明無分配爆炸）。
+  - `TestManyLinesOk`：10,000 行 `x=1` → `Loaded`（回歸，低於上限不受影響）。
+
+### 驗證結果
+
+- Release x64（llvm-mingw + Ninja）build 零新增 warning；full CTest 31/31 全綠。
+- settings_store 專注 `ctest --test-dir build -R nimblerun_settings_test` 通過，
+  實測 0.30 s（含 1.1M 行檔案的建檔與載入）——超行數檔快速回 Corrupt 即為
+  分配未爆炸的證明（此前同形檔會配置數百 MB）。
+
+### 測試陷阱（本 session 發現）
+
+- `Load` 的 Malformed 處置是 `PreserveCorrupt`（把 `settings.ini` 改名
+  `settings.ini.corrupt`），所以 Corrupt 斷言後要檢查「原檔已被移開」而非
+  「原檔還在」——與既有 `TestCorrupt`／`TestOversizeFileCorrupt` 同形。
+- 行內容選 `x=1`：`settings_store.cpp` 的 per-row 迴圈對 unknown key 直接忽略
+  （不會踩 NR-140 的 root cap），而 `ReadVersionedLines` 的守門在 per-row
+  迴圈前就會先開火，因此任何行形狀都能觸發；用 unknown key 最乾淨。
+

@@ -303,6 +303,42 @@ void TestCatalogRootCap100k(const std::wstring& dir) {
     Expect(loaded.catalog_roots.empty(), "100k-root load keeps no roots");
 }
 
+// NR-141: a file with more lines than kMaxLines must fail before SplitLines
+// allocates one std::wstring per line -- otherwise a 2.2 MB file would blow up
+// into millions of string allocations on the UI thread. The lines are unknown
+// keys (x=1), so no NR-140 row cap is involved: it is the shared read-layer
+// line cap, not content validation, that quarantines this file. The test
+// completing quickly is the proof of no allocation explosion.
+void TestLineCountCap(const std::wstring& dir) {
+    std::string content = "schema=1\n";
+    content.reserve(8 * 1100001);
+    for (int i = 0; i < 1100001; ++i) {
+        content += "x=1\n";
+    }
+    WriteBytes(dir + L"\\settings.ini", content);
+    SettingsStore store(dir);
+    Settings loaded;
+    Expect(store.Load(loaded) == SettingsLoadResult::Corrupt, ">1M-line file reports Corrupt");
+    Expect(loaded.hotkey == L"Alt+Space", "over-line-cap load resets to the default hotkey");
+    Expect(!fs::exists(dir + L"\\settings.ini"), "over-line-cap file moved aside");
+    Expect(fs::exists(dir + L"\\settings.ini.corrupt"), "over-line-cap file preserved");
+}
+
+// NR-141 regression: a large-but-legal file (10k rows, well under kMaxLines)
+// loads unchanged -- the line-count guard only fires above the cap.
+void TestManyLinesOk(const std::wstring& dir) {
+    std::string content = "schema=1\n";
+    content.reserve(8 * 10000);
+    for (int i = 0; i < 10000; ++i) {
+        content += "x=1\n";
+    }
+    WriteBytes(dir + L"\\settings.ini", content);
+    SettingsStore store(dir);
+    Settings loaded;
+    Expect(store.Load(loaded) == SettingsLoadResult::Loaded, "10k-line file loads");
+    Expect(loaded.hotkey == L"Alt+Space", "10k-line load keeps the default hotkey");
+}
+
 void TestNewerSchema(const std::wstring& dir) {
     const std::string content = "schema=99\nrecent_count=30\n";
     WriteBytes(dir + L"\\settings.ini", content);
@@ -514,6 +550,8 @@ int wmain() {
     TestCatalogRootMaxOk(MakeTempDir("rootmax"));
     TestHotkeyLengthCap(MakeTempDir("hotkeycap"));
     TestCatalogRootCap100k(MakeTempDir("rootcap100k"));
+    TestLineCountCap(MakeTempDir("linecap"));
+    TestManyLinesOk(MakeTempDir("manylines"));
     TestNewerSchema(MakeTempDir("newer"));
     TestNewerSchemaSaveRefused(MakeTempDir("newersave"));
     TestMissingLoadSaveWritesFile(MakeTempDir("writable_missing"));
