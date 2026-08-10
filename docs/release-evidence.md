@@ -1,11 +1,11 @@
 # Release Evidence
 
-- Generated: 2026-08-10 13:32:04 +08:00 (UTC: 2026-08-10T13:32:04.5999380+08:00)
+- Generated: 2026-08-10 19:12:15 +08:00 (UTC: 2026-08-10T19:12:15.7745089+08:00)
 - OS: Microsoft Windows 11 專業版 build 26200
 - CPU: Intel64 Family 6 Model 151 Stepping 2, GenuineIntel
 - Debugger attached: False
-- Git commit: 6a00c8c7e397f3c82b440b9fb0a5f4fbb7d83c6f
-- CTest count: Total Tests: 26
+- Git commit: dcd0a6b06b0a15bae910f6f854f125843f39d47a
+- CTest count: Total Tests: 31
 
 ## Tool versions
 
@@ -26,8 +26,8 @@
 
 ```text
 # cmake configure
--- Configuring done (1.4s)
--- Generating done (0.4s)
+-- Configuring done (0.6s)
+-- Generating done (0.1s)
 -- Build files have been written to: D:/Documents/GitHub/NimbleRun/build
 exit code: 0
 ```
@@ -40,61 +40,71 @@ exit code: 0
 # ctest full suite
 Test project D:/Documents/GitHub/NimbleRun/build
       Start  1: nimblerun_search_test
- 1/26 Test  #1: nimblerun_search_test ....................   Passed    0.06 sec
+ 1/31 Test  #1: nimblerun_search_test ....................   Passed    0.03 sec
       Start  2: nimblerun_hotkey_test
- 2/26 Test  #2: nimblerun_hotkey_test ....................   Passed    0.03 sec
+ 2/31 Test  #2: nimblerun_hotkey_test ....................   Passed    0.05 sec
       Start  3: nimblerun_start_menu_catalog_test
- 3/26 Test  #3: nimblerun_start_menu_catalog_test ........   Passed   23.60 sec
+ 3/31 Test  #3: nimblerun_start_menu_catalog_test ........   Passed    6.21 sec
       Start  4: nimblerun_settings_test
- 4/26 Test  #4: nimblerun_settings_test ..................   Passed    0.35 sec
+ 4/31 Test  #4: nimblerun_settings_test ..................   Passed    0.23 sec
       Start  5: nimblerun_appsfolder_catalog_test
- 5/26 Test  #5: nimblerun_appsfolder_catalog_test ........   Passed    1.56 sec
+ 5/31 Test  #5: nimblerun_appsfolder_catalog_test ........   Passed    1.28 sec
       Start  6: nimblerun_app_filter_test
- 6/26 Test  #6: nimblerun_app_filter_test ................   Passed    0.03 sec
+ 6/31 Test  #6: nimblerun_app_filter_test ................   Passed    0.03 sec
       Start  7: nimblerun_user_folder_catalog_test
- 7/26 Test  #7: nimblerun_user_folder_catalog_test .......   Passed    0.18 sec
+ 7/31 Test  #7: nimblerun_user_folder_catalog_test .......   Passed    0.11 sec
       Start  8: nimblerun_identity_dedup_test
- 8/26 Test  #8: nimblerun_identity_dedup_test ............   Passed    0.04 sec
+ 8/31 Test  #8: nimblerun_identity_dedup_test ............   Passed    0.04 sec
       Start  9: nimblerun_shell_launch_test
- 9/26 Test  #9: nimblerun_shell_launch_test ..............   Passed    1.16 sec
+ 9/31 Test  #9: nimblerun_shell_launch_test ..............   Passed    0.95 sec
       Start 10: nimblerun_recent_usage_test
-10/26 Test #10: nimblerun_recent_usage_test ..............   Passed    0.33 sec
+10/31 Test #10: nimblerun_recent_usage_test ..............   Passed    0.20 sec
       Start 11: nimblerun_list_vertical_slice_test
-11/26 Test #11: nimblerun_list_vertical_slice_test .......   Passed    0.05 sec
+11/31 Test #11: nimblerun_list_vertical_slice_test .......   Passed    0.03 sec
       Start 12: nimblerun_icons_cache_test
-12/26 Test #12: nimblerun_icons_cache_test ...............   Passed    0.04 sec
+12/31 Test #12: nimblerun_icons_cache_test ...............   Passed    0.05 sec
       Start 13: nimblerun_icon_pack_format_test
-13/26 Test #13: nimblerun_icon_pack_format_test ..........   Passed    0.10 sec
+13/31 Test #13: nimblerun_icon_pack_format_test ..........   Passed    0.10 sec
       Start 14: nimblerun_icon_store_test
-14/26 Test #14: nimblerun_icon_store_test ................   Passed    8.90 sec
+14/31 Test #14: nimblerun_icon_store_test ................   Passed    7.17 sec
       Start 15: nimblerun_png_codec_test
-15/26 Test #15: nimblerun_png_codec_test .................   Passed    0.11 sec
+15/31 Test #15: nimblerun_png_codec_test .................   Passed    0.07 sec
       Start 16: nimblerun_icon_worker_test
-16/26 Test #16: nimblerun_icon_worker_test ...............   Passed    0.82 sec
-      Start 17: nimblerun_dpi_theme_accessibility_test
-17/26 Test #17: nimblerun_dpi_theme_accessibility_test ...   Passed    0.19 sec
-      Start 18: nimblerun_settings_ui_test
-18/26 Test #18: nimblerun_settings_ui_test ...............   Passed    0.17 sec
-      Start 19: nimblerun_startup_option_test
-19/26 Test #19: nimblerun_startup_option_test ............   Passed    0.09 sec
-      Start 20: nimblerun_catalog_refresh_test
-20/26 Test #20: nimblerun_catalog_refresh_test ...........   Passed    0.72 sec
-      Start 21: nimblerun_pinning_test
-21/26 Test #21: nimblerun_pinning_test ...................   Passed    1.79 sec
-      Start 22: nimblerun_diagnostic_log_test
-22/26 Test #22: nimblerun_diagnostic_log_test ............   Passed    4.67 sec
-      Start 23: nimblerun_hotkey_capture_test
-23/26 Test #23: nimblerun_hotkey_capture_test ............   Passed    0.15 sec
-      Start 24: nimblerun_lifecycle_check
-24/26 Test #24: nimblerun_lifecycle_check ................   Passed    3.43 sec
-      Start 25: nimblerun_catalog_watcher_test
-25/26 Test #25: nimblerun_catalog_watcher_test ...........   Passed    2.11 sec
-      Start 26: nimblerun_message_loop_test
-26/26 Test #26: nimblerun_message_loop_test ..............   Passed    0.02 sec
+16/31 Test #16: nimblerun_icon_worker_test ...............   Passed    0.83 sec
+      Start 17: nimblerun_handoff_registry_test
+17/31 Test #17: nimblerun_handoff_registry_test ..........   Passed    0.03 sec
+      Start 18: nimblerun_icon_request_session_test
+18/31 Test #18: nimblerun_icon_request_session_test ......   Passed    0.03 sec
+      Start 19: nimblerun_dpi_theme_accessibility_test
+19/31 Test #19: nimblerun_dpi_theme_accessibility_test ...   Passed    0.08 sec
+      Start 20: nimblerun_settings_ui_test
+20/31 Test #20: nimblerun_settings_ui_test ...............   Passed    0.13 sec
+      Start 21: nimblerun_startup_option_test
+21/31 Test #21: nimblerun_startup_option_test ............   Passed    0.07 sec
+      Start 22: nimblerun_catalog_refresh_test
+22/31 Test #22: nimblerun_catalog_refresh_test ...........   Passed    0.70 sec
+      Start 23: nimblerun_directory_walker_test
+23/31 Test #23: nimblerun_directory_walker_test ..........   Passed    0.05 sec
+      Start 24: nimblerun_pinning_test
+24/31 Test #24: nimblerun_pinning_test ...................   Passed    1.64 sec
+      Start 25: nimblerun_diagnostic_log_test
+25/31 Test #25: nimblerun_diagnostic_log_test ............   Passed    2.26 sec
+      Start 26: nimblerun_hotkey_capture_test
+26/31 Test #26: nimblerun_hotkey_capture_test ............   Passed    0.06 sec
+      Start 27: nimblerun_snapshot_assembler_test
+27/31 Test #27: nimblerun_snapshot_assembler_test ........   Passed    0.13 sec
+      Start 28: nimblerun_pin_drag_state_test
+28/31 Test #28: nimblerun_pin_drag_state_test ............   Passed    0.04 sec
+      Start 29: nimblerun_lifecycle_check
+29/31 Test #29: nimblerun_lifecycle_check ................   Passed    3.25 sec
+      Start 30: nimblerun_catalog_watcher_test
+30/31 Test #30: nimblerun_catalog_watcher_test ...........   Passed    2.10 sec
+      Start 31: nimblerun_rebuild_pipeline_test
+31/31 Test #31: nimblerun_rebuild_pipeline_test ..........   Passed    0.25 sec
 
-100% tests passed out of 26
+100% tests passed out of 31
 
-Total Test time (real) =  50.80 sec
+Total Test time (real) =  28.27 sec
 exit code: 0
 ```
 ## Process smoke, idle measurement, short soak
@@ -103,9 +113,9 @@ exit code: 0
 
 ```text
 idle thread count: 17
-idle working set bytes: 40423424
-idle private bytes: 8650752
-idle handle count: 402
+idle working set bytes: 39583744
+idle private bytes: 8908800
+idle handle count: 403
 ```
 
 ### Short soak (3x launch/terminate)
@@ -136,7 +146,7 @@ CTest is a separate release gate; its registration count comes from live ctest -
 
 | Metric | Threshold | Measurement source | Measured | Value | Verdict |
 |---|---|---|---|---|---|
-| CTest registration vs executed | registered == executed | live ctest -N vs full-suite output | measured | registered 26 vs executed 26 | PASS |
+| CTest registration vs executed | registered == executed | live ctest -N vs full-suite output | measured | registered 31 vs executed 31 | PASS |
 
 ### Non-blocking process context
 

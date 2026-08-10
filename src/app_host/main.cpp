@@ -8,7 +8,6 @@
 #include "app_host/icon_request_session.h"
 #include "app_host/rebuild_pipeline.h"
 #include "app_host/hotkey.h"
-#include "app_host/message_loop.h"
 #include "app_host/panel_model.h"
 #include "app_host/snapshot_assembler.h"
 #include "app_host/settings_dialog.h"
@@ -37,7 +36,9 @@
 #include "ui/panel_palette.h"
 #include "ui/pin_drag_state.h"
 #include "ui/quick_select.h"
+#include "win/com.h"
 #include "win/handoff_registry.h"
+#include "win/handle_guard.h"
 #include "usage/usage_store.h"
 
 #include <d2d1.h>
@@ -52,6 +53,7 @@
 #include <iterator>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -297,12 +299,12 @@ void WaitForStartupTestGate() {
     }
 }
 
-void OpenTestShowSemaphore() {
+HANDLE OpenTestShowSemaphore() {
     const std::wstring name = EnvironmentValue(L"NIMBLERUN_TEST_SHOW_SEMAPHORE");
-    if (!name.empty()) {
-        g_test_show_semaphore = OpenSemaphoreW(SEMAPHORE_MODIFY_STATE, FALSE,
-                                                name.c_str());
+    if (name.empty()) {
+        return nullptr;
     }
+    return OpenSemaphoreW(SEMAPHORE_MODIFY_STATE, FALSE, name.c_str());
 }
 
 // NR-017: bounded local diagnostic log under the per-user data dir. Only
@@ -2848,20 +2850,20 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         return 1;
     }
 
-    HANDLE startup_ready = CreateEventW(nullptr, TRUE, FALSE, kStartupReadyEvent);
+    nimblerun::HandleGuard startup_ready(
+        CreateEventW(nullptr, TRUE, FALSE, kStartupReadyEvent));
     if (!startup_ready) {
         return 1;
     }
 
-    HANDLE mutex = CreateMutexW(nullptr, TRUE, kInstanceMutex);
+    nimblerun::HandleGuard mutex(CreateMutexW(nullptr, TRUE, kInstanceMutex));
     if (!mutex) {
-        CloseHandle(startup_ready);
         return 1;
     }
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
         HWND existing = FindWindowW(kWindowClass, nullptr);
         if (!existing &&
-            WaitForSingleObject(startup_ready, kStartupRendezvousTimeoutMs) ==
+            WaitForSingleObject(startup_ready.Get(), kStartupRendezvousTimeoutMs) ==
                 WAIT_OBJECT_0) {
             existing = FindWindowW(kWindowClass, nullptr);
         }
@@ -2875,24 +2877,16 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
             MessageBoxW(nullptr, dialog_strings::kRendezvousTimeout,
                         dialog_strings::kTitle, MB_OK | MB_ICONWARNING);
         }
-        CloseHandle(mutex);
-        CloseHandle(startup_ready);
         return 0;
     }
 
-    const HRESULT com_result = CoInitializeEx(
-        nullptr,
-        COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
-    if (FAILED(com_result)) {
-        CloseHandle(startup_ready);
-        CloseHandle(mutex);
+    std::optional<nimblerun::ComGuard> com;
+    com.emplace();
+    if (!com->Usable()) {
         return 1;
     }
 
     if (!RegisterMainWindow(instance)) {
-        CoUninitialize();
-        CloseHandle(startup_ready);
-        CloseHandle(mutex);
         return 1;
     }
 
@@ -2918,16 +2912,14 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         instance,
         nullptr);
     if (!window) {
-        CoUninitialize();
-        CloseHandle(startup_ready);
-        CloseHandle(mutex);
         return 1;
     }
     g_main_window = window;
     g_accessibility = nimblerun::PanelAccessibilityProvider::Create(window);
     SyncAccessibility(window);
-    SetEvent(startup_ready);
-    OpenTestShowSemaphore();
+    SetEvent(startup_ready.Get());
+    nimblerun::HandleGuard test_show_semaphore{OpenTestShowSemaphore()};
+    g_test_show_semaphore = test_show_semaphore.Get();
 
     // NR-044: let DWM round the panel's corners so it matches the Windows 11
     // flyouts and the panel's own 6 DIP search box (design-spec §4.9). The
@@ -3186,8 +3178,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
             // dispatching an undefined MSG.
             g_diag->Write(L"ui-loop", L"getmessage-error");
         }
-        if (!nimblerun::ShouldDispatchMessage(get_result)) {
-            break;  // 0 = WM_QUIT, -1 = retrieval error; neither has a dispatchable MSG
+        // NR-117: GetMessageW returns >0 for a dispatchable message, 0 for
+        // WM_QUIT, and -1 for a retrieval error; only >0 may be dispatched.
+        if (get_result <= 0) {
+            break;
         }
         TranslateMessage(&message);
         DispatchMessageW(&message);
@@ -3208,13 +3202,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         g_accessibility = nullptr;
         provider->Release();
     }
-    if (g_test_show_semaphore) {
-        CloseHandle(g_test_show_semaphore);
-        g_test_show_semaphore = nullptr;
-    }
+    g_test_show_semaphore = nullptr;
     g_rebuild_pipeline.reset();
-    CoUninitialize();
-    CloseHandle(startup_ready);
-    CloseHandle(mutex);
+    com.reset();
     return static_cast<int>(message.wParam);
 }
