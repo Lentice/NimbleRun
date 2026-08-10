@@ -125,6 +125,70 @@ void TestCacheFailureRetention() {
     Expect(refresh.Snapshot().size() == 2, "failed source cache row is retained");
 }
 
+void TestForgedDeliveryFailureIgnored() {
+    CatalogRefreshCoordinator refresh;
+    AppEntry cached;
+    cached.display_name = L"Cached Start";
+    cached.stable_id = L"cached-start";
+    cached.source = AppSource::UserStartMenu;
+    cached.launch_verified = false;
+    refresh.SetSnapshot({cached});
+    refresh.SeedSourceEntriesFromSnapshot();
+    HANDLE gate = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    HANDLE release = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    std::vector<Posted> posts;
+    std::mutex posts_mutex;
+    int completed = 0;
+    RebuildPipeline pipeline(
+        refresh, [] { return Settings{}; },
+        [&](UINT message, WPARAM w_param, LPARAM l_param) {
+            std::lock_guard<std::mutex> lock(posts_mutex);
+            posts.push_back({message, w_param, l_param});
+            return true;
+        },
+        [&](CatalogSource source, const Settings& settings, std::atomic<bool>* cancel) {
+            SetEvent(gate);
+            WaitForSingleObject(release, INFINITE);
+            return Enumerate(source, settings, cancel);
+        },
+        [&] { ++completed; }, [] {}, [] {});
+
+    pipeline.Request({CatalogSource::StartMenu}, RebuildReason::Explicit);
+    Expect(WaitForSingleObject(gate, 1000) == WAIT_OBJECT_0,
+           "worker started before the forged messages");
+    pipeline.OnDeliveryFailureMessage(1, 0);
+    pipeline.OnDeliveryFailureMessage(1, 1);
+    pipeline.OnDeliveryFailureMessage(1, 2);
+    Expect(completed == 0, "forged failure never completes the generation early");
+    Expect(refresh.IsRebuildInProgress(), "forged failure leaves the rebuild running");
+    Expect(refresh.Snapshot().front().display_name == L"Cached Start",
+           "forged failure publishes no merged snapshot");
+    SetEvent(release);
+    Posted healthy{};
+    for (int i = 0; i < 200; ++i) {
+        {
+            std::lock_guard<std::mutex> lock(posts_mutex);
+            for (const Posted& post : posts) {
+                if (post.message == WM_APP + 8) {
+                    healthy = post;
+                    break;
+                }
+            }
+        }
+        if (healthy.message == WM_APP + 8) break;
+        Sleep(5);
+    }
+    Expect(healthy.message == WM_APP + 8, "real result was posted");
+    pipeline.OnResultMessage(healthy.w_param, healthy.l_param);
+    for (int i = 0; i < 200 && completed == 0; ++i) Sleep(5);
+    Expect(completed == 1, "real result completes the generation once");
+    Expect(!refresh.IsRebuildInProgress(), "real result finishes the rebuild");
+    Expect(refresh.Snapshot().front().display_name == L"Start",
+           "real result publishes the fresh snapshot");
+    CloseHandle(gate);
+    CloseHandle(release);
+}
+
 void TestFullRescanThrottleAndWatchMap() {
     CatalogRefreshCoordinator refresh;
     std::atomic<int> enumerations = 0;
@@ -262,6 +326,7 @@ void TestShutdownBounded() {
 int wmain() {
     TestDeliveryFailureCompletesOnce();
     TestCacheFailureRetention();
+    TestForgedDeliveryFailureIgnored();
     TestFullRescanThrottleAndWatchMap();
     TestChangeThrottle();
     TestShutdownBounded();

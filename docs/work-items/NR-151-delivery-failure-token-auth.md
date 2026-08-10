@@ -96,4 +96,32 @@ ctest --test-dir build --output-on-failure
 ctest --test-dir build -R rebuild_pipeline --output-on-failure
 ```
 
-完成後在文件底部補齊本 item 的 Handoff 交接備註。
+## Handoff
+
+- 2026-08-10 完成（NR-151, commit `NR-151: authenticate delivery-failure messages with handoff tokens`）。
+- 變更：`src/app_host/rebuild_pipeline.cpp` — `QueueFailure`（:159-199）的 recorded
+  分支改為優先 `handoffs_.Register` 一個 `failed=true` 的 `RebuildResult`
+  （`new RebuildResult` + 既有欄位，與 worker 路徑 :121-127 同型）並 post
+  `kRebuildDeliveryFailedMessage` `(generation, token)`（與 `kRebuildDoneMessage`
+  同形）；`Register`／post 任一失敗即 `Erase` 並退回既有 `(0,0)` + `SetEvent`
+  fallback。not-recorded（double-OOM）分支原樣保留（decision 2 的 best-effort）。
+  `OnDeliveryFailureMessage`（:226-246）的 `w_param != 0` 分支改為
+  `handoffs_.Take(l_param)`——與 `OnResultMessage` 同形；取不到或 `!result->failed`
+  → `return 0`（偽造 token 無內容效果）；取得則 `ApplySourceFailure(generation,
+  source)` + `CompleteIfReady` + `DrainFailures` + repaint。`w_param == 0`（drain）
+  分支與 `failure_event_` 機制未動。
+- 測試：`tests/unit/rebuild_pipeline_test.cpp` 新增 `TestForgedDeliveryFailureIgnored`
+  ——worker 以 gate/release event 卡在列舉中，期間以 `OnDeliveryFailureMessage(1, 0/1/2)`
+  發偽造 inline 訊息，斷言 `completed == 0`、`IsRebuildInProgress()`、snapshot 仍為
+  快照種子（無提前 merge）；release 後真實結果仍恰好完成一次 generation。已實證
+  判別力：stash 掉 `rebuild_pipeline.cpp` 只留新測試 → 測試失敗；套回修復 → 綠燈。
+- 驗證：Release（llvm-mingw/Ninja）build 成功；新 warnings 0（唯一 warning 仍是
+  `main.cpp:1395 unused variable 'target_size'`，NR-150 交接區已記錄與本 item 無關）；
+  CTest 31/31 全綠（數量不變）。
+- 交接：失敗的雙重保送（`failures_` 記錄 + token 註冊）維持不變——token 訊息直接
+  套用失敗並 `DrainFailures`（雙套用為冪等：`ApplySourceFailure` 對同一 source 重跑
+  僅重算相同 snapshot），drain 路徑仍是訊息遺失時的兜底。殘留風險（decision 1 明言
+  接受）：偽造值若恰好等於真實 token（heap 位址）仍有效，與 `OnResultMessage` 現況
+  相同；double-OOM 的 inline 形狀現為 no-op，NR-100「generation 不永久卡住」在該
+  不可達路徑上由 `failure_event_` 兜底（recorded 時）維持。後續勿再把
+  `OnDeliveryFailureMessage` 的 `w_param != 0` 分支改回直接消費 `l_param` 內容值。

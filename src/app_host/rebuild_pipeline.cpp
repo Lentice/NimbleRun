@@ -166,7 +166,31 @@ void RebuildPipeline::QueueFailure(std::uint64_t generation, CatalogSource sourc
         if (on_exception_) on_exception_();
     }
     if (recorded) {
-        if (!post_to_ui_(kRebuildDeliveryFailedMessage, 0, 0) && failure_event_) {
+        // NR-151: deliver through the handoff registry, same shape as
+        // OnResultMessage, so a forged message can never name a source by
+        // value. The failures_ entry stays: the drain path and the
+        // failure_event_ fallback below still rely on it.
+        bool posted_token = false;
+        try {
+            std::unique_ptr<RebuildResult> owned(new RebuildResult);
+            owned->generation = generation;
+            owned->source = source;
+            owned->failed = true;
+            const std::uintptr_t token = handoffs_.Register(std::move(owned));
+            if (token) {
+                if (post_to_ui_(kRebuildDeliveryFailedMessage,
+                                static_cast<WPARAM>(generation),
+                                static_cast<LPARAM>(token))) {
+                    posted_token = true;
+                } else {
+                    handoffs_.Erase(token);
+                }
+            }
+        } catch (...) {
+            if (on_exception_) on_exception_();
+        }
+        if (!posted_token && !post_to_ui_(kRebuildDeliveryFailedMessage, 0, 0) &&
+            failure_event_) {
             SetEvent(failure_event_);
         }
     } else if (!post_to_ui_(kRebuildDeliveryFailedMessage,
@@ -224,15 +248,23 @@ LRESULT RebuildPipeline::OnResultMessage(WPARAM, LPARAM l_param) {
 }
 
 LRESULT RebuildPipeline::OnDeliveryFailureMessage(WPARAM w_param, LPARAM l_param) {
-    if (w_param != 0 && static_cast<std::uintptr_t>(l_param) <=
-                            static_cast<std::uintptr_t>(CatalogSource::UserFolder)) {
-        const auto generation = static_cast<std::uint64_t>(w_param);
-        const auto source = static_cast<CatalogSource>(l_param);
-        refresh_.ApplySourceFailure(generation, source);
-        CompleteIfReady(generation);
-    } else {
+    if (w_param != 0) {
+        // NR-151: the payload is a handoff token, never a source value. A
+        // forged message names no registered token (or a non-failure result)
+        // and is dropped without any content effect.
+        std::unique_ptr<RebuildResult> result =
+            handoffs_.Take(static_cast<std::uintptr_t>(l_param));
+        if (!result || !result->failed) {
+            return 0;
+        }
+        if (refresh_.ApplySourceFailure(result->generation, result->source)) {
+            CompleteIfReady(result->generation);
+        }
         DrainFailures();
+        if (on_repaint_) on_repaint_();
+        return 0;
     }
+    DrainFailures();
     if (on_repaint_) on_repaint_();
     return 0;
 }
