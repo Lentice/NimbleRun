@@ -333,6 +333,7 @@ NR-117（GetMessageW error result 被誤當成可 dispatch）── 依賴 NR-11
 | 用 Catalog 項目把空白狀態的格狀填滿（NR-053 的 §4.2 規則 3） | NR-061 的使用者決策（2026-08-07） | 實機上填出 40 格 `3D Vision 相...`／`AccessPort`／`AlertMail48` 這類從未開過的項目，把「我釘的或我用過的」這個唯一語意稀釋掉，且這些格子的右鍵「Remove from recent」按了毫無反應。空白狀態的內容一律只來自釘選清單與使用紀錄；沒有就顯示一行提示。**NR-053 依 `usage_score` 排序的那一半保留。**（2026-08-07 由 NR-071 覆寫：常用區改依最後啟動時間排序、最新在最前，`usage_score` 僅留給 §4.5 搜尋結果的次要排序。「不用其他 App 填充」這條不受影響，仍然有效。） |
 | 把 icons 疊層（icon_cache／icon_pack_format／png_codec／icon_store／icon_worker／shell_icon_provider）重寫成單一「icon acquisition」深模組 | 2026-08-10 三方架構審查 | 這不是碎片化，是真正的分層：每層有各自的存在理由與各自的測試，Shell／COM 邊界恰好收在單一執行緒上。重寫換不到 locality，只會把六份可測的介面換成一份不可測的大介面。**真正的問題是 token 交接註冊表沒有模組**，那一條已由 NR-131 處理；UI 端的 pending-key 集合若仍是負擔，開新 item 時必須提出 icons 疊層本身造成的具體 bug 或修補紀錄作為新證據。 |
 | 抽一個泛用的「versioned persistence policy」深模組，讓 settings／pin／usage 三個 store 共用 schema 守門與 atomic commit | 2026-08-10 三方架構審查 | 機制層已經共用（`src/storage/atomic_text_file.h`），NR-057／NR-127 也已把 `kSchemaPrefix` 等常數收斂到一份。剩下的重複只是每個 store 各自幾行的守門呼叫，套用刪除測試——刪掉這層抽象，複雜度**不集中**，只是回到三個各自正確且各自有測試的 store。要重開必須先指出一個「三份守門已經漂移」的具體實例（NR-072／NR-080／NR-096 修的是三個**不同**的邊界，不是同一條規則的三份拷貝）。**特別不得**把三種 domain 格式壓成一個泛用 parser。 |
+| 把 `main.cpp` 的子系統全域收成一個 `PanelHost` struct（含 RAII 化建構／銷毀順序、消掉 `if (!g_x) return;` 守門） | 2026-08-10 NR-132／NR-134 落地後的重新評估 | 這條原本記為「必須排在 NR-132 與 NR-134 之後」；兩者已 done，條件已成立，實測結果是**前提不成立**。`main.cpp` 由 3955 降到 3222 行，但檔案層級全域仍有 55 個，其中 `PanelHost` 真正要吸收的**只有 12 個子系統指標**（`g_model`／`g_accessibility`／`g_usage`／`g_pins`／`g_settings_store`／`g_icon_cache`／`g_icon_worker`／`g_refresh`／`g_snapshot_assembler`／`g_watcher`／`g_diag`／`g_rebuild_pipeline`）。其餘是 20 個 D2D/DWrite 資源、14 個 Win32 handle 與滑鼠／視窗狀態、7 個 settings／theme 值、以及三個**已經是值模組**的成員（`g_icon_request_session`／`g_pin_drag_state`／`g_launch_failure_refresh`）——沒有一類是 `PanelHost` 該吸收的。套用刪除測試：把 12 個指標搬進一個 struct，複雜度**不集中**，只是換個名字；12 個 `if (!g_x) return;` 守門一個都不會消失（它們擋的是 wndproc 在 `wWinMain` 發佈前／`:3210` 清空後被呼叫，struct 化不改變那個時間窗），銷毀順序仍然由 `wWinMain` 的 stack local 宣告順序決定，那正是 C++ 已經保證的機制。要重開必須提出**建構／銷毀順序真的出過一次事**的修補紀錄。原本掛在此候選下的 applied-settings 三份鏡像已獨立留在 §候選。 |
 | 把 FR-004a 的 program-like 判準套用到 FR-005 使用者自訂資料夾 | `docs/design-spec.md:354` | 明文「此判準**不套用於** FR-005 的使用者自訂資料夾」。該來源的把關者是使用者自己勾選的副檔名清單；二次過濾會無聲擋掉使用者手動加入的副檔名。 |
 
 ## 稽核修補 lane 10（NR-118，2026-08-09 第十二次 fresh audit 產出）
@@ -434,22 +435,18 @@ NR-138（IconRequestSession）── 依賴 NR-012、NR-032、NR-099、NR-109、
 | 7 | NR-136 | 低 | 獨立、範圍最小、風險最低 |
 | 8 | NR-135 | 低 | **排最後**：它會改變 CTest 數，連帶要同步 `docs/testing.md` 與重產 release evidence；放在其他 item 都落地後只做一次 |
 
-做完 4 與 5 之後**重新評估** `PanelHost` 候選——屆時大部分全域已被移走，那個 diff 才划算。
+NR-132／NR-134 已落地，`PanelHost` 候選已於 2026-08-10 重新評估並**否決**（見 §已否決的方向）。
 
 ### 候選（尚未開 item）
 
-- **`main.cpp` 的 ~28 個子系統全域收成一個 `PanelHost` struct**：`wWinMain`（`:3714-3804`）
-  把十一個子系統當 stack local 建構後立刻發佈成裸指標全域，銷毀順序是隱性且 load-bearing
-  （`:3783-3786` 的註解是唯一保護）；每個 host 函式頂端的 `if (!g_x) return;` 是為了一個
-  視窗存在後就不可能發生的狀態。純機械但巨大的 diff，**必須排在 NR-132 與 NR-134 之後**
-  ——那兩個 item 會先移走大部分全域，順序比範圍更關鍵。
+- **applied-settings 三份部分鏡像**（`main.cpp` ShowPanel 只複製 `recent_count`、
+  對話框套用、`wWinMain` 各寫一份）：「catalog 來源欄位只能經由 rebuild 改變」這條規則
+  目前只活在註解裡。原本掛在 `PanelHost` 候選底下；`PanelHost` 否決後這條**獨立留存**為候選
+  ——它是一條真實的不變式，與收全域無關，若日後 settings 欄位增加就開成獨立 item。
 - **`Render()`（`main.cpp:1939-2400`，460 行）抽出 `std::vector<RowVisual>` builder**：
   把「畫什麼」與「怎麼畫」分開，`SyncAccessibility` 可共用同一份決策（目前獨立重推
   `selected`／`disabled`，是與 NR-133 同型的第三份分歧）。**不是** render command list。
   近期無任何 bug 修補指向 `Render` 的狀態邏輯，故列候選不開 item；若它開始出現在 bug 報告再開。
-  `PanelHost` 候選另應順帶擁有 **applied-settings 三份部分鏡像**（`main.cpp:2432-2442` ShowPanel
-  只複製 `recent_count`、`:3159-3162` 對話框套用、`:3714-3717` `wWinMain`），那條
-  「catalog 來源欄位只能經由 rebuild 改變」的規則目前只活在 `:2439-2441` 的註解裡。
 - **`ModalScope` RAII**（`g_context_menu_active`／`g_dialog_active` 的五處手動 set/clear，
   `main.cpp:201-205`、`:928-931`、`:980-983`、`:2697-2700`、`:3459-3462`）：與 NR-119 修掉的
   是同一類共用狀態覆寫，但**沒有第二次出事的證據**，NR-119 的一行入口守門已經擋住那個 crash。
