@@ -155,6 +155,18 @@
 | NR-116 | Cold-start cache ＋ 首輪 source failure 保留該來源快取行與 usage | 3 | `done` | NR-011, NR-063, NR-113 | [NR-116](work-items/NR-116-cold-start-cache-source-failure-retention.md) |
 | NR-117 | Message loop 必須正確處理 GetMessageW error，不得 dispatch 未定義 MSG | 3 | `done` | NR-115 | [NR-117](work-items/NR-117-message-loop-getmessage-error.md) |
 | NR-118 | Watcher/debounce 的部分 rebuild 不得取代冷啟動的完整 rebuild | 3 | `done` | NR-065, NR-081, NR-116 | [NR-118](work-items/NR-118-watcher-supersede-full-rebuild.md) |
+| NR-119 | 設定對話框重入覆寫 g_dialog → null deref crash | 4 | `ready` | NR-013, NR-089 | [NR-119](work-items/NR-119-settings-dialog-reentrancy-crash.md) |
+| NR-120 | 高度 clamp 在高 DPI 小螢幕裁掉 footer；§4.9 的 70% 上限未實作 | 3 | `ready` | NR-015, NR-082, NR-103 | [NR-120](work-items/NR-120-panel-height-clamp-footer.md) |
+| NR-121 | catalog.cache 無行數上限＋dedup O(n²) 在 UI 執行緒 | 2 | `ready` | NR-011, NR-057, NR-073, NR-079, NR-113 | [NR-121](work-items/NR-121-catalog-cache-row-cap-dedup-index.md) |
+| NR-122 | favorites/usage 無行數上限：load O(n²)＋Reconcile O(pins×catalog)＋ReadAllBytes 無上限 | 1 | `ready` | NR-057, NR-072, NR-080, NR-096 | [NR-122](work-items/NR-122-store-row-caps-and-hash-loads.md) |
+| NR-123 | Rebuild thread join 無界：hung Shell call 卡死關閉（§9.4） | 3 | `ready` | NR-049, NR-077, NR-098 | [NR-123](work-items/NR-123-rebuild-join-bounded-wait.md) |
+| NR-124 | §11 診斷缺口：損壞捷徑／缺失資料夾靜默略過、dedup 歧義計數丟棄 | 3 | `ready` | NR-054, NR-063, NR-090, NR-091, NR-092 | [NR-124](work-items/NR-124-catalog-diagnostic-gaps.md) |
+| NR-125 | design-spec §4.1／FR-002 回寫 NR-088 的 Win 鍵決策 | 4 | `ready` | NR-086, NR-088, NR-094 | [NR-125](work-items/NR-125-spec-winkey-sync.md) |
+| NR-126 | 文件殘餘同步：§4.6 公式、§10.2 格式、testing/roadmap、註解、release-evidence | 5 | `ready` | NR-056, NR-061, NR-094, NR-104 | [NR-126](work-items/NR-126-docs-residual-sync.md) |
+| NR-127 | 路徑／解析／常數 helper 重複拷貝收斂（×3/×3/×5 等） | 3 | `ready` | NR-057 | [NR-127](work-items/NR-127-duplicate-helper-convergence.md) |
+| NR-128 | 死碼與 test-only API 移除（g_last_hotkey_error、GetStartupStatus、Resolve 等） | 3 | `ready` | NR-127 | [NR-128](work-items/NR-128-dead-code-removal.md) |
+| NR-129 | 25 份逐字相同的測試 Expect helper 收斂 | 3 | `ready` | NR-055 | [NR-129](work-items/NR-129-shared-test-expect-helper.md) |
+| NR-130 | 同 user DoS 面：full-rescan 限流＋single-instance 靜默退出 | 1 | `ready` | NR-002, NR-077, NR-110 | [NR-130](work-items/NR-130-same-user-dos-surface.md) |
 
 ## Dependency lanes
 
@@ -323,7 +335,112 @@ unverified 行（顯示不可啟動、無後續完整 rebuild 保證）、無 ca
 純值守門 ShouldStartRebuild，watcher/timer 在途時以既有 500 ms debounce timer 延後服務。
 ```
 
+## 稽核修補 lane 11（NR-119～NR-130，2026-08-10 第十三次全 repo 稽核產出）
+
+```
+NR-119（設定對話框重入 crash）── 依賴 NR-013、NR-089（done）；CRITICAL；
+        tray→Settings 在對話框 modal loop 內重入 ShowSettingsDialog，內層關閉清掉 g_dialog，
+        外層任何控制項互動即 null deref。修 ShowSettingsDialog 入口 re-entrancy guard
+NR-120（高度 clamp 裁 footer）── 依賴 NR-015、NR-082、NR-103（done）；IMPORTANT；
+        200% DPI 小螢幕 path bar＋key hints 整條不可見；spec §4.9「70% 上限」從未實作。
+        採「放不下時壓縮可見列數、footer 恆可見」＋spec 同步（第五輪曾記為低度發現，本輪升級）
+NR-121（cache 無行數上限＋dedup O(n²)）── 依賴 NR-011、NR-057、NR-073、NR-079、NR-113（done）；MEDIUM；
+        不受信 cache 檔可讓冷啟動凍結數秒以上；dedup.cpp 註解的「FR-003 有界」不涵蓋 cache 檔。
+        行數上限走既有 Malformed 路徑；name-collision 掃描改 name-keyed 分桶（逐位元等價）
+NR-122（store 行數/大小無上限）── 依賴 NR-057、NR-072、NR-080、NR-096（done）；MEDIUM；
+        favorites/usage 的 O(n²) load＋O(pins×catalog) Reconcile 在每次 Alt+Space 的 UI 執行緒；
+        ReadAllBytes 無大小上限。與 NR-121 同根因不同檔案，故拆開
+NR-123（rebuild join 無界）── 依賴 NR-049、NR-077、NR-098（done）；MEDIUM；
+        hung Shell call 使 WM_DESTROY／Ctrl+R 卡死 UI（§9.4 違反）；只補 shutdown 路徑 bounded wait，
+        不用 TerminateThread，Ctrl+R 的 supersede join 維持原樣
+NR-124（§11 診斷缺口）── 依賴 NR-054、NR-063、NR-090/091/092（done）；MEDIUM；
+        損壞捷徑／缺失資料夾「記錄錯誤」從未實作、dedup 歧義計數被丟棄；計數帶回 RebuildResult、
+        UI 執行緒完成 handler 寫 sanitized 一行式，枚舉器不碰 DiagnosticLog
+NR-125（spec Win 鍵矛盾）── 依賴 NR-086、NR-088、NR-094（done）；MEDIUM；
+        NR-088 覆寫後 spec §4.1 仍寫「一律拒絕 Win 鍵」——唯一「規格說謊」級發現；純改 spec
+NR-126（文件殘餘同步）── 依賴 NR-056、NR-061、NR-094、NR-104（done）；LOW；
+        §4.6 公式、§10.2 favorites 格式、testing/roadmap 過時、main.cpp 註解、release-evidence 重產
+NR-127（helper 重複收斂）── 依賴 NR-057（done）；MEDIUM；ToLower/FileName/FileStem/Extension ×3、
+        ParseInt ×3、kSchemaPrefix ×5、kMinRecentCount ×2、KeyFor、all-sources ×4、預設值 ×2
+NR-128（死碼移除）── 依賴 NR-127；LOW；g_last_hotkey_error、GetStartupStatus/StartupStatus/PathsMatch
+        （唯一讀大 REG_SZ 的輸入面，刪掉即移除）、IconCache::Resolve、kQuickSelectDigits、FileName、未用 include
+NR-129（測試 Expect ×25）── 依賴 NR-055（done）；LOW；NR-055 的 CMake 收斂在測試碼層的對應
+NR-130（同 user DoS 面）── 依賴 NR-002、NR-077、NR-110（done）；LOW；
+        full-rescan marker 無限流可被偽造事件驅動 rebuild storm；single-instance 逾時靜默退出。
+        採限流＋逾時 MessageBoxW 回饋，不驗證 sender、不搶回 mutex
+```
+
 ## 計畫決策紀錄
+
+- 2026-08-10（NR-119～NR-130 ready，第十三次全 repo 稽核產出）：NR-118 完成後派四個平行唯讀
+  subagent 分軸審計（ponytail 過度設計／正確性穩健性／spec 符合度／安全性不受信輸入），主 Agent
+  對所有 CRITICAL/IMPORTANT 與跨軸交叉發現逐一重讀原始碼驗證後收斂成 12 個 item。**排序依
+  「先修 crash、再修使用者看得到的中斷、再修資料面與資源、再修文件與整理」**。逐項決策與
+  「為什麼不那樣做」：**NR-119（CRITICAL）**——`g_dialog` 是檔案範圍全域（`settings_dialog.cpp:47`，
+  `:613` 設／`:619` 清空），`kSettingsMessage` handler（`main.cpp:3058-3064`）無 re-entrancy
+  守門；設定對話框 modal loop 期間 tray→Settings（`ShowTrayMenu` 的 `PostMessageW(kSettingsMessage)`）
+  重入 `ShowSettingsDialog`，內層關閉清掉外層 context → 外層任何控制項互動 null deref 殺死常駐
+  process。`g_dialog_active` 只涵蓋 MessageBox 前後、語意是「面板不因 KILLFOCUS 隱藏」，不是守門。
+  修法：`ShowSettingsDialog` 入口 `if (g_dialog.editor != nullptr) return false;` 一行；不搬
+  `GWLP_USERDATA`（搬移是選修）；WM_HOTKEY 在對話框期間叫出面板（焦點竊取）是同族不同問題，
+  不 crash，列 Non-goal。**NR-120（IMPORTANT）**——`ClampWindowSize`（`panel_layout.cpp:37-43`）
+  是 work-32px；200% DPI 小螢幕（1366×768）488 DIP 面板被 clamp 到 696px，footer band
+  （462~482 DIP，第五輪已量）整條不可見，§4.2 path bar 與 §4.9 key hints 都是 spec 承諾；
+  spec 的「上限 70%」與「高度依內容調整」從未實作、三方矛盾。採 Option A：放不下時壓縮
+  list/grid 可見列數、footer 恆可見，clamp 維持 work-32px（70% 在 200% 小螢幕更小、仍裁
+  footer），spec 同步改寫；NR-064/082 的 hit-test 界限不動。**NR-121（MEDIUM）**——cache 檔
+  是磁碟上不受信輸入卻無行數上限（`catalog_cache.cpp:122-155` 全收），`DeduplicateCatalog`
+  的 name-collision 掃描是 O(n²)（`dedup.cpp:96-106`，每對兩次 `ToLower`）；dedup.cpp 註解的
+  「FR-003 有界」約束的是枚舉器輸出，不涵蓋 cache 檔；呼叫點在 message loop 前的冷啟動與每次
+  generation 完成（UI 執行緒）。修法：`kMaxCacheRows` 超限走既有 Malformed 路徑（NR-050 形狀），
+  name-collision 改 lowercased name 分桶（`UnjudgeableNameCollision` 只在名字相等時才可能 true，
+  分桶結果逐位元等價）；不重開「搜尋太慢」的已否決方向（本 item 是 dedup＋cache 界，與
+  `SearchApps` 無關）。**NR-122（MEDIUM）**——favorites/usage 的 load 是 O(n²)（`pin_store.cpp:76`、
+  `usage_store.cpp:68`），Reconcile 是 O(pins×catalog)（`pin_store.cpp:210`），每次 Alt+Space
+  都在 UI 執行緒跑，兩檔無行數上限、`ReadAllBytes`（`atomic_text_file.h:61-84`）無大小上限；
+  與 NR-121 同根因但檔案/演算法/測試不同，拆開。修法：行數/位元組上限走既有 corrupt 路徑＋
+  load/Reconcile hash 化（O(n+m)），schema 與 Save 格式一字不改。**NR-123（MEDIUM）**——
+  `JoinRebuildThreads`（`main.cpp:1587-1596`）在 Ctrl+R、設定套用與 WM_DESTROY 都無界 join；
+  NR-098 的 cancel 只在迭代邊界檢查，hung Shell call 卡死關閉（§9.4 違反）。第四輪曾把 icon
+  worker Stop() 記為已知限制；本 item 只補 shutdown 路徑 bounded wait（建議 5 s，逾時放棄 join；
+  安全論證＝NR-049 捕獲清單＋NR-077 未知 token 忽略＋process 結束 OS 回收執行緒），Ctrl+R 的
+  supersede join 維持原樣（NR-118 決策 §4），**不用 TerminateThread**（持 COM 鎖的執行緒上
+  強制終止可能 deadlock 全 process）。**NR-124（MEDIUM）**——§11 明列的「單一捷徑損壞→記錄
+  錯誤」「缺失資料夾→記錄一次」從未實作（`start_menu_catalog.cpp:138-139`、`user_folder_catalog.cpp:
+  111-113` 靜默），dedup 的 `ambiguous_kept`/`removed_duplicates` 計數在 `catalog_refresh.cpp:232`
+  被丟棄；grep 證實枚舉器路徑零 DiagnosticLog。修法：計數帶回 RebuildResult、UI 執行緒完成
+  handler 寫 sanitized 一行式（FR-014 格式，每 generation 每來源至多一行、零計數不寫）；
+  `source_ok` 語意（NR-063/090/091/092）不改。**NR-125（MEDIUM）**——NR-088 把 Win 鍵從硬拒絕
+  降級為警告可確認後，spec §4.1（`:135`）與 FR-002 仍寫「一律拒絕」，出貨行為與唯一真相直接
+  矛盾；本 item 是覆寫的落點，只改 spec（NR-086 的 shell-reserved 三組合硬拒絕保留）。
+  **NR-126（LOW）**——§4.6 公式（spec 寫 30d/7d 視窗、實作是 lifetime total＋bonus，schema
+  算不出公式；第四輪已記刻意省略，本 item 只把 spec 同步為實際公式並註記 schema 限制，不 bump）、
+  §10.2 favorites 格式（寫每行一個 ID、實際 schema=2 三欄 TSV）、testing.md 的 NR-053 殘句
+  （NR-061 已否決填充）、roadmap Phase 標記、main.cpp:2328 註解（640x432 vs 488）、
+  release-evidence 重產（25→26）。**NR-127（MEDIUM，ponytail 軸唯一 MEDIUM）**——ToLower/
+  FileName/FileStem/Extension 三份拷貝（`user_folder_catalog.cpp:16-46` 與同 library 的
+  `app_filter.h` 逐字相同、settings 再拷兩份）、ParseCountText vs ParseInt 第三份 wcstol 且缺
+  ERANGE、kSchemaPrefix ×5、kMinRecentCount ×2、KeyFor vs IconKey::Encode、main.cpp all-sources
+  ×4、Settings 預設值雙份；沿用 NR-057 的收斂原則（放既有純值標頭、逐字相同才收斂、行為零變更）。
+  **NR-128（LOW）**——`g_last_hotkey_error`（write-only）、`GetStartupStatus`/`StartupStatus`/
+  `PathsMatch`（src 零呼叫者、唯一讀大 REG_SZ 的輸入面，刪掉即移除）、`IconCache::Resolve`
+  （NR-032 後無生產消費者）、`kQuickSelectDigits`（測試用常數驗證常數）、`app_filter::FileName`
+  （零外部呼叫者，時機與 NR-127 協調）、兩個未用 include；`SetStartupEnabled` 保留。**NR-129
+  （LOW）**——25 份逐字相同 Expect 收斂成 `tests/unit/test_util.h`，NR-055 的 CMake 收斂在
+  測試碼層的對應。**NR-130（LOW）**——full-rescan marker 無限流（同 user process 可偽造事件
+  驅動 rebuild storm）＋single-instance 逾時靜默退出；採「限流併入既有 debounce＋逾時
+  MessageBoxW 回饋」，不驗證 sender（NR-077 決策不重開）、不搶回 mutex（NR-110 競賽不重開）。
+  跨軸交叉：B.M1（footer 裁切）＝C.F4（70% 未實作）合併為 NR-120；B.M2（dedup O(n²)）＝
+  D.F1（cache 無上限）合併為 NR-121；D.F6（REG_SZ 大小）因 GetStartupStatus 是死碼而由
+  NR-128 一併消除，不另開。未成 item 的低嚴重度發現（記錄備查）：(1) `RefreshPins` 每次
+  ShowPanel 都整檔重寫 favorites.txt（Reconcile 把全部 last_seen 重寫為 now，熱路徑 I/O）；
+  (2) `g_pins->Save()`/`g_usage->Save()` 回傳值被忽略（失敗時無診斷）；(3) ShowPanel 的
+  settings Load 回傳值未檢查（執行中損壞→設定靜默回預設一次）；(4) EN_UPDATE 查詢截斷在
+  1023 字元（EDIT 顯示與搜尋不一致）；(5) fallback initial 對 surrogate pair 只取高半代理字
+  （純視覺）；(6) `PanelModel::Columns()` 每次呼叫重跑 NormalizeName（微量）；(7) §8.3
+  Clang 分支無 LTO/CFG/HEVA/PDB（工具鏈支援與否屬 release 決策）。全部 12 個 item 依賴皆
+  done、皆 `ready`；NR-127 與 NR-128 同動 user_folder_catalog/app_filter，建議同一 agent 依序。
+  未 commit。
 
 - 2026-08-09（NR-118，第十二次 fresh audit 產出）：NR-117 完成後再派 fresh independent read-only audit，
   未在 NR-113～NR-117 內找到新 bug；但沿 `kWatchChangedMessage`→`WM_TIMER`→`StartRebuild` 追蹤發現一個
