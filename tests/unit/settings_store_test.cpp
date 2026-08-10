@@ -31,6 +31,8 @@ using nimblerun::UsageLoadResult;
 using nimblerun::UsageStore;
 using nimblerun::VersionedReadStatus;
 using nimblerun::UserDataDirFromLocalAppData;
+using nimblerun::kMaxCatalogRoots;
+using nimblerun::kMaxHotkeyLength;
 
 namespace {
 
@@ -244,7 +246,7 @@ void TestOversizeFileCorrupt(const std::wstring& dir) {
 // partial parse (NR-080 contract).
 void TestCatalogRootCap(const std::wstring& dir) {
     std::string content = "schema=1\n";
-    for (int i = 0; i < 33; ++i) {
+    for (std::size_t i = 0; i < kMaxCatalogRoots + 1; ++i) {
         content += "catalog_root=C:\\root|true\n";
     }
     WriteBytes(dir + L"\\settings.ini", content);
@@ -261,23 +263,24 @@ void TestCatalogRootCap(const std::wstring& dir) {
 void TestCatalogRootMaxOk(const std::wstring& dir) {
     // Paths avoid \r/\n/\t/\\ sequences: UnescapeText treats them as escapes.
     std::string content = "schema=1\n";
-    for (int i = 0; i < 32; ++i) {
+    for (std::size_t i = 0; i < kMaxCatalogRoots; ++i) {
         content += "catalog_root=C:\\Tools" + std::to_string(i) + "|true\n";
     }
     WriteBytes(dir + L"\\settings.ini", content);
     SettingsStore store(dir);
     Settings loaded;
     Expect(store.Load(loaded) == SettingsLoadResult::Loaded, "32 roots loads");
-    Expect(loaded.catalog_roots.size() == 32, "all 32 roots preserved");
+    Expect(loaded.catalog_roots.size() == kMaxCatalogRoots, "all 32 roots preserved");
     Expect(loaded.catalog_roots[0].path == L"C:\\Tools0", "first root preserved");
-    Expect(loaded.catalog_roots[31].path == L"C:\\Tools31", "last root preserved");
+    Expect(loaded.catalog_roots[kMaxCatalogRoots - 1].path == L"C:\\Tools31",
+           "last root preserved");
 }
 
 // NR-140: a hotkey value longer than kMaxHotkeyLength never reaches
 // ParseHotkey's per-'+' vector; over-limit is the same whole-file Corrupt.
 void TestHotkeyLengthCap(const std::wstring& dir) {
     std::string content = "schema=1\nhotkey=";
-    content.append(257, 'A');
+    content.append(kMaxHotkeyLength + 1, 'A');
     content += "\n";
     WriteBytes(dir + L"\\settings.ini", content);
     SettingsStore store(dir);

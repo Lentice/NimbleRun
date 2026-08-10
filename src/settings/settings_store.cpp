@@ -21,12 +21,6 @@ namespace {
 
 constexpr std::wstring_view kFileName = L"settings.ini";
 constexpr int kSchemaVersion = 1;
-// NR-140: settings.ini is untrusted input (design-spec §10.4). Caps keep a
-// crafted file from spawning a watcher thread per root at startup (each root
-// becomes a CreateFileW + std::thread in main.cpp StartWatchers) and from
-// pushing a huge value through ParseHotkey's per-'+' vector.
-constexpr std::size_t kMaxCatalogRoots = 32;
-constexpr std::size_t kMaxHotkeyLength = 256;
 
 bool ParseInt(std::wstring_view text, int& out) {
     // NR-144: the previous copy hand-rolled a wide-string-to-long parse with

@@ -91,3 +91,43 @@ rg -n "kMaxCatalogRoots" src/settings
 ```
 
 完成後在文件底部補齊本 item 的 Handoff 交接備註。
+
+## Handoff
+
+- 2026-08-10 完成（NR-152, commit `NR-152: symmetric settings root cap on the write side`）。
+- 變更：
+  - `src/settings/settings_store.h` — 新增公開常數
+    `kMaxCatalogRoots = 32`、`kMaxHotkeyLength = 256`（`inline constexpr
+    std::size_t`，含 NR-140 防護理由註解，與 `kMinRecentCount`／`kMaxRecentCount`
+    同款），`<cstddef>` 一併補進 include。
+  - `src/settings/settings_store.cpp` — 兩常數自 anonymous namespace 移除；
+    `Load` 的 `:220`（root 上限）與 `:189`（hotkey 長度）改從 header 引用，
+    語意與數值零變動。
+  - `src/settings/settings_editor.cpp` — `AddRoot`（:396-403）在
+    `IsLocalAbsolutePath` 通過後、duplicate 檢查前新增 `>= kMaxCatalogRoots`
+    → `return false`（回 false 時 working copy 不動、不設 dirty）；新增
+    `SettingsString::FolderLimitNotice` 文案
+    「The maximum of 32 user folders is already reached.」。
+  - `src/settings/settings_editor.h` — enum 增列 `FolderLimitNotice`；`AddRoot`
+    註解補「at most kMaxCatalogRoots」。
+  - `src/app_host/settings_dialog.cpp` — `IDC_ADD_FOLDER`（:496-505）：browse
+    回傳路徑後先檢查 `Working().catalog_roots.size() >= kMaxCatalogRoots`，
+    達上限顯示 `FolderLimitNotice`（不再誤導成「路徑無效」），未達上限才呼叫
+    `AddRoot`（失敗仍顯示既有 `FolderInvalidNotice`）；`Populate` 維持每次刷新。
+  - `docs/design-spec.md` §FR-013 — 自訂資料夾條目補上限句（決策 2 原文）：
+    「自訂資料夾上限 32 個（與設定檔讀取端一致；超限的 `settings.ini` 視為損壞、
+    退回預設並隔離原檔）；`hotkey` 值上限 256 字元，超限同視為損壞。」
+  - `tests/unit/settings_editor_test.cpp` — 新增 `TestAddRootCap`：加到 32 全
+    過、第 33 個回 false 且清單維持 32、重複路徑在滿載下仍回 false。
+  - `tests/unit/settings_store_test.cpp` — NR-140 既有上限測試改引用公開常數
+    （`kMaxCatalogRoots`／`kMaxHotkeyLength` 取代字面 32/33/257），斷言不變。
+- 驗證：Release（llvm-mingw/Ninja）build 成功；新 warnings 0（唯一 warning 仍是
+  `main.cpp:1395 unused variable 'target_size'`，NR-150 交接區已記錄與本 item
+  無關）；CTest 31/31 全綠（數量不變）；`ctest -R "settings"` 2/2 全綠；
+  `rg kMaxCatalogRoots src/settings` → 定義於 `settings_store.h`、`Load` 與
+  `AddRoot` 各引用一次。
+- 交接：`Save` 未加第二道守門（決策 1）——`AddRoot` 是 UI 唯一新增來源，
+  `Settings` 直接構造僅存在於測試與預設值；若未來新增其他寫入路徑，須先在該
+  路徑複用 `kMaxCatalogRoots` 守門。`hotkey` 的寫入端不受此 cap 影響：
+  `SetHotkey` 走 `ParseHotkey` 語法驗證且 `Save` 前有 swap 回滾，與 NR-140
+  的 256-char 上限（針對檔案的原始值防護）互補不重疊。

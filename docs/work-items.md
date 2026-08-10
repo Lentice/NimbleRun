@@ -188,7 +188,7 @@
 | NR-149 | WM_DPICHANGED 的 lParam 未驗證：同 user 程序 SendMessageW 任意指標即 AV 殺死常駐 process | 3 | `done` | — | [NR-149](work-items/NR-149-wm-dpi-changed-lparam-validation.md) |
 | NR-150 | HwndRenderTarget DPI 從未同步：混合 DPI 螢幕內容裁切且 hit-test 與 paint 分歧 | 3 | `done` | NR-149 | [NR-150](work-items/NR-150-render-target-dpi-sync.md) |
 | NR-151 | NR-139 殘餘：偽造 inline delivery-failure 使 generation 提前完成，過時快照寫進 catalog.cache | 3 | `done` | — | [NR-151](work-items/NR-151-delivery-failure-token-auth.md) |
-| NR-152 | settings 寫入端與讀取端不對稱：UI 可寫出自己讀不回來的檔（整包設定重置陷阱）＋spec 補條文 | 1 | `ready` | — | [NR-152](work-items/NR-152-settings-write-side-symmetry.md) |
+| NR-152 | settings 寫入端與讀取端不對稱：UI 可寫出自己讀不回來的檔（整包設定重置陷阱）＋spec 補條文 | 1 | `done` | — | [NR-152](work-items/NR-152-settings-write-side-symmetry.md) |
 | NR-153 | NR-147 留下的死分支（Change 兩臂相同）與未用常數 kRebuildStartMinIntervalMs | 2 | `ready` | — | [NR-153](work-items/NR-153-nr147-dead-branch-cleanup.md) |
 | NR-154 | ParseInt 收斂只做一半：settings_store 與 settings_dialog 仍兩份拷貝 | 1 | `ready` | — | [NR-154](work-items/NR-154-parseint-shared-helper.md) |
 | NR-155 | catalog_refresh sequel：SourceEntries 死碼＋防偽守門抽共用 helper | 3 | `ready` | — | [NR-155](work-items/NR-155-catalog-refresh-cleanup-sequel.md) |

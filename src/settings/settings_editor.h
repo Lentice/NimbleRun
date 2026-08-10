@@ -44,6 +44,7 @@ enum class SettingsString {
     RecentCountNotice,
     SaveFailedNotice,
     FolderInvalidNotice,
+    FolderLimitNotice,  // NR-152: at kMaxCatalogRoots, AddRoot refuses (write/read symmetry)
     ExtensionsNotice,
     ClearUsageDoneNotice,
     ResetDoneNotice,
@@ -99,7 +100,7 @@ public:
     bool SetAutoStart(bool enabled);
     bool SetHotkey(std::wstring_view combo);    // empty/invalid/Win-key rejected
     bool SetExtensionEnabled(std::wstring_view extension, bool enabled);
-    bool AddRoot(std::wstring_view path, bool recursive);   // local absolute paths only
+    bool AddRoot(std::wstring_view path, bool recursive);   // local absolute paths only; at most kMaxCatalogRoots
     bool RemoveRoot(std::size_t index);
     bool SetRootRecursive(std::size_t index, bool recursive);
 

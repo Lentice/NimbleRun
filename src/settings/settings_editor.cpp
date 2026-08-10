@@ -159,6 +159,10 @@ std::wstring_view SettingsStringText(SettingsString key) {
         return L"Could not save settings. The previous values were kept.";
     case SettingsString::FolderInvalidNotice:
         return L"Only local folder paths are accepted (for example C:\\Tools).";
+    case SettingsString::FolderLimitNotice:
+        // NR-152: the write side mirrors Load's 32-root cap, so the notice says
+        // what actually happened instead of blaming the picked path.
+        return L"The maximum of 32 user folders is already reached.";
     case SettingsString::ExtensionsNotice:
         return L"At least one extension must stay enabled.";
     case SettingsString::ClearUsageDoneNotice:
@@ -387,6 +391,13 @@ bool SettingsEditor::SetExtensionEnabled(std::wstring_view extension, bool enabl
 
 bool SettingsEditor::AddRoot(std::wstring_view path, bool recursive) {
     if (!IsLocalAbsolutePath(path)) {
+        return false;
+    }
+    // NR-152: the write side mirrors Load's cap (settings_store.h). At 32
+    // roots the next add must be refused, or Save would persist a file the
+    // next Load quarantines as corrupt -- the NR-058 "settings vanished" trap,
+    // re-created through the settings dialog.
+    if (working_.catalog_roots.size() >= kMaxCatalogRoots) {
         return false;
     }
     const std::wstring normalized = Trim(path);

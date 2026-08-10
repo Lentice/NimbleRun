@@ -41,6 +41,7 @@ using nimblerun::SettingsString;
 using nimblerun::SettingsStringText;
 using nimblerun::Theme;
 using nimblerun::UsageStore;
+using nimblerun::kMaxCatalogRoots;
 
 namespace {
 
@@ -350,6 +351,25 @@ void TestHotkeyParseAcceptsWinModifier() {
     Expect(ParseHotkey(L"Ctrl+Esc", binding) == false, "Ctrl+Esc still hard-rejected");
 }
 
+// NR-152: the write side mirrors Load's read-side cap. Past kMaxCatalogRoots
+// every AddRoot is refused, so Save can never persist a settings.ini the next
+// launch would quarantine as corrupt (NR-058 "settings vanished" trap).
+void TestAddRootCap() {
+    SettingsEditor editor(DefaultSettings());
+    for (std::size_t i = 0; i < kMaxCatalogRoots; ++i) {
+        Expect(editor.AddRoot(L"C:\\Tools" + std::to_wstring(i), true),
+               "roots up to the cap are accepted");
+    }
+    Expect(editor.Working().catalog_roots.size() == kMaxCatalogRoots,
+           "32 roots in the working copy");
+    Expect(editor.AddRoot(L"D:\\Extra", true) == false, "33rd root refused");
+    Expect(editor.Working().catalog_roots.size() == kMaxCatalogRoots,
+           "refused root leaves the list at the cap");
+    Expect(editor.AddRoot(L"C:\\Tools0", true) == false, "duplicate still refused");
+    Expect(editor.Working().catalog_roots.size() == kMaxCatalogRoots,
+           "duplicate refusal keeps the list at the cap");
+}
+
 void TestResetRestoresDefaults() {
     const std::wstring dir = MakeTempDir("reset");
     SettingsStore store(dir);
@@ -466,6 +486,7 @@ int wmain() {
     TestHotkeyParseFormat();
     TestHotkeyRejectsShellReservedCombos();
     TestHotkeyParseAcceptsWinModifier();
+    TestAddRootCap();
     TestResetRestoresDefaults();
     TestClearUsageOnly();
     TestClearUsageFailureRestoresRecords();

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -33,6 +34,16 @@ inline constexpr int kMaxRecentCount = 40;
 // UNC, network, URI and device paths are rejected (design-spec §FR-005).
 // Shared with the user-folder catalog enumerator for its defensive guard.
 bool IsLocalAbsolutePath(std::wstring_view value);
+
+// NR-140: settings.ini is untrusted input (design-spec §10.4). These caps keep
+// a crafted file from spawning a watcher thread per root at startup (each root
+// becomes a CreateFileW + std::thread in main.cpp StartWatchers) and from
+// pushing a huge value through ParseHotkey's per-'+' vector. Over-limit is
+// whole-file Corrupt in Load; SettingsEditor::AddRoot enforces the same root
+// cap on the write side (NR-152) so the UI cannot persist a file the next
+// Load would quarantine.
+inline constexpr std::size_t kMaxCatalogRoots = 32;
+inline constexpr std::size_t kMaxHotkeyLength = 256;
 
 struct Settings {
     std::wstring hotkey = L"Alt+Space";

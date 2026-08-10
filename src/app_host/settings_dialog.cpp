@@ -493,7 +493,11 @@ INT_PTR CALLBACK SettingsDialogProc(HWND dialog, UINT message, WPARAM w_param, L
             if (pidl) {
                 wchar_t path[MAX_PATH];
                 if (SHGetPathFromIDListW(pidl, path)) {
-                    if (!g_dialog.editor->AddRoot(path, true)) {
+                    // NR-152: at the cap AddRoot would refuse; name the real reason
+                    // (the limit) instead of the misleading path-invalid notice.
+                    if (g_dialog.editor->Working().catalog_roots.size() >= kMaxCatalogRoots) {
+                        SetStatus(dialog, SettingsString::FolderLimitNotice);
+                    } else if (!g_dialog.editor->AddRoot(path, true)) {
                         SetStatus(dialog, SettingsString::FolderInvalidNotice);
                     }
                     Populate(dialog, g_dialog.editor->Working());
