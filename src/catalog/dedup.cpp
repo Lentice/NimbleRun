@@ -34,18 +34,9 @@ int SourcePriority(AppSource source) {
 // their stored identity alone (design-spec §FR-007 item 3): a packaged app's
 // Start Menu shortcut is a path, its AppsFolder item a parsing name. Same
 // display name + different identity + one Shell side = keep both, record it.
-// Never a reason to merge; only a diagnostic.
-bool UnjudgeableNameCollision(const AppEntry& a, const AppEntry& b) {
-    if (a.stable_id == b.stable_id) {
-        return false;  // same app: merged, not ambiguous
-    }
-    if (ToLower(a.display_name) != ToLower(b.display_name)) {
-        return false;  // not name-related: unrelated apps
-    }
-    const bool a_shell = a.source == AppSource::AppsFolder;
-    const bool b_shell = b.source == AppSource::AppsFolder;
-    return a_shell != b_shell;
-}
+// Never a reason to merge; only a diagnostic. The name-equality half of this
+// predicate is the bucket key of the scan in DeduplicateCatalog (NR-121), so
+// the residual test inside a bucket is: distinct stable ids, one Shell side.
 
 // Between two entries for the same physical target, the target itself beats a
 // shortcut to it: the body is what the user thinks of as the app, and its path
@@ -93,14 +84,33 @@ DedupResult DeduplicateCatalog(const std::vector<AppEntry>& entries) {
         ++result.removed_duplicates;
     }
 
-    // ponytail: O(n^2) name-collision scan; catalog is bounded by design
-    // (FR-003, <5k entries), switch to a name-keyed index if it ever matters.
+    // NR-121: name-keyed bucketing. UnjudgeableNameCollision can only be true
+    // when the two lowercased display names are equal, so the old all-pairs
+    // scan reduces to bucketing kept entries by ToLower(display_name) once each
+    // and comparing only inside a bucket. Marked pairs, ambiguous_kept and
+    // output order are bit-for-bit the old scan's: the same predicate on
+    // exactly the subset of pairs it could ever fire on.
     std::vector<bool> ambiguous(result.entries.size(), false);
+    std::unordered_map<std::wstring, std::vector<std::size_t>> buckets;
+    buckets.reserve(result.entries.size());
     for (std::size_t i = 0; i < result.entries.size(); ++i) {
-        for (std::size_t j = i + 1; j < result.entries.size(); ++j) {
-            if (UnjudgeableNameCollision(result.entries[i], result.entries[j])) {
-                ambiguous[i] = true;
-                ambiguous[j] = true;
+        buckets[ToLower(result.entries[i].display_name)].push_back(i);
+    }
+    // ponytail: a pathological bucket of n same-named kept entries still costs
+    // O(n^2) trivial comparisons -- inherent, every such pair may be ambiguous.
+    // The cache row cap (kMaxCacheRows) and FR-003 bound n.
+    for (const auto& bucket : buckets) {
+        const std::vector<std::size_t>& indices = bucket.second;
+        for (std::size_t x = 0; x < indices.size(); ++x) {
+            const AppEntry& a = result.entries[indices[x]];
+            for (std::size_t y = x + 1; y < indices.size(); ++y) {
+                const AppEntry& b = result.entries[indices[y]];
+                if (a.stable_id != b.stable_id &&
+                    (a.source == AppSource::AppsFolder) !=
+                        (b.source == AppSource::AppsFolder)) {
+                    ambiguous[indices[x]] = true;
+                    ambiguous[indices[y]] = true;
+                }
             }
         }
     }

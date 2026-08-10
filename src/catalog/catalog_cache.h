@@ -2,10 +2,19 @@
 
 #include "catalog/app_entry.h"
 
+#include <cstddef>
 #include <string>
 #include <vector>
 
 namespace nimblerun {
+
+// NR-121: catalog.cache is untrusted on-disk input (NR-070); a hand-edited or
+// stale file must not freeze the cold-start UI thread with an unbounded
+// load + dedup (design-spec §11). A cache with more rows than this cap is
+// treated as Malformed (quarantined via PreserveCorrupt, rebuilt). Rows, not
+// bytes: the icon pack's 32 MiB is a byte budget, this is a row-count budget.
+// 20,000 is a generous multiple of FR-003's <5k enumerator scale with headroom.
+constexpr std::size_t kMaxCacheRows = 20000;
 
 // Versioned catalog cache under the per-user data dir (design-spec §10.2):
 // a speed-only snapshot of the merged catalog, never a source of truth. Read

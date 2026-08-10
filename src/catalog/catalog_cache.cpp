@@ -118,6 +118,23 @@ bool LoadCatalogCache(const std::wstring& directory, std::vector<AppEntry>& out,
         return false;
     }
 
+    // NR-121: a legally formatted file can still be untrusted-input abuse when
+    // it carries far more rows than any real catalog (a hand-edited file of
+    // valid lines, no corruption involved). Rows over the cap take the existing
+    // Malformed disposition -- PreserveCorrupt + rebuild -- so the cold-start UI
+    // thread is never asked to load + dedup an unbounded file (design-spec §11).
+    // The NewerSchema branch above returns before this point and is untouched.
+    // Empty lines never become entries (the parse loop skips them), so they do
+    // not count toward the row cap.
+    const std::size_t rows = static_cast<std::size_t>(std::count_if(
+        lines.begin(), lines.end(),
+        [](const std::wstring& line) { return !line.empty(); }));
+    if (rows > kMaxCacheRows) {
+        PreserveCorrupt(directory, kFileName);
+        out.clear();
+        return false;
+    }
+
     out.clear();
     out.reserve(lines.size());
     for (std::size_t i = 0; i < lines.size(); ++i) {

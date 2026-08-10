@@ -1,8 +1,11 @@
 #include "test_util.h"
 
+#include "catalog/app_filter.h"
 #include "catalog/dedup.h"
 #include "catalog/stable_id.h"
 
+#include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -15,6 +18,9 @@ using nimblerun::DedupResult;
 using nimblerun::DeduplicateCatalog;
 using nimblerun::HashStableId;
 using nimblerun::NormalizePathKey;
+using std::chrono::duration_cast;
+using std::chrono::microseconds;
+using std::chrono::steady_clock;
 
 namespace {
 
@@ -276,6 +282,90 @@ void TestEmptyInput() {
     Expect(out.ambiguous_kept == 0, "empty input ambiguous count");
 }
 
+// NR-121: the former all-pairs name-collision scan, kept here as the reference
+// for the bucketed scan. Replicates the pre-NR-121 DeduplicateCatalog tail:
+// every pair, lowercased-name equality + distinct stable id + one Shell side.
+std::vector<bool> ReferenceAmbiguousScan(const std::vector<AppEntry>& entries) {
+    std::vector<bool> ambiguous(entries.size(), false);
+    for (std::size_t i = 0; i < entries.size(); ++i) {
+        for (std::size_t j = i + 1; j < entries.size(); ++j) {
+            const AppEntry& a = entries[i];
+            const AppEntry& b = entries[j];
+            if (a.stable_id != b.stable_id &&
+                nimblerun::ToLower(a.display_name) == nimblerun::ToLower(b.display_name) &&
+                (a.source == AppSource::AppsFolder) != (b.source == AppSource::AppsFolder)) {
+                ambiguous[i] = true;
+                ambiguous[j] = true;
+            }
+        }
+    }
+    return ambiguous;
+}
+
+// NR-121: the bucketed scan must mark exactly the entries the all-pairs scan
+// marked. Recompute the reference over the produced entries and compare counts
+// on a mixed fixture that exercises every branch of the predicate: an
+// unjudgeable pair (same name, one Shell side), same-name judgeable pairs
+// (merged-by-id and both-path), unrelated names, and a verified/unverified
+// provenance mix (NR-116).
+void TestBucketedAmbiguityMatchesAllPairs() {
+    const std::wstring parsing = L"shell:AppsFolder\\Microsoft.WindowsCalculator_8wekyb3d8bbwe!App";
+    const std::wstring lnk = L"C:\\Users\\me\\Start Menu\\Calculator.lnk";
+    const std::wstring target = L"C:\\Program Files\\Note\\notepad.exe";
+    const std::wstring id = HashStableId(NormalizePathKey(target));
+
+    AppEntry unverified = Entry(HashStableId(NormalizePathKey(lnk)), L"Calculator",
+                                AppSource::UserStartMenu, lnk);
+    unverified.launch_verified = false;  // a cache row (NR-113)
+
+    std::vector<AppEntry> input = {
+        // Same stable id -> merged, not ambiguous.
+        Entry(id, L"Notepad", AppSource::UserStartMenu, L"C:\\Users\\me\\Start Menu\\Notepad.lnk"),
+        Entry(id, L"Notepad", AppSource::UserFolder, target),
+        // Same name, one Shell side -> the ambiguous pair.
+        Entry(HashStableId(parsing), L"Calculator", AppSource::AppsFolder, parsing),
+        unverified,
+        // Same name, both path -> judgeable distinct, not ambiguous.
+        Entry(HashStableId(NormalizePathKey(L"C:\\A\\a.exe")), L"Editor",
+              AppSource::UserFolder, L"C:\\A\\a.exe"),
+        Entry(HashStableId(NormalizePathKey(L"C:\\A\\b.exe")), L"Editor",
+              AppSource::UserFolder, L"C:\\A\\b.exe"),
+    };
+
+    const DedupResult out = DeduplicateCatalog(input);
+    const std::vector<bool> reference = ReferenceAmbiguousScan(out.entries);
+    const std::size_t reference_ambiguous =
+        static_cast<std::size_t>(std::count(reference.begin(), reference.end(), true));
+    Expect(reference_ambiguous == out.ambiguous_kept,
+           "bucketed scan marks exactly the all-pairs scan's entries");
+    Expect(out.ambiguous_kept == 2, "only the unjudgeable Calculator pair is ambiguous");
+}
+
+// NR-121: worst-path latency of dedup over 5000 distinct-name kept entries.
+// Distinct names collapse every bucket to size 1, so this measures the scan's
+// cost when the O(n^2) all-pairs version would pay all 12.5M pairs. Threshold
+// (50 ms) is ~20x the measured ~2 ms (see the item's handoff) so it only flags
+// a regression that re-introduces the all-pairs scan.
+void TestDedup5000Timing() {
+    std::vector<AppEntry> big;
+    big.reserve(5000);
+    for (int i = 0; i < 5000; ++i) {
+        big.push_back(Entry(L"id" + std::to_wstring(i), L"App " + std::to_wstring(i) + L" edition",
+                            AppSource::UserFolder, L"C:\\A\\app" + std::to_wstring(i) + L".exe"));
+    }
+
+    const auto start = steady_clock::now();
+    const DedupResult out = DeduplicateCatalog(big);
+    const auto elapsed_us =
+        duration_cast<microseconds>(steady_clock::now() - start).count();
+
+    std::wprintf(L"NR-121: DeduplicateCatalog over 5000 distinct-name entries took %lld us (%lld ms), kept %zu\n",
+                 elapsed_us, elapsed_us / 1000, out.entries.size());
+    Expect(out.entries.size() == 5000, "5000 distinct entries all kept");
+    Expect(out.ambiguous_kept == 0, "distinct names mark nothing ambiguous");
+    Expect(elapsed_us / 1000 < 50, "5000-entry dedup stays under 50 ms");
+}
+
 } // namespace
 
 int wmain() {
@@ -290,6 +380,8 @@ int wmain() {
     TestOrderingReproducible();
     TestVerifiedBeatsUnverifiedInDedup();
     TestEmptyInput();
+    TestBucketedAmbiguityMatchesAllPairs();
+    TestDedup5000Timing();
     std::printf("NR-007 identity and dedup check PASSED\n");
     return 0;
 }

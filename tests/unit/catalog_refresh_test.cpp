@@ -780,6 +780,48 @@ void TestOlderSchemaCacheRebuilds() {
     RemoveTreeBestEffort(dir);
 }
 
+// NR-121: a hand-edited cache with more rows than the cap is untrusted-input
+// abuse (legally formatted lines, no corruption involved), not a tolerable
+// catalog. Load rejects it through the existing Malformed disposition:
+// quarantined via PreserveCorrupt and rebuilt, so the cold-start UI thread is
+// never asked to load + dedup an unbounded file (design-spec §11).
+void TestCacheOverRowCapQuarantines() {
+    const std::wstring dir = TempDir();
+    std::vector<AppEntry> entries;
+    entries.reserve(nimblerun::kMaxCacheRows + 1);
+    for (std::size_t i = 0; i < nimblerun::kMaxCacheRows + 1; ++i) {
+        entries.push_back(Entry(L"id" + std::to_wstring(i), AppSource::UserStartMenu));
+    }
+    SaveCatalogCache(dir, entries);
+
+    std::vector<AppEntry> loaded;
+    Expect(!LoadCatalogCache(dir, loaded), "over-cap cache is rejected");
+    Expect(loaded.empty(), "no partial entries from an over-cap cache");
+    Expect(fs::exists(fs::path(dir) / L"catalog.cache.corrupt"),
+           "over-cap cache is preserved as .corrupt");
+    RemoveTreeBestEffort(dir);
+}
+
+// NR-121: exactly at the cap is a legal, loadable file; the cap rejects only
+// over-limit rows, so a legitimate near-cap catalog behaves unchanged.
+void TestCacheAtRowCapLoads() {
+    const std::wstring dir = TempDir();
+    std::vector<AppEntry> entries;
+    entries.reserve(nimblerun::kMaxCacheRows);
+    for (std::size_t i = 0; i < nimblerun::kMaxCacheRows; ++i) {
+        entries.push_back(Entry(L"id" + std::to_wstring(i), AppSource::UserStartMenu));
+    }
+    SaveCatalogCache(dir, entries);
+
+    std::vector<AppEntry> loaded;
+    Expect(LoadCatalogCache(dir, loaded), "a cache at exactly the cap loads");
+    Expect(loaded.size() == nimblerun::kMaxCacheRows,
+           "every at-cap row round-trips");
+    Expect(!fs::exists(fs::path(dir) / L"catalog.cache.corrupt"),
+           "an at-cap cache is not quarantined");
+    RemoveTreeBestEffort(dir);
+}
+
 // NR-049: StartRebuild hands each rebuild thread a by-value Settings snapshot,
 // so a later mutation of the original cannot reach into the running scan. This
 // pins that Settings really is an ordinary copyable value with no shared
@@ -844,6 +886,8 @@ int wmain() {
     TestNewerSchemaCacheReportsAndLeavesOutUntouched();
     TestCorruptCacheRebuilds();
     TestOlderSchemaCacheRebuilds();
+    TestCacheOverRowCapQuarantines();
+    TestCacheAtRowCapLoads();
     TestFailureNoRebuildTriggersOnce();
     TestFailureWithRebuildMerges();
     TestConsecutiveFailuresTriggerOnce();
