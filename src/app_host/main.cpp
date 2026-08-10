@@ -2765,13 +2765,34 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
         RepositionSearchEdit(window);
         return 0;
     case WM_DPICHANGED:
-        // The suggested rect preserves the panel's DIP size at the new monitor
-        // DPI (design-spec §4.9); apply it and rebuild geometry.
-        if (const RECT* suggested = reinterpret_cast<const RECT*>(l_param)) {
-            SetWindowPos(window, nullptr, suggested->left, suggested->top,
-                         suggested->right - suggested->left,
-                         suggested->bottom - suggested->top,
-                         SWP_NOACTIVATE | SWP_NOZORDER);
+        // NR-149: lParam is a raw pointer value marshaled across processes
+        // (WM_DPICHANGED is delivered by SendMessageW), so it is untrusted:
+        // any same-integrity process can forge
+        // SendMessageW(hwnd, WM_DPICHANGED, 0, (LPARAM)0x1) and dereferencing
+        // it would AV the always-on tray process. Never read it. Recompute the
+        // suggested rect instead: keep the current position (GetWindowRect)
+        // and size the panel at the new monitor DPI, clamped to the work area.
+        {
+            RECT rect{};
+            GetWindowRect(window, &rect);
+            MONITORINFO monitor_info{};
+            monitor_info.cbSize = sizeof(monitor_info);
+            const HMONITOR monitor = MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST);
+            // NR-146: a failed query leaves rcWork zeroed; skip the move
+            // rather than size the panel against a 0x0 work area.
+            if (GetMonitorInfoW(monitor, &monitor_info)) {
+                const RECT work_area = monitor_info.rcWork;
+                const nimblerun::layout::WindowSize size = nimblerun::layout::ClampWindowSize(
+                    static_cast<float>(GetDpiForWindow(window)),
+                    work_area.right - work_area.left,
+                    work_area.bottom - work_area.top);
+                const int left = std::clamp(rect.left, work_area.left,
+                                            work_area.right - size.width);
+                const int top = std::clamp(rect.top, work_area.top,
+                                           work_area.bottom - size.height);
+                SetWindowPos(window, nullptr, left, top, size.width, size.height,
+                             SWP_NOACTIVATE | SWP_NOZORDER);
+            }
         }
         UpdateViewportRows(window);
         RepositionSearchEdit(window);

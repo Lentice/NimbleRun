@@ -83,4 +83,20 @@ rg -n -A 12 "case WM_DPICHANGED" src/app_host/main.cpp
 # expect: 無 reinterpret_cast，無 suggested-> 解參考
 ```
 
-完成後在文件底部補齊本 item 的 Handoff 交接備註。
+## Handoff
+
+- 2026-08-10 完成（NR-149, commit `NR-149: never dereference WM_DPICHANGED lParam`）。
+- 變更：`src/app_host/main.cpp:2767-2800` — `WM_DPICHANGED` 分支刪除
+  `reinterpret_cast<const RECT*>(l_param)`，改為重算：`GetWindowRect` 取目前位置、
+  `GetDpiForWindow` 取新 DPI、`MonitorFromWindow`＋`GetMonitorInfoW`（失敗跳過
+  SetWindowPos，同 NR-146 處置）取 work area、`ClampWindowSize` 重算尺寸、
+  `std::clamp` 把位置夾回 work area，再 `SetWindowPos`。既有
+  `UpdateViewportRows`／`RepositionSearchEdit`／`UpdateSearchFont`／`InvalidateRect`
+  順序不變。NR-149 註解說明 lParam 跨處理序原樣傳遞、不可信任、不得解參考。
+- 驗證：Release（llvm-mingw/Ninja）build 成功；新 warnings 0（既有
+  `main.cpp:1389 unused variable 'target_size'` 為 NR-120/NR-133 時代引入，stash 重編證實
+  與本 item 無關）；CTest 31/31 全綠（數量不變）。
+- grep 驗證：`case WM_DPICHANGED` 分支無 `reinterpret_cast`、無 `suggested->` 解參考；
+  同一 handler 其餘分支亦無 lParam 指標解參考（WM_SIZE 僅用 LOWORD/HIWORD）。
+- 交接：NR-150（HwndRenderTarget DPI 同步）的 `WM_DPICHANGED` 改動以本 item 改完後的
+  分支形狀為基礎，勿再引用已刪除的 `suggested` rect。

@@ -185,7 +185,7 @@
 | NR-146 | ShowPanel GetMonitorInfoW 未檢查＋shutdown 逾時 detach 後 pipeline 不得銷毀 | 3 | `done` | — | [NR-146](work-items/NR-146-lifecycle-robustness-guards.md) |
 | NR-147 | watcher Change 路徑補限流（NR-130 只蓋 FullRescan 的半邊） | 2 | `done` | — | [NR-147](work-items/NR-147-watcher-change-throttle.md) |
 | NR-148 | 「開啟檔案位置／內容」與啟動共用 launch_verified 守門 | 2 | `done` | — | [NR-148](work-items/NR-148-shell-actions-launch-verified-gate.md) |
-| NR-149 | WM_DPICHANGED 的 lParam 未驗證：同 user 程序 SendMessageW 任意指標即 AV 殺死常駐 process | 3 | `ready` | — | [NR-149](work-items/NR-149-wm-dpi-changed-lparam-validation.md) |
+| NR-149 | WM_DPICHANGED 的 lParam 未驗證：同 user 程序 SendMessageW 任意指標即 AV 殺死常駐 process | 3 | `done` | — | [NR-149](work-items/NR-149-wm-dpi-changed-lparam-validation.md) |
 | NR-150 | HwndRenderTarget DPI 從未同步：混合 DPI 螢幕內容裁切且 hit-test 與 paint 分歧 | 3 | `ready` | NR-149 | [NR-150](work-items/NR-150-render-target-dpi-sync.md) |
 | NR-151 | NR-139 殘餘：偽造 inline delivery-failure 使 generation 提前完成，過時快照寫進 catalog.cache | 3 | `ready` | — | [NR-151](work-items/NR-151-delivery-failure-token-auth.md) |
 | NR-152 | settings 寫入端與讀取端不對稱：UI 可寫出自己讀不回來的檔（整包設定重置陷阱）＋spec 補條文 | 1 | `ready` | — | [NR-152](work-items/NR-152-settings-write-side-symmetry.md) |
