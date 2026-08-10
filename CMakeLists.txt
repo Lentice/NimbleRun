@@ -304,6 +304,14 @@ target_link_libraries(nimblerun_diagnostics
         kernel32
 )
 
+add_library(nimblerun_rebuild_pipeline STATIC
+    src/app_host/rebuild_pipeline.cpp
+)
+
+target_include_directories(nimblerun_rebuild_pipeline PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_compile_definitions(nimblerun_rebuild_pipeline PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX WINVER=0x0A00 _WIN32_WINNT=0x0A00)
+target_link_libraries(nimblerun_rebuild_pipeline PUBLIC nimblerun_catalog kernel32 user32)
+
 add_executable(NimbleRun WIN32
     src/app_host/main.cpp
     src/app_host/settings_dialog.cpp
@@ -322,6 +330,7 @@ target_link_libraries(NimbleRun
         nimblerun_icons
         nimblerun_ui
         nimblerun_diagnostics
+        nimblerun_rebuild_pipeline
         nimblerun_hotkey
         d2d1
         dwrite

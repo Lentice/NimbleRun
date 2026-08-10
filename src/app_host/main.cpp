@@ -5,7 +5,7 @@
 #include <dwmapi.h>
 
 #include "app_host/catalog_watcher.h"
-#include "app_host/full_rescan_throttle.h"
+#include "app_host/rebuild_pipeline.h"
 #include "app_host/hotkey.h"
 #include "app_host/message_loop.h"
 #include "app_host/panel_model.h"
@@ -77,7 +77,7 @@ constexpr UINT kExitMessage = WM_APP + 5;
 // for a full rescan (buffer overflow / ERROR_NOTIFY_ENUM_DIR), 0 for a change.
 constexpr UINT kWatchChangedMessage = WM_APP + 7;
 // NR-011: a background enumeration finished. wParam = generation, lParam =
-// pointer to a heap RebuildResult the UI thread takes ownership of.
+// token owned by RebuildPipeline.
 constexpr UINT kRebuildDoneMessage = WM_APP + 8;
 // NR-032: one decoded icon finished on the worker thread. lParam = pointer to a
 // heap IconResult the UI thread takes ownership of (empty bitmap = failure).
@@ -260,28 +260,6 @@ HBRUSH g_search_bg_brush = nullptr;
 // results come back through kRebuildDoneMessage.
 nimblerun::CatalogRefreshCoordinator* g_refresh = nullptr;
 nimblerun::CatalogWatcher* g_watcher = nullptr;
-// 1-based watcher watch index -> CatalogSource, aligned with the watcher's
-// root order (Start Menu folders first, then each user-folder root).
-std::vector<nimblerun::CatalogSource> g_watch_sources;
-// NR-130: last accepted full-rescan marker timestamp per source, so a storm of
-// posted markers (any same-session process can send them) does not force one
-// immediate rebuild per message. kFullRescanNever = no accepted marker yet.
-// UI-thread only, like the rest of the watch state.
-std::unordered_map<nimblerun::CatalogSource, std::int64_t> g_last_full_rescan_ms;
-
-// NR-049: rebuild threads are owned, not detached. Joined in WM_DESTROY so a
-// scan can never outlive the window it posts to, nor the globals it reads.
-// Only ever touched on the UI thread (StartRebuild and WM_DESTROY), so it needs
-// no lock of its own.
-std::vector<std::thread> g_rebuild_threads;
-
-// NR-098: cooperative cancellation signal for in-flight rebuild scans. Set on
-// the UI thread (StartRebuild and WM_DESTROY both run there) before the
-// previous cycle's threads are joined, and reset only after they are all
-// joined, so the enumerators on those threads read it while it is stable and
-// the next generation starts clean. The atomic is the only synchronization the
-// enumerators need; no lock is required around it.
-std::atomic<bool> g_rebuild_cancel{false};
 
 std::wstring EnvironmentValue(const wchar_t* name) {
     const DWORD length = GetEnvironmentVariableW(name, nullptr, 0);
@@ -334,41 +312,7 @@ void OpenTestShowSemaphore() {
 // search text, usernames, personal paths or command lines (design-spec §FR-014).
 nimblerun::DiagnosticLog* g_diag = nullptr;
 
-// One finished background enumeration, transferred to the UI thread.
-struct RebuildResult {
-    std::uint64_t generation = 0;
-    nimblerun::CatalogSource source = nimblerun::CatalogSource::StartMenu;
-    bool failed = false;
-    std::vector<nimblerun::AppEntry> entries;
-    // NR-124: the enumerator's per-source counts, folded into the coordinator's
-    // generation diagnostics by ApplySourceResult. Only ever consumed on the
-    // UI thread's completion handler.
-    nimblerun::GenerationDiagnostics diagnostics;
-};
-
-// NR-077: rebuild results use their own registry and mutex; icon results have
-// a separate instance so the two unrelated delivery paths do not serialize.
-nimblerun::HandoffRegistry<RebuildResult> g_rebuild_handoffs;
-
-// NR-100: rebuild sources whose result could not be delivered (PostMessageW
-// failed). The worker records "(generation, source)" before the UI thread
-// drains it as a source failure, so every source still completes its
-// generation exactly once. Only touched by the workers under
-// g_delivery_failure_mutex and by the UI thread under the same mutex.
-std::mutex g_delivery_failure_mutex;
-std::vector<std::pair<std::uint64_t, nimblerun::CatalogSource>> g_rebuild_delivery_failures;
-
-// NR-115: manual-reset event the main message loop also waits on. A worker
-// that records a rebuild delivery failure signals it when PostMessageW cannot
-// deliver the wake-up message (queue full), so a recorded failure is always
-// drained instead of waiting for an unrelated later message.
-HANDLE g_rebuild_failure_event = nullptr;
-
-// NR-079: set once at startup when the on-disk catalog.cache carries a newer
-// schema than this build reads. design-spec §10.4 forbids overwriting that
-// file, so cache writes stay off for the run (the cache is a rebuildable
-// snapshot; the in-memory one keeps working); a re-read next launch re-decides.
-bool g_catalog_cache_disable_writes = false;
+std::unique_ptr<nimblerun::RebuildPipeline> g_rebuild_pipeline;
 
 std::int64_t MonotonicMs() {
     return static_cast<std::int64_t>(GetTickCount64());
@@ -1429,421 +1373,55 @@ void RefreshPanelSnapshot() {
 // completed generation (design-spec §FR-008). No InvalidateRect: the caller
 // owns the single repaint per handled message.
 void OnGenerationCompleteRefresh() {
-    // NR-124: write the completed generation's diagnostics -- at most three
-    // sanitized lines, zero-noise (a clean generation writes nothing). The
-    // enumerators never touch DiagnosticLog; the counts travel back through the
-    // coordinator and are written here, on the UI thread only.
     if (g_diag && g_refresh) {
-        for (const std::wstring& line :
-             nimblerun::RebuildDiagnosticLines(g_refresh->LastGenerationDiagnostics())) {
+        for (const std::wstring& line : nimblerun::RebuildDiagnosticLines(
+                 g_refresh->LastGenerationDiagnostics())) {
             g_diag->Write(L"rebuild", line);
         }
     }
-    // NR-022: the refresh the launch-failure dialog scheduled has run
-    // to completion, so a future failure can schedule a fresh refresh.
     g_launch_failure_refresh.OnRefreshComplete();
-    // NR-073: the merged snapshot only changes when the whole generation
-    // has reported; refreshing the panel and writing catalog.cache for
-    // the first 1..n-1 results would reset the selection and re-persist
-    // data the UI thread already holds, every cycle (§FR-008).
     RefreshPanelSnapshot();
-    // NR-079: a newer-schema catalog.cache is another build's data --
-    // never overwrite it (design-spec §10.4); the in-memory snapshot
-    // keeps working and the flag stays set for the whole run.
-    if (!g_catalog_cache_disable_writes) {
-        nimblerun::SaveCatalogCache(g_user_data_directory,
-                                    g_refresh->Snapshot());
+    if (g_rebuild_pipeline && !g_rebuild_pipeline->CacheWritesDisabled()) {
+        nimblerun::SaveCatalogCache(g_user_data_directory, g_refresh->Snapshot());
     }
 }
 
-// NR-100: applies every recorded delivery failure as a source failure, so each
-// source whose result could not be posted still completes its generation
-// (ApplySourceFailure keeps the source's old entries). Entries for a stale
-// generation are dropped harmlessly. Returns true when at least one entry was
-// applied and the current generation completed as a result. UI thread only.
-bool DrainRebuildDeliveryFailures() {
-    if (!g_refresh) {
-        return false;
-    }
-    std::vector<std::pair<std::uint64_t, nimblerun::CatalogSource>> failures;
-    {
-        std::lock_guard<std::mutex> lock(g_delivery_failure_mutex);
-        failures.swap(g_rebuild_delivery_failures);
-    }
-    if (failures.empty()) {
-        return false;
-    }
-    bool applied_any = false;
-    for (const auto& [generation, source] : failures) {
-        if (g_refresh->ApplySourceFailure(generation, source)) {
-            applied_any = true;
-        }
-    }
-    return applied_any && !g_refresh->IsRebuildInProgress();
-}
-
-// UI-owned completion for failures that happen before a worker can hand off a
-// result. The worker never receives the coordinator pointer; it queues the
-// same failure signal through QueueRebuildSourceFailure below.
-void CompleteRebuildSourceFailure(std::uint64_t generation,
-                                  nimblerun::CatalogSource source) {
-    if (!g_refresh) {
-        return;
-    }
-    if (g_refresh->ApplySourceFailure(generation, source) &&
-        g_refresh->GenerationComplete(generation)) {
-        OnGenerationCompleteRefresh();
+void StartRebuild(HWND, std::vector<nimblerun::CatalogSource> sources) {
+    if (g_rebuild_pipeline) {
+        g_rebuild_pipeline->Request(std::move(sources), nimblerun::RebuildReason::Explicit);
     }
 }
 
-// NR-106: use the existing UI-owned delivery-failure handoff for a source
-// that has no result payload (allocation or registry setup failed). StartRebuild
-// reserves this vector for the current source batch, so the encoded message is
-// only an OS-only fallback if an unexpected append failure still occurs.
-void QueueRebuildSourceFailure(HWND window, std::uint64_t generation,
-                               nimblerun::CatalogSource source) {
-    bool recorded = false;
-    try {
-        std::lock_guard<std::mutex> lock(g_delivery_failure_mutex);
-        g_rebuild_delivery_failures.emplace_back(generation, source);
-        recorded = true;
-    } catch (...) {
-        if (g_diag) {
-            g_diag->Write(L"rebuild", L"exception");
-        }
-    }
-    if (recorded) {
-        // NR-115: a queue-full PostMessageW failure must not strand the record --
-        // the message loop's manual-reset event provides the reliable, event-driven
-        // drain (no polling, no timer). SetEvent is thread-safe on a kernel object;
-        // the UI drains under g_delivery_failure_mutex.
-        if (!PostMessageW(window, kRebuildDeliveryFailedMessage, 0, 0) &&
-            g_rebuild_failure_event != nullptr) {
-            SetEvent(g_rebuild_failure_event);
-        }
-        return;
-    }
-    // No allocation is needed for this direct signal. The receiver validates
-    // the small source enum before applying the UI-owned failure.
-    if (!PostMessageW(window, kRebuildDeliveryFailedMessage,
-                      static_cast<WPARAM>(generation),
-                      static_cast<LPARAM>(source)) &&
-        g_diag) {
-        g_diag->Write(L"rebuild", L"exception");
-    }
-}
-
-// A push_back failure is only handled after its just-started worker is joined.
-// Remove any result/failure that worker may already have posted before the UI
-// completes the source as a setup failure.
-void DiscardPendingRebuildCompletion(std::uint64_t generation,
-                                     nimblerun::CatalogSource source) {
-    g_rebuild_handoffs.EraseIf([generation, source](const RebuildResult& result) {
-        return result.generation == generation && result.source == source;
-    });
-    {
-        std::lock_guard<std::mutex> lock(g_delivery_failure_mutex);
-        g_rebuild_delivery_failures.erase(
-            std::remove_if(g_rebuild_delivery_failures.begin(),
-                           g_rebuild_delivery_failures.end(),
-                           [generation, source](const auto& failure) {
-                               return failure.first == generation &&
-                                      failure.second == source;
-                           }),
-            g_rebuild_delivery_failures.end());
-    }
-}
-
-// NR-049: waits for every in-flight rebuild thread. The rebuild threads read
-// g_settings and g_refresh, so this must run before anything that tears those
-// down; WM_DESTROY is that point in practice, and each new rebuild cycle joins
-// the previous one first. Rebuilds are debounced 500 ms apart (§FR-008), so a
-// cycle's threads have almost always finished by the time this is called, and
-// a finished thread returns from join() at once.
-// NR-098: the cancellation flag is set BEFORE any join, so a scan still in
-// flight (large or stuck directory, slow Shell extension) stops at its next
-// safe iteration boundary instead of blocking the UI thread on join() until it
-// finishes (design-spec §9.4). Reset only after every thread is joined so the
-// next generation starts clean. StartRebuild and WM_DESTROY both use this one
-// helper, so they share the same cancel→wait order.
-// NR-123: the default INFINITE wait keeps StartRebuild's supersede semantics
-// unchanged (a slow scan still stops at its next cancellation boundary,
-// NR-098). WM_DESTROY passes a bounded timeout: a worker stuck inside a single
-// uninterruptible Shell call (design-spec §16) must not hang shutdown forever.
-// On timeout the survivors are detached and shutdown continues -- the process
-// exits right after, so the OS reclaims them (NR-049's detach hazard only
-// applies on a non-exit path), and a late kRebuildDoneMessage is ignored as an
-// unknown token (NR-077).
-// NR-123: how long WM_DESTROY waits for a worker stuck in an uninterruptible
-// Shell call before giving up and continuing the shutdown.
-constexpr DWORD kRebuildJoinTimeoutMs = 5000;
-void JoinRebuildThreads(DWORD timeout_ms = INFINITE) {
-    g_rebuild_cancel.store(true);
-    bool all_finished = true;
-    if (!g_rebuild_threads.empty()) {
-        std::vector<HANDLE> handles;
-        handles.reserve(g_rebuild_threads.size());
-        for (std::thread& worker : g_rebuild_threads) {
-            if (worker.joinable()) {
-                handles.push_back(worker.native_handle());
-            }
-        }
-        if (timeout_ms != INFINITE && !handles.empty()) {
-            const DWORD wait_result = WaitForMultipleObjects(
-                static_cast<DWORD>(handles.size()), handles.data(), TRUE, timeout_ms);
-            all_finished = (wait_result == WAIT_OBJECT_0);
-        }
-    }
-    if (all_finished) {
-        for (std::thread& worker : g_rebuild_threads) {
-            if (worker.joinable()) {
-                worker.join();
-            }
-        }
-        g_rebuild_threads.clear();
-        g_rebuild_cancel.store(false);
-    } else {
-        // NR-123: timeout (or a failed wait) -- at least one worker is still
-        // inside an uninterruptible call. Detach it so destroying the vector
-        // does not call std::terminate, then continue the shutdown; the OS
-        // reclaims the thread when the process exits. Leave g_rebuild_cancel
-        // set: the process is exiting, no next generation will run.
-        for (std::thread& worker : g_rebuild_threads) {
-            if (worker.joinable()) {
-                worker.detach();
-            }
-        }
-        g_rebuild_threads.clear();
-    }
-}
-
-// NR-011: starts one background thread per source in `sources` for a rebuild
-// cycle; results return through kRebuildDoneMessage on the UI thread.
-void StartRebuild(HWND window, std::vector<nimblerun::CatalogSource> sources) {
-    if (!g_refresh) {
-        return;
-    }
-    // NR-049: join the previous cycle before starting a new one. Rebuilds are
-    // debounced 500 ms apart (§FR-008) and a cycle's threads have almost
-    // always finished by the time the next one starts, so this is normally a
-    // no-op; when it is not, the join is bounded because JoinRebuildThreads
-    // first signals the cooperative cancellation flag, so a slow scan stops at
-    // its next safe iteration boundary instead of blocking the UI thread
-    // (NR-098).
-    JoinRebuildThreads();
-    const std::uint64_t generation = g_refresh->BeginGeneration(sources);
-    // NR-049: the rebuild threads must never touch g_settings. It is UI-thread
-    // state, and the settings dialog can reassign it (freeing catalog_roots and
-    // every root string) while a scan is halfway through a directory tree.
-    // A Settings is an ordinary copyable value (AGENTS.md), so each thread gets
-    // the snapshot that was current when the rebuild started -- which is also
-    // the semantically correct input: a rebuild reflects the settings that
-    // triggered it, not settings applied after it began.
-    nimblerun::Settings settings_snapshot;
-    try {
-        settings_snapshot = g_settings;
-        g_rebuild_threads.reserve(g_rebuild_threads.size() + sources.size());
-        std::lock_guard<std::mutex> lock(g_delivery_failure_mutex);
-        g_rebuild_delivery_failures.reserve(g_rebuild_delivery_failures.size() +
-                                             sources.size());
-    } catch (...) {
-        // NR-106: no worker was started, so complete every source directly on
-        // the UI-owned coordinator when setup storage itself cannot grow.
-        if (g_diag) {
-            g_diag->Write(L"rebuild", L"exception");
-        }
-        for (const nimblerun::CatalogSource source : sources) {
-            CompleteRebuildSourceFailure(generation, source);
-        }
-        return;
-    }
-    for (const nimblerun::CatalogSource source : sources) {
-        std::thread worker;
-        try {
-            worker = std::thread([window, generation, source, settings_snapshot]() {
-            // NR-097: the allocation and the generation/source assignment are
-            // inside the try so a heap-exhaustion failure is caught instead of
-            // escaping the thread entry point.
-            RebuildResult* result = nullptr;
-            try {
-                result = new RebuildResult;
-                result->generation = generation;
-                result->source = source;
-                switch (source) {
-                case nimblerun::CatalogSource::StartMenu: {
-                    // NR-063: the enumerator reports source-level failure; the worker
-                    // just forwards it so the coordinator keeps the old entries.
-                    // NR-098: a cancelled scan also comes back as a source failure.
-                    const auto res = nimblerun::EnumerateStartMenuCatalog(&g_rebuild_cancel);
-                    result->failed = !res.source_ok;
-                    result->entries = std::move(res.entries);
-                    // NR-124: carry the corrupt-link count to the completion handler.
-                    result->diagnostics.corrupt_links = res.corrupt_links;
-                    break;
-                }
-                case nimblerun::CatalogSource::AppsFolder:
-                    // NR-028: "Include Windows apps" off skips the enumeration
-                    // entirely (no COM walk) and the source reports empty, so the
-                    // merged snapshot clears old packaged-app entries via the same
-                    // ApplySourceResult path.
-                    if (settings_snapshot.include_windows_apps) {
-                        const auto res = nimblerun::EnumerateAppsFolderCatalog(&g_rebuild_cancel);
-                        result->failed = !res.source_ok;
-                        result->entries = std::move(res.entries);
-                    } else {
-                        result->entries = std::vector<nimblerun::AppEntry>{};
-                    }
-                    break;
-                case nimblerun::CatalogSource::UserFolder: {
-                    // NR-092: the enumerator reports source-level failure when an
-                    // open directory's walk fails mid-enumeration; the worker just
-                    // forwards it so the coordinator keeps the old entries.
-                    const auto res =
-                        nimblerun::EnumerateUserFolderCatalog(settings_snapshot, &g_rebuild_cancel);
-                    result->failed = !res.source_ok;
-                    result->entries = std::move(res.entries);
-                    // NR-124: carry the skipped-directory count to the completion handler.
-                    result->diagnostics.skipped_directories = res.skipped_directories;
-                    break;
-                }
-                }
-            } catch (...) {
-                if (result == nullptr) {
-                    // NR-106: the result could not be allocated at all; queue
-                    // the source failure without passing the coordinator to
-                    // this worker.
-                    if (g_diag) {
-                        g_diag->Write(L"rebuild", L"exception");
-                    }
-                    QueueRebuildSourceFailure(window, generation, source);
-                    return;
-                }
-                // NR-076: an allocation/enumeration exception must not terminate
-                // the process (design-spec §11). Report a source failure so the
-                // coordinator keeps this source's old entries (design-spec
-                // §NFR-003); the enumerators' own failures already flow through
-                // source_ok.
-                result->failed = true;
-                if (g_diag) {
-                    g_diag->Write(L"rebuild", L"exception");
-                }
-            }
-            // NR-077: hand the payload to the UI thread by token, never by a
-            // raw pointer in a WM_APP message. The registry owns the object;
-            // the receiver finds the token and moves it out. A full message
-            // queue (PostMessageW fails) erases the token, which deletes the
-            // object -- NR-063's leak guard.
-            std::unique_ptr<RebuildResult> owned(result);
-            const std::uintptr_t token = g_rebuild_handoffs.Register(std::move(owned));
-            if (token == 0) {
-                // NR-106: no registry token exists, so the owned guard releases
-                // the result while the same UI-owned source failure is queued.
-                if (g_diag) {
-                    g_diag->Write(L"rebuild", L"exception");
-                }
-                QueueRebuildSourceFailure(window, generation, source);
-                return;
-            }
-            if (!PostMessageW(window, kRebuildDoneMessage,
-                              static_cast<WPARAM>(generation),
-                              static_cast<LPARAM>(token))) {
-                // NR-063's leak guard: the result never reaches the UI thread,
-                // so erase the token, which deletes the payload.
-                g_rebuild_handoffs.Erase(token);
-                // NR-100: the UI thread must still complete this source for the
-                // generation (ApplySourceFailure keeps its old entries). Record
-                // it under its own mutex and send a payload-free wake-up.
-                QueueRebuildSourceFailure(window, generation, source);
-            }
-            });
-        } catch (...) {
-            // NR-097: thread construction failed (std::system_error) on the UI
-            // thread. No worker was started, so there is nothing to join; log
-            // and skip this source for the generation.
-            if (g_diag) {
-                g_diag->Write(L"rebuild", L"exception");
-            }
-            CompleteRebuildSourceFailure(generation, source);
-            continue;
-        }
-        try {
-            g_rebuild_threads.push_back(std::move(worker));
-        } catch (...) {
-            // NR-097: a joinable std::thread that is destroyed = terminate.
-            // push_back failed (bad_alloc), so join the just-started worker and
-            // skip this source; the process survives.
-            if (g_diag) {
-                g_diag->Write(L"rebuild", L"exception");
-            }
-            worker.join();
-            DiscardPendingRebuildCompletion(generation, source);
-            CompleteRebuildSourceFailure(generation, source);
-        }
-    }
-}
-
-// NR-011: coalesces dense file events behind a 500 ms debounce; a full-rescan
-// marker bypasses the wait. One timer at a time; after it fires the due sources
-// are rebuilt together.
-void ScheduleDebouncedRebuild(HWND window) {
-    if (KillTimer(window, kRebuildTimerId) != 0) {
-        // A timer was already pending; restarting it extends the debounce window.
-    }
-    SetTimer(window, kRebuildTimerId, 500, nullptr);
-}
-
-// NR-011: maps a watcher watch index (1-based) back to its catalog source.
-nimblerun::CatalogSource WatchIndexToSource(int index) {
-    if (index >= 1 && index <= static_cast<int>(g_watch_sources.size())) {
-        return g_watch_sources[static_cast<std::size_t>(index - 1)];
-    }
-    return nimblerun::CatalogSource::StartMenu;
-}
-
-// NR-011: (re)starts the directory watchers from the current settings. The
-// two Programs known folders watch recursively; each user-folder root uses its
-// own recursive flag. g_watch_sources stays aligned with the watch order.
+// NR-011: (re)starts directory watchers and records an explicit index-to-source
+// table. The table retains entries even when CatalogWatcher skips a failed root.
 void StartWatchers() {
-    if (!g_watcher) {
-        return;
-    }
+    if (!g_watcher) return;
     std::vector<std::wstring> roots;
     std::vector<bool> recursive;
-    g_watch_sources.clear();
-
-    auto add_root = [&](const std::wstring& path, bool sub,
+    std::vector<nimblerun::RebuildWatchSource> sources;
+    auto add_root = [&](const std::wstring& path, bool recurse,
                         nimblerun::CatalogSource source) {
-        if (path.empty()) {
-            return;
-        }
+        if (path.empty()) return;
         roots.push_back(path);
-        recursive.push_back(sub);
-        g_watch_sources.push_back(source);
+        recursive.push_back(recurse);
+        sources.push_back({path, recurse, source});
     };
-
     wchar_t* user_programs = nullptr;
     if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Programs, KF_FLAG_DEFAULT, nullptr,
-                                       &user_programs)) &&
-        user_programs) {
+                                       &user_programs)) && user_programs) {
         add_root(user_programs, true, nimblerun::CatalogSource::StartMenu);
     }
-    if (user_programs) {
-        CoTaskMemFree(user_programs);
-    }
+    if (user_programs) CoTaskMemFree(user_programs);
     wchar_t* common_programs = nullptr;
     if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_CommonPrograms, KF_FLAG_DEFAULT, nullptr,
-                                       &common_programs)) &&
-        common_programs) {
+                                       &common_programs)) && common_programs) {
         add_root(common_programs, true, nimblerun::CatalogSource::StartMenu);
     }
-    if (common_programs) {
-        CoTaskMemFree(common_programs);
-    }
-
+    if (common_programs) CoTaskMemFree(common_programs);
     for (const nimblerun::CatalogRoot& root : g_settings.catalog_roots) {
         add_root(root.path, root.recursive, nimblerun::CatalogSource::UserFolder);
     }
-
+    if (g_rebuild_pipeline) g_rebuild_pipeline->SetWatchSources(std::move(sources));
     g_watcher->SetRoots(roots, recursive);
 }
 
@@ -2941,124 +2519,22 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
         return 0;
     }
     case kWatchChangedMessage: {
-        // NR-011: a watched directory changed. Coalesce behind the 500 ms
-        // debounce; a full-rescan marker is due immediately.
-        const int index = static_cast<int>(w_param);
-        const bool full_rescan = l_param != 0;
-        const nimblerun::CatalogSource source = WatchIndexToSource(index);
-        if (full_rescan) {
-            const std::int64_t now = MonotonicMs();
-            if (nimblerun::ShouldAcceptFullRescan(g_last_full_rescan_ms[source], now)) {
-                // NR-130: the marker passed the storm throttle; it is due
-                // immediately exactly as before.
-                g_last_full_rescan_ms[source] = now;
-                g_refresh->MarkSourceFullRescan(source);
-                if (g_refresh->ShouldStartRebuild(now)) {
-                    const std::vector<nimblerun::CatalogSource> due =
-                        g_refresh->DueSources(now);
-                    if (!due.empty()) {
-                        StartRebuild(window, due);
-                    }
-                } else if (!g_refresh->DueSources(now).empty()) {
-                    // NR-118: rebuild running; defer the full-rescan marker to the debounce
-                    // timer so it is serviced once the current generation completes (the
-                    // marker is always due per its kNever timestamp).
-                    ScheduleDebouncedRebuild(window);
-                }
-            } else {
-                // NR-130: throttled duplicate full-rescan marker from the same
-                // source; merge into the existing debounce path instead of
-                // forcing another immediate rebuild.
-                g_refresh->NotifySourceEvent(source, now);
-                ScheduleDebouncedRebuild(window);
-            }
-        } else {
-            g_refresh->NotifySourceEvent(source, MonotonicMs());
-            ScheduleDebouncedRebuild(window);
-        }
+        if (!g_rebuild_pipeline) return 0;
+        const auto source = g_rebuild_pipeline->SourceForIndex(static_cast<int>(w_param));
+        if (!source) return 0;
+        g_rebuild_pipeline->Request({*source}, l_param != 0
+            ? nimblerun::RebuildReason::FullRescan
+            : nimblerun::RebuildReason::Change);
         return 0;
     }
-    case kRebuildDoneMessage: {
-        // NR-011: one background enumeration finished. The coordinator swaps the
-        // snapshot only when the whole generation has reported, so applying the
-        // result here can never show a partial catalog.
-        std::unique_ptr<RebuildResult> result;
-        // lParam is an untrusted token; Take validates it and returns nullptr
-        // for messages not registered by this process.
-        result = g_rebuild_handoffs.Take(static_cast<std::uintptr_t>(l_param));
-        if (!result) {
-            return 0;
-        }
-        // NR-063: result_applied names what the boolean actually is -- this
-        // source's outcome was accepted for the current generation -- not "the
-        // whole generation finished". The launch-failure gate resets only when
-        // every source in the cycle has reported.
-        bool result_applied = false;
-        if (result->failed) {
-            result_applied =
-                g_refresh->ApplySourceFailure(result->generation, result->source);
-        } else {
-            if (g_refresh->ApplySourceResult(result->generation, result->source,
-                                             std::move(result->entries),
-                                             result->diagnostics)) {
-                result_applied = true;
-                // NR-063: a successful source-ok enumeration refreshes the
-                // AppsFolder staleness clock; a failure keeps it stale so the
-                // 10-minute retry can run again (design-spec §FR-008).
-                if (result->source == nimblerun::CatalogSource::AppsFolder) {
-                    g_refresh->RecordAppsFolderSuccess(MonotonicMs());
-                }
-            }
-        }
-        if (result_applied && g_refresh->GenerationComplete(result->generation)) {
-            OnGenerationCompleteRefresh();
-        }
-        // NR-100: a sibling source's result may have failed to post while this
-        // one was delivered; drain those delivery failures. If that completes
-        // the generation, run the same single completion refresh (NR-073 keeps
-        // the snapshot swap at one choke point).
-        if (DrainRebuildDeliveryFailures()) {
-            OnGenerationCompleteRefresh();
-        }
-        InvalidateRect(window, nullptr, FALSE);
-        return 0;
-    }
+    case kRebuildDoneMessage:
+        return g_rebuild_pipeline ? g_rebuild_pipeline->OnResultMessage(w_param, l_param) : 0;
     case kRebuildDeliveryFailedMessage:
-        // NR-100: at least one rebuild source could not deliver its result via
-        // kRebuildDoneMessage. Drain the recorded failures as source failures so
-        // every source completes exactly once and the generation cannot stall
-        // in IsRebuildInProgress() forever (payload-free wake-up).
-        if (w_param != 0) {
-            // NR-106: the failure queue's reserved capacity was unexpectedly
-            // unavailable. The worker encoded only the generation and enum;
-            // validate the enum before crossing into the coordinator.
-            const auto source_value = static_cast<std::uintptr_t>(l_param);
-            if (source_value <= static_cast<std::uintptr_t>(
-                                   nimblerun::CatalogSource::UserFolder)) {
-                CompleteRebuildSourceFailure(
-                    static_cast<std::uint64_t>(w_param),
-                    static_cast<nimblerun::CatalogSource>(source_value));
-            }
-        } else if (DrainRebuildDeliveryFailures()) {
-            OnGenerationCompleteRefresh();
-        }
-        InvalidateRect(window, nullptr, FALSE);
-        return 0;
+        return g_rebuild_pipeline ? g_rebuild_pipeline->OnDeliveryFailureMessage(w_param, l_param) : 0;
     case WM_TIMER:
         if (w_param == kRebuildTimerId) {
             KillTimer(window, kRebuildTimerId);
-            if (g_refresh) {
-                const std::int64_t now = MonotonicMs();
-                if (g_refresh->ShouldStartRebuild(now)) {
-                    StartRebuild(window, g_refresh->DueSources(now));
-                } else if (!g_refresh->DueSources(now).empty()) {
-                    // NR-118: due sources exist but a rebuild is running; a partial
-                    // cycle must not supersede it (cold-start sources would be left
-                    // unverified or dropped). Re-arm so the pending work is serviced
-                    // by the next tick once the current generation completes.
-                    SetTimer(window, kRebuildTimerId, 500, nullptr);
-                }
-            }
+            if (g_rebuild_pipeline) g_rebuild_pipeline->OnDebounceTimer();
         }
         return 0;
     case kSettingsMessage: {
@@ -3452,10 +2928,10 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
         // into a dead HWND and read globals mid-destruction.
         // NR-123: the wait is bounded. A worker stuck inside a single
         // uninterruptible Shell call must not hang shutdown (design-spec
-        // §9.4); on timeout JoinRebuildThreads detaches it and we continue --
+        // §9.4); on timeout Shutdown detaches it and we continue --
         // the process is exiting, so the OS reclaims the thread, and the
         // registry clear below frees every in-flight payload exactly once.
-        JoinRebuildThreads(kRebuildJoinTimeoutMs);
+        if (g_rebuild_pipeline) g_rebuild_pipeline->Shutdown(5000);
         // NR-049: a thread can post its result microseconds before we join it,
         // so drain the queue and delete the payloads. Mirrors the existing
         // kIconReadyMessage drain directly above; without it every shutdown
@@ -3472,7 +2948,6 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
         // is released here, in the same UI thread that registered ownership
         // semantics; workers are all joined above so nothing can insert after.
         nimblerun::g_icon_handoffs.Clear();
-        g_rebuild_handoffs.Clear();
         if (g_search_font) {
             DeleteObject(g_search_font);
             g_search_font = nullptr;
@@ -3635,7 +3110,6 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     }
     // NR-079: a newer-schema file on disk must not be overwritten by this build
     // (design-spec §10.4); the flag stays set for the whole run.
-    g_catalog_cache_disable_writes = !persistence_available || cache_newer;
 
     nimblerun::UsageStore usage(data_directory);
     const nimblerun::UsageLoadResult usage_result =
@@ -3650,6 +3124,51 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         ? nimblerun::JoinPath(data_directory, L"logs") : std::wstring{};
     nimblerun::DiagnosticLog diag(g_log_directory, L"nimblerun.log");
     g_diag = &diag;
+
+    g_rebuild_pipeline = std::make_unique<nimblerun::RebuildPipeline>(
+        refresh,
+        [] { return g_settings; },
+        [window](UINT message, WPARAM w_param, LPARAM l_param) {
+            return PostMessageW(window, message, w_param, l_param) != FALSE;
+        },
+        [](nimblerun::CatalogSource source, const nimblerun::Settings& settings,
+           std::atomic<bool>* cancel) {
+            nimblerun::RebuildEnumeration result;
+            switch (source) {
+            case nimblerun::CatalogSource::StartMenu: {
+                const auto value = nimblerun::EnumerateStartMenuCatalog(cancel);
+                result.entries = std::move(value.entries);
+                result.source_ok = value.source_ok;
+                result.diagnostics.corrupt_links = value.corrupt_links;
+                break;
+            }
+            case nimblerun::CatalogSource::AppsFolder:
+                if (settings.include_windows_apps) {
+                    const auto value = nimblerun::EnumerateAppsFolderCatalog(cancel);
+                    result.entries = std::move(value.entries);
+                    result.source_ok = value.source_ok;
+                }
+                break;
+            case nimblerun::CatalogSource::UserFolder: {
+                const auto value = nimblerun::EnumerateUserFolderCatalog(settings, cancel);
+                result.entries = std::move(value.entries);
+                result.source_ok = value.source_ok;
+                result.diagnostics.skipped_directories = value.skipped_directories;
+                break;
+            }
+            }
+            return result;
+        },
+        [] { OnGenerationCompleteRefresh(); },
+        [window] { InvalidateRect(window, nullptr, FALSE); },
+        [window] {
+            KillTimer(window, kRebuildTimerId);
+            SetTimer(window, kRebuildTimerId, 500, nullptr);
+        },
+        [] {
+            if (g_diag) g_diag->Write(L"rebuild", L"exception");
+        });
+    g_rebuild_pipeline->SetCacheWritesDisabled(!persistence_available || cache_newer);
 
     // NR-058: settings/usage load failures surface now that the log exists (the
     // log is created after those loads; the initialization order is unchanged).
@@ -3769,16 +3288,6 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         g_store_load_issues = 0;
     }
 
-    // NR-115: the main loop waits on a manual-reset event alongside the message
-    // queue, so a recorded delivery failure is drained even when its
-    // PostMessageW wake-up failed (queue full). Created before the first rebuild
-    // can queue a failure; closed after WM_DESTROY joined every worker, so no
-    // worker can SetEvent or append after the handle dies.
-    g_rebuild_failure_event =
-        CreateEventW(nullptr, TRUE, FALSE, nullptr);
-    // A null event degrades gracefully: the loop below behaves exactly like the
-    // previous plain GetMessageW loop and SetEvent stays guarded by the null check.
-
     // NR-011: kick off the background full rebuild now that the panel can serve
     // the cached snapshot; the results arrive through kRebuildDoneMessage.
     if (g_refresh) {
@@ -3792,28 +3301,15 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         // so a recorded failure is drained even when its PostMessageW wake-up
         // failed (queue full). Event-driven: no polling, no timer.
         DWORD wait_result = WAIT_FAILED;
-        if (g_rebuild_failure_event != nullptr) {
+        HANDLE failure_event = g_rebuild_pipeline ? g_rebuild_pipeline->FailureEvent() : nullptr;
+        if (failure_event != nullptr) {
             wait_result = MsgWaitForMultipleObjectsEx(
-                1, &g_rebuild_failure_event, INFINITE, QS_ALLINPUT,
+                1, &failure_event, INFINITE, QS_ALLINPUT,
                 MWMO_INPUTAVAILABLE);
         }
-        if (g_rebuild_failure_event != nullptr &&
+        if (failure_event != nullptr &&
             wait_result == WAIT_OBJECT_0) {
-            // A recorded delivery failure woke the loop. Drain under the UI-owned
-            // coordinator; a complete generation refreshes the panel and cache
-            // exactly once (OnGenerationCompleteRefresh). InvalidateRect mirrors
-            // the kRebuildDeliveryFailedMessage case's single repaint.
-            if (DrainRebuildDeliveryFailures()) {
-                OnGenerationCompleteRefresh();
-            }
-            InvalidateRect(window, nullptr, FALSE);
-            // The event is level-triggered: reset only when no records remain, so a
-            // SetEvent racing the drain is never lost. New records after the reset
-            // re-signal it and the next wait returns immediately.
-            std::lock_guard<std::mutex> lock(g_delivery_failure_mutex);
-            if (g_rebuild_delivery_failures.empty()) {
-                ResetEvent(g_rebuild_failure_event);
-            }
+            if (g_rebuild_pipeline) g_rebuild_pipeline->DrainPending();
             continue;
         }
         const int get_result = GetMessageW(&message, nullptr, 0, 0);
@@ -3849,11 +3345,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         CloseHandle(g_test_show_semaphore);
         g_test_show_semaphore = nullptr;
     }
+    g_rebuild_pipeline.reset();
     CoUninitialize();
-    if (g_rebuild_failure_event != nullptr) {
-        CloseHandle(g_rebuild_failure_event);
-        g_rebuild_failure_event = nullptr;
-    }
     CloseHandle(startup_ready);
     CloseHandle(mutex);
     return static_cast<int>(message.wParam);

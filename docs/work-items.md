@@ -168,7 +168,7 @@
 | NR-129 | 25 份逐字相同的測試 Expect helper 收斂 | 3 | `done` | NR-055 | [NR-129](work-items/NR-129-shared-test-expect-helper.md) |
 | NR-130 | 同 user DoS 面：full-rescan 限流＋single-instance 靜默退出 | 1 | `done` | NR-002, NR-077, NR-110 | [NR-130](work-items/NR-130-same-user-dos-surface.md) |
 | NR-131 | Token 交接註冊表收斂為模組，rebuild 停止借用 icon worker 的 mutex | 3 | `done` | NR-077, NR-127 | [NR-131](work-items/NR-131-handoff-registry-module.md) |
-| NR-132 | Rebuild 編排抽成 RebuildPipeline（九個全域／五啟動點／四完成點） | 3 | `planned` | NR-131, NR-100, NR-115, NR-116, NR-118, NR-123, NR-130 | [NR-132](work-items/NR-132-rebuild-pipeline-module.md) |
+| NR-132 | Rebuild 編排抽成 RebuildPipeline（九個全域／五啟動點／四完成點） | 3 | `done` | NR-131, NR-100, NR-115, NR-116, NR-118, NR-123, NR-130 | [NR-132](work-items/NR-132-rebuild-pipeline-module.md) |
 | NR-133 | Slot 幾何單一來源 `SlotRect`／`SlotAtPointDip`（四份拷貝、footer 界已分歧） | 3 | `done` | NR-064, NR-082, NR-120 | [NR-133](work-items/NR-133-slot-geometry-single-source.md) |
 | NR-134 | Snapshot 組裝順序契約要有擁有者：`CatalogSnapshotAssembler` | 3 | `ready` | NR-061, NR-072, NR-083, NR-116 | [NR-134](work-items/NR-134-snapshot-assembly-module.md) |
 | NR-135 | `wWinMain` RAII 收尾（`HandleGuard`＋`ComGuard`）與刪除 `message_loop.h` | 3 | `ready` | NR-051, NR-117 | [NR-135](work-items/NR-135-winmain-raii-and-message-loop-inline.md) |

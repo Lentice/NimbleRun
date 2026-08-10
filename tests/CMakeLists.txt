@@ -174,26 +174,6 @@ endif()
 
 add_test(NAME nimblerun_catalog_watcher_test COMMAND nimblerun_catalog_watcher_test)
 
-# NR-130: header-only seam for the full-rescan marker throttle decision
-# (app_host module, not a library), compiled into the test directly.
-add_executable(nimblerun_full_rescan_throttle_test
-    unit/full_rescan_throttle_test.cpp
-)
-target_include_directories(nimblerun_full_rescan_throttle_test PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src
-)
-target_link_libraries(nimblerun_full_rescan_throttle_test PRIVATE user32 kernel32)
-target_compile_definitions(nimblerun_full_rescan_throttle_test
-    PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX WINVER=0x0A00 _WIN32_WINNT=0x0A00
-)
-if(MSVC OR CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
-    target_compile_options(nimblerun_full_rescan_throttle_test PRIVATE /W4 /permissive- /EHsc)
-elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    target_compile_options(nimblerun_full_rescan_throttle_test PRIVATE -Wall -Wextra -Wpedantic)
-    target_link_options(nimblerun_full_rescan_throttle_test PRIVATE -municode -static)
-endif()
-add_test(NAME nimblerun_full_rescan_throttle_test COMMAND nimblerun_full_rescan_throttle_test)
-
 # NR-117: header-only seam for the GetMessageW dispatch decision; compiled
 # into the test directly (it lives in the app_host module, not a library).
 add_executable(nimblerun_message_loop_test
@@ -213,3 +193,15 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     target_link_options(nimblerun_message_loop_test PRIVATE -municode -static)
 endif()
 add_test(NAME nimblerun_message_loop_test COMMAND nimblerun_message_loop_test)
+
+add_executable(nimblerun_rebuild_pipeline_test unit/rebuild_pipeline_test.cpp)
+target_include_directories(nimblerun_rebuild_pipeline_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src)
+target_link_libraries(nimblerun_rebuild_pipeline_test PRIVATE nimblerun_rebuild_pipeline)
+target_compile_definitions(nimblerun_rebuild_pipeline_test PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX WINVER=0x0A00 _WIN32_WINNT=0x0A00)
+if(MSVC OR CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
+    target_compile_options(nimblerun_rebuild_pipeline_test PRIVATE /W4 /permissive- /EHsc)
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    target_compile_options(nimblerun_rebuild_pipeline_test PRIVATE -Wall -Wextra -Wpedantic)
+    target_link_options(nimblerun_rebuild_pipeline_test PRIVATE -municode -static)
+endif()
+add_test(NAME nimblerun_rebuild_pipeline_test COMMAND nimblerun_rebuild_pipeline_test)

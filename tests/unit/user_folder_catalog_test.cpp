@@ -285,13 +285,13 @@ void TestSourceSanityCheck() {
     Expect(!root.empty(), "repo root located from the test executable");
     const std::string catalog = ReadSourceFile(root, L"src\\catalog\\user_folder_catalog.cpp");
     const std::string walker = ReadSourceFile(root, L"src\\catalog\\directory_walker.cpp");
-    const std::string main_src = ReadSourceFile(root, L"src\\app_host\\main.cpp");
+    const std::string pipeline = ReadSourceFile(root, L"src\\app_host\\rebuild_pipeline.cpp");
     ExpectContains(walker, "ERROR_NO_MORE_FILES", "clean-end check present in the walk");
     ExpectContains(catalog, "source_ok = false", "mid-walk failure sets source_ok false");
-    ExpectContains(main_src, "EnumerateUserFolderCatalog", "worker calls the enumerator");
-    ExpectContains(main_src, "result->failed = !res.source_ok",
+    ExpectContains(pipeline, "enumerate_source_", "pipeline calls the enumerator");
+    ExpectContains(pipeline, "result->failed = !enumeration.source_ok",
                    "worker forwards source_ok to failed");
-    ExpectContains(main_src, "ApplySourceFailure", "failed results reach the failure route");
+    ExpectContains(pipeline, "ApplySourceFailure", "failed results reach the failure route");
 }
 
 } // namespace
