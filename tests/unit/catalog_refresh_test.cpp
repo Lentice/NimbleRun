@@ -324,6 +324,28 @@ void TestFailureWakeupDrainCompletesGeneration() {
            "healthy new entry and both failed sources' old entries remain");
 }
 
+// NR-139: a forged kRebuildDeliveryFailedMessage can name a matching-generation
+// source that is not in the active set. ApplySourceFailure must return false
+// instead of throwing std::out_of_range -- the window procedure has no exception
+// boundary, so a throw would std::terminate the resident tray process.
+void TestForgedFailureNonActiveSourceRejected() {
+    CatalogRefreshCoordinator c;
+    const std::uint64_t gen = c.BeginGeneration({CatalogSource::StartMenu});
+    Expect(!c.ApplySourceFailure(gen, CatalogSource::UserFolder),
+           "non-active source failure is rejected without throwing");
+}
+
+// NR-139: the forged-result twin. ApplySourceResult for a non-active source
+// must also return false without throwing, and must not touch any state.
+void TestForgedResultNonActiveSourceRejected() {
+    CatalogRefreshCoordinator c;
+    const std::uint64_t gen = c.BeginGeneration({CatalogSource::StartMenu});
+    Expect(!c.ApplySourceResult(gen, CatalogSource::UserFolder,
+                                {Entry(L"forged", AppSource::UserFolder)}),
+           "non-active source result is rejected without throwing");
+    Expect(c.Snapshot().empty(), "rejected result leaves no snapshot entries");
+}
+
 // AppsFolder on-demand rule: no refresh under 10 minutes, refresh when older.
 void TestAppsFolderStaleness() {
     CatalogRefreshCoordinator c;
@@ -980,6 +1002,8 @@ int wmain() {
     TestDeliveryFailureCompletesGeneration();
     TestSetupFailureCompletesGeneration();
     TestFailureWakeupDrainCompletesGeneration();
+    TestForgedFailureNonActiveSourceRejected();
+    TestForgedResultNonActiveSourceRejected();
     TestSeedSourceEntriesRetainsFailedSourceRows();
     TestSnapshotFillsNormalizedName();
     TestSetSnapshotFillsNormalizedName();

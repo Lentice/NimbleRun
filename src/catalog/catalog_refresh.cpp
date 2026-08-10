@@ -107,6 +107,14 @@ bool CatalogRefreshCoordinator::ApplySourceResult(std::uint64_t generation,
     if (generation != generation_) {
         return false;  // a newer rebuild started; this worker is stale
     }
+    // NR-139: the snapshot holds only active sources; a forged
+    // kRebuildDeliveryFailedMessage can name a matching-generation source that
+    // is not in the active set. Reject it before touching any state -- the
+    // normal path guarantees membership, so find() never misses there.
+    const auto snapshot = generation_event_snapshot_.find(source);
+    if (snapshot == generation_event_snapshot_.end()) {
+        return false;
+    }
     // NR-124: fold the enumerator's counts into the generation diagnostics. A
     // source that failed never reaches this path, so a partial/failed walk's
     // counts are never reported as complete.
@@ -120,7 +128,7 @@ bool CatalogRefreshCoordinator::ApplySourceResult(std::uint64_t generation,
     const auto event = last_event_ms_.find(source);
     const std::int64_t current =
         event == last_event_ms_.end() ? kNoEventSentinel : event->second;
-    if (current == generation_event_snapshot_.at(source)) {
+    if (current == snapshot->second) {
         pending_[source] = false;
     }
     received_[source] = true;
@@ -135,12 +143,18 @@ bool CatalogRefreshCoordinator::ApplySourceFailure(std::uint64_t generation,
     if (generation != generation_) {
         return false;
     }
+    // NR-139: same forged-message guard as ApplySourceResult -- a non-active
+    // source is not this generation's business, so reject it without throwing.
+    const auto snapshot = generation_event_snapshot_.find(source);
+    if (snapshot == generation_event_snapshot_.end()) {
+        return false;
+    }
     // NR-065: same conditional clear as ApplySourceResult -- a failure must not
     // drop an event that arrived while the failed scan was in flight.
     const auto event = last_event_ms_.find(source);
     const std::int64_t current =
         event == last_event_ms_.end() ? kNoEventSentinel : event->second;
-    if (current == generation_event_snapshot_.at(source)) {
+    if (current == snapshot->second) {
         pending_[source] = false;
     }
     received_[source] = true;  // the source's old entries stay; others still apply

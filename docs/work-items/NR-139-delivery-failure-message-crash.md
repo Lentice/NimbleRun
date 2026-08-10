@@ -109,4 +109,39 @@ rg -n "generation_event_snapshot_.*\.at\(" src
 # expect: 零命中
 ```
 
-完成後在文件底部補齊本 item 的 Handoff 交接備註。
+## Handoff
+
+已完成（commit `NR-139: forged delivery-failure message cannot crash the process`）。
+
+**變更內容**：`src/catalog/catalog_refresh.cpp` 的 `ApplySourceResult`（`:103-139`）與
+`ApplySourceFailure`（`:141-165`）在 generation 相符檢查後各加一道 NR-139 守門：
+`generation_event_snapshot_.find(source)` 非成員即 `return false`（不觸碰任何狀態，
+與 generation mismatch 早退同語意）。兩函式原 `current == generation_event_snapshot_.at(source)`
+改用守門迭代器（`snapshot->second`），`.at()` 完全移除，正常路徑（active 成員）行為
+逐字不變。守門放在 `ApplySourceResult` 的 diagnostics fold／`source_entries_` 寫入之前，
+確保「回 false」=「什麼都沒發生」。
+
+**選修項未做**：`OnDeliveryFailureMessage` 的 `IsActiveSource` 成員守門未加——`.find()`
+守門已讓非 active source 的呼叫成為無害 no-op（回 false、零副作用），window proc 再加一層
+判斷是純冗餘；item 明言「only if clean」，此處 clean 判定為不需要，故維持最小 diff。
+
+**測試**：`tests/unit/catalog_refresh_test.cpp` 新增兩個必測案例，註冊於既有 list-plus-loop
+（置於 `TestFailureWakeupDrainCompletesGeneration` 之後）：
+- `TestForgedFailureNonActiveSourceRejected`：`BeginGeneration({StartMenu})` 後
+  `ApplySourceFailure(gen, UserFolder)` 回 `false` 不拋（若拋出，測試 process 即終止，
+  等同 fail）；
+- `TestForgedResultNonActiveSourceRejected`：同 setup 下 `ApplySourceResult(gen, UserFolder,
+  entries)` 回 `false` 不拋，且 `Snapshot()` 維持空（無狀態污染）。
+成功路徑既有斷言（NR-065／NR-100／NR-106／NR-115 等）全部未動。
+
+**驗證**：Release (llvm-mingw) configure 成功；`cmake --build build` 零新增 warning；
+完整 `ctest --test-dir build --output-on-failure` 31/31 通過（數量不變，故
+`docs/testing.md` 未動）；focused `ctest -R "catalog_refresh|rebuild_pipeline"` 2/2 通過；
+`rg -n "generation_event_snapshot_.*\\.at\\(" src` 零命中。單獨執行新測試：
+`build/tests/nimblerun_catalog_refresh_test.exe` 印出
+「NR-011/NR-022 catalog refresh check PASSED」。
+
+**交接區（Non-goals 指定記錄，不另開 item）**：偽造「active source 失敗」的剩餘窗口
+（`ApplySourceFailure` 對 active source 回 true → 該來源缺項 → generation 提前完成 →
+真結果到達後同 generation 重算自癒）是 same-user、窄窗口、自我修復；same-user attacker
+本就能直接改寫 `usage.tsv`／`favorites.txt`，無新增傷害。
