@@ -720,7 +720,7 @@ flowchart TD
 6. 釋放 Direct2D 與 COM resource。
 7. 銷毀視窗、釋放 Mutex、結束程序。
 
-關閉不得因等待 Shell extension 無限卡住；worker join 應有可控取消路徑。
+關閉不得因等待 Shell extension 無限卡住；worker join 應有可控取消路徑。等待有界，超時即繼續退出。
 
 ---
 

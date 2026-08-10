@@ -159,7 +159,7 @@
 | NR-120 | 高度 clamp 在高 DPI 小螢幕裁掉 footer；§4.9 的 70% 上限未實作 | 3 | `done` | NR-015, NR-082, NR-103 | [NR-120](work-items/NR-120-panel-height-clamp-footer.md) |
 | NR-121 | catalog.cache 無行數上限＋dedup O(n²) 在 UI 執行緒 | 2 | `done` | NR-011, NR-057, NR-073, NR-079, NR-113 | [NR-121](work-items/NR-121-catalog-cache-row-cap-dedup-index.md) |
 | NR-122 | favorites/usage 無行數上限：load O(n²)＋Reconcile O(pins×catalog)＋ReadAllBytes 無上限 | 1 | `done` | NR-057, NR-072, NR-080, NR-096 | [NR-122](work-items/NR-122-store-row-caps-and-hash-loads.md) |
-| NR-123 | Rebuild thread join 無界：hung Shell call 卡死關閉（§9.4） | 3 | `ready` | NR-049, NR-077, NR-098 | [NR-123](work-items/NR-123-rebuild-join-bounded-wait.md) |
+| NR-123 | Rebuild thread join 無界：hung Shell call 卡死關閉（§9.4） | 3 | `done` | NR-049, NR-077, NR-098 | [NR-123](work-items/NR-123-rebuild-join-bounded-wait.md) |
 | NR-124 | §11 診斷缺口：損壞捷徑／缺失資料夾靜默略過、dedup 歧義計數丟棄 | 3 | `ready` | NR-054, NR-063, NR-090, NR-091, NR-092 | [NR-124](work-items/NR-124-catalog-diagnostic-gaps.md) |
 | NR-125 | design-spec §4.1／FR-002 回寫 NR-088 的 Win 鍵決策 | 4 | `done` | NR-086, NR-088, NR-094 | [NR-125](work-items/NR-125-spec-winkey-sync.md) |
 | NR-126 | 文件殘餘同步：§4.6 公式、§10.2 格式、testing/roadmap、註解、release-evidence | 5 | `ready` | NR-056, NR-061, NR-094, NR-104 | [NR-126](work-items/NR-126-docs-residual-sync.md) |

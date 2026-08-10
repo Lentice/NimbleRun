@@ -1596,16 +1596,56 @@ void DiscardPendingRebuildCompletion(std::uint64_t generation,
 // safe iteration boundary instead of blocking the UI thread on join() until it
 // finishes (design-spec §9.4). Reset only after every thread is joined so the
 // next generation starts clean. StartRebuild and WM_DESTROY both use this one
-// helper, so they share the same cancel→join order.
-void JoinRebuildThreads() {
+// helper, so they share the same cancel→wait order.
+// NR-123: the default INFINITE wait keeps StartRebuild's supersede semantics
+// unchanged (a slow scan still stops at its next cancellation boundary,
+// NR-098). WM_DESTROY passes a bounded timeout: a worker stuck inside a single
+// uninterruptible Shell call (design-spec §16) must not hang shutdown forever.
+// On timeout the survivors are detached and shutdown continues -- the process
+// exits right after, so the OS reclaims them (NR-049's detach hazard only
+// applies on a non-exit path), and a late kRebuildDoneMessage is ignored as an
+// unknown token (NR-077).
+// NR-123: how long WM_DESTROY waits for a worker stuck in an uninterruptible
+// Shell call before giving up and continuing the shutdown.
+constexpr DWORD kRebuildJoinTimeoutMs = 5000;
+void JoinRebuildThreads(DWORD timeout_ms = INFINITE) {
     g_rebuild_cancel.store(true);
-    for (std::thread& worker : g_rebuild_threads) {
-        if (worker.joinable()) {
-            worker.join();
+    bool all_finished = true;
+    if (!g_rebuild_threads.empty()) {
+        std::vector<HANDLE> handles;
+        handles.reserve(g_rebuild_threads.size());
+        for (std::thread& worker : g_rebuild_threads) {
+            if (worker.joinable()) {
+                handles.push_back(worker.native_handle());
+            }
+        }
+        if (timeout_ms != INFINITE && !handles.empty()) {
+            const DWORD wait_result = WaitForMultipleObjects(
+                static_cast<DWORD>(handles.size()), handles.data(), TRUE, timeout_ms);
+            all_finished = (wait_result == WAIT_OBJECT_0);
         }
     }
-    g_rebuild_threads.clear();
-    g_rebuild_cancel.store(false);
+    if (all_finished) {
+        for (std::thread& worker : g_rebuild_threads) {
+            if (worker.joinable()) {
+                worker.join();
+            }
+        }
+        g_rebuild_threads.clear();
+        g_rebuild_cancel.store(false);
+    } else {
+        // NR-123: timeout (or a failed wait) -- at least one worker is still
+        // inside an uninterruptible call. Detach it so destroying the vector
+        // does not call std::terminate, then continue the shutdown; the OS
+        // reclaims the thread when the process exits. Leave g_rebuild_cancel
+        // set: the process is exiting, no next generation will run.
+        for (std::thread& worker : g_rebuild_threads) {
+            if (worker.joinable()) {
+                worker.detach();
+            }
+        }
+        g_rebuild_threads.clear();
+    }
 }
 
 // NR-011: starts one background thread per source in `sources` for a rebuild
@@ -3474,7 +3514,12 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
         // g_settings (they live past the message loop, and the worker reads
         // both). Ordering matters: a scan that outlived the window would post
         // into a dead HWND and read globals mid-destruction.
-        JoinRebuildThreads();
+        // NR-123: the wait is bounded. A worker stuck inside a single
+        // uninterruptible Shell call must not hang shutdown (design-spec
+        // §9.4); on timeout JoinRebuildThreads detaches it and we continue --
+        // the process is exiting, so the OS reclaims the thread, and the
+        // registry clear below frees every in-flight payload exactly once.
+        JoinRebuildThreads(kRebuildJoinTimeoutMs);
         // NR-049: a thread can post its result microseconds before we join it,
         // so drain the queue and delete the payloads. Mirrors the existing
         // kIconReadyMessage drain directly above; without it every shutdown
