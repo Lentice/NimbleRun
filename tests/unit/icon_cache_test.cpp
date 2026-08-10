@@ -5,136 +5,60 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string>
-#include <vector>
 
-using nimblerun::AppEntry;
 using nimblerun::IconBitmap;
 using nimblerun::IconCache;
 using nimblerun::IconKey;
-using nimblerun::IconProvider;
 
 namespace {
-
-AppEntry Entry(const std::wstring& stable_id) {
-    AppEntry entry;
-    entry.stable_id = stable_id;
-    entry.display_name = L"probe";
-    entry.launch_identity = L"C:\\Apps\\probe.exe";
-    entry.source_path = entry.launch_identity;
-    return entry;
-}
-
-// Deterministic fake provider: every load produces a bitmap carrying a
-// per-call payload and records the key it was asked for. Failures are
-// scripted with a per-key deny list.
-class FakeIconProvider : public IconProvider {
-public:
-    int calls = 0;
-    std::vector<std::wstring> requested;
-    std::vector<std::wstring> failing;
-
-    IconBitmap Load(const AppEntry&, const IconKey& key) override {
-        ++calls;
-        requested.push_back(key.Encode());
-        for (const std::wstring& fail_key : failing) {
-            if (fail_key == key.Encode()) {
-                return {};
-            }
-        }
-        IconBitmap bitmap;
-        bitmap.width = 4;
-        bitmap.height = 4;
-        bitmap.pixels.assign(16, static_cast<std::uint32_t>(calls));
-        return bitmap;
-    }
-};
 
 IconKey Key(const std::wstring& stable_id, int variant = 48) {
     return IconKey{stable_id, variant};
 }
 
-void TestMissThenInsertAndHit() {
-    FakeIconProvider provider;
+IconBitmap SampleBitmap() {
+    IconBitmap icon;
+    icon.width = 2;
+    icon.height = 2;
+    icon.pixels.assign(4, 0xFF112233u);
+    return icon;
+}
+
+// NR-128: the miss->provider->insert route (IconCache::Resolve) is gone, so the
+// cache is exercised through its worker entry point Insert() plus Peek(), which
+// is exactly the production path. TestLruEviction, TestReinsertRefreshesRecency
+// and TestProviderFailureNotCached were Resolve-only routes whose semantics are
+// covered verbatim by TestInsertAddsAndEvicts, TestInsertRefreshesRecency and
+// TestInsertRejectsEmpty below (all share the same LRU/eviction code path).
+
+void TestInsertThenPeekHit() {
     IconCache cache;
     const std::wstring encoded = Key(L"app1").Encode();
 
     Expect(cache.Peek(encoded) == nullptr, "uncached key misses");
     Expect(cache.Size() == 0, "empty cache has size zero");
 
-    const IconBitmap loaded = cache.Resolve(Entry(L"app1"), Key(L"app1"), provider);
-    Expect(!loaded.Empty(), "first resolve loads through the provider");
-    Expect(loaded.pixels[0] == 1, "provider payload round-trips");
-    Expect(provider.calls == 1, "provider called exactly once on a miss");
+    cache.Insert(encoded, SampleBitmap());
     Expect(cache.Size() == 1, "insert grew the cache");
-
-    const IconBitmap hit = cache.Resolve(Entry(L"app1"), Key(L"app1"), provider);
-    Expect(!hit.Empty(), "second resolve is a cache hit");
-    Expect(hit.pixels[0] == 1, "hit returns the stored bitmap, not a reload");
-    Expect(provider.calls == 1, "cache hit does not touch the provider");
-
     Expect(cache.Peek(encoded) != nullptr, "peek finds the inserted key");
-    Expect(cache.Peek(encoded)->pixels[0] == 1, "peek returns the stored bitmap");
-}
-
-void TestLruEviction() {
-    FakeIconProvider provider;
-    IconCache cache(2);
-
-    cache.Resolve(Entry(L"a"), Key(L"a"), provider);
-    cache.Resolve(Entry(L"b"), Key(L"b"), provider);
-    cache.Resolve(Entry(L"c"), Key(L"c"), provider);
-
-    Expect(cache.Size() == 2, "cap keeps the cache bounded");
-    Expect(cache.Peek(Key(L"a").Encode()) == nullptr, "oldest entry is evicted");
-    Expect(cache.Peek(Key(L"b").Encode()) != nullptr, "second entry survives");
-    Expect(cache.Peek(Key(L"c").Encode()) != nullptr, "newest entry survives");
-}
-
-void TestReinsertRefreshesRecency() {
-    FakeIconProvider provider;
-    IconCache cache(2);
-
-    cache.Resolve(Entry(L"a"), Key(L"a"), provider);
-    cache.Resolve(Entry(L"b"), Key(L"b"), provider);
-    cache.Resolve(Entry(L"a"), Key(L"a"), provider);  // touch a again
-    cache.Resolve(Entry(L"c"), Key(L"c"), provider);
-
-    Expect(cache.Peek(Key(L"a").Encode()) != nullptr, "recently re-read entry survives");
-    Expect(cache.Peek(Key(L"b").Encode()) == nullptr, "least recently used entry is evicted");
-    Expect(cache.Peek(Key(L"c").Encode()) != nullptr, "newest entry survives");
-}
-
-void TestProviderFailureNotCached() {
-    FakeIconProvider provider;
-    IconCache cache(2);
-    provider.failing.push_back(Key(L"bad").Encode());
-
-    const IconBitmap failed = cache.Resolve(Entry(L"bad"), Key(L"bad"), provider);
-    Expect(failed.Empty(), "provider failure returns an empty bitmap");
-    Expect(cache.Size() == 0, "failure is not cached");
-    Expect(cache.Peek(Key(L"bad").Encode()) == nullptr, "no entry after a failure");
-
-    cache.Resolve(Entry(L"bad"), Key(L"bad"), provider);
-    Expect(provider.calls == 2, "uncached failure is retried, not suppressed");
-    Expect(cache.Size() == 0, "still nothing cached after repeated failure");
+    Expect(cache.Peek(encoded)->pixels[0] == 0xFF112233u,
+           "peek returns the stored bitmap, not a reload");
 }
 
 void TestKeySeparatesVariant() {
-    FakeIconProvider provider;
     IconCache cache(8);
 
-    cache.Resolve(Entry(L"app"), Key(L"app", 48), provider);
+    cache.Insert(Key(L"app", 48).Encode(), SampleBitmap());
     Expect(cache.Peek(Key(L"app", 48).Encode()) != nullptr, "exact variant is cached");
     Expect(cache.Peek(Key(L"app", 96).Encode()) == nullptr, "next variant is a distinct key");
     Expect(cache.Peek(Key(L"other", 48).Encode()) == nullptr, "different stable id is a distinct key");
 }
 
 void TestDefaultCap() {
-    FakeIconProvider provider;
     IconCache cache;
     const std::size_t cap = nimblerun::IconCacheCapacityFor(0, 20);
     for (std::size_t i = 0; i < cap + 5; ++i) {
-        cache.Resolve(Entry(std::to_wstring(i)), Key(std::to_wstring(i)), provider);
+        cache.Insert(std::to_wstring(i) + L"|48", SampleBitmap());
     }
     Expect(cache.Size() == cap, "default cap bounds the cache");
 }
@@ -181,51 +105,48 @@ void TestCapacityFor() {
 }
 
 void TestSetMaxItemsShrink() {
-    FakeIconProvider provider;
     IconCache cache(8);
-    cache.Resolve(Entry(L"a"), Key(L"a"), provider);
-    cache.Resolve(Entry(L"b"), Key(L"b"), provider);
-    cache.Resolve(Entry(L"c"), Key(L"c"), provider);
-    cache.Resolve(Entry(L"d"), Key(L"d"), provider);
+    cache.Insert(L"a|48", SampleBitmap());
+    cache.Insert(L"b|48", SampleBitmap());
+    cache.Insert(L"c|48", SampleBitmap());
+    cache.Insert(L"d|48", SampleBitmap());
 
     cache.SetMaxItems(2);
     Expect(cache.Size() == 2, "shrink evicts down to the new cap");
-    Expect(cache.Peek(Key(L"a").Encode()) == nullptr, "oldest entries are evicted first");
-    Expect(cache.Peek(Key(L"b").Encode()) == nullptr, "second oldest entry is evicted");
-    Expect(cache.Peek(Key(L"c").Encode()) != nullptr, "newer entries survive");
-    Expect(cache.Peek(Key(L"d").Encode()) != nullptr, "newest entry survives");
+    Expect(cache.Peek(L"a|48") == nullptr, "oldest entries are evicted first");
+    Expect(cache.Peek(L"b|48") == nullptr, "second oldest entry is evicted");
+    Expect(cache.Peek(L"c|48") != nullptr, "newer entries survive");
+    Expect(cache.Peek(L"d|48") != nullptr, "newest entry survives");
 
     // Relative recency of the survivors is preserved: d is still more recent
     // than c, so inserting another key evicts c, never d.
-    cache.Resolve(Entry(L"e"), Key(L"e"), provider);
-    Expect(cache.Peek(Key(L"c").Encode()) == nullptr, "shrink keeps recency order");
-    Expect(cache.Peek(Key(L"d").Encode()) != nullptr, "newest of the survivors stays");
+    cache.Insert(L"e|48", SampleBitmap());
+    Expect(cache.Peek(L"c|48") == nullptr, "shrink keeps recency order");
+    Expect(cache.Peek(L"d|48") != nullptr, "newest of the survivors stays");
 }
 
 void TestSetMaxItemsZero() {
-    FakeIconProvider provider;
     IconCache cache(8);
-    cache.Resolve(Entry(L"a"), Key(L"a"), provider);
-    cache.Resolve(Entry(L"b"), Key(L"b"), provider);
+    cache.Insert(L"a|48", SampleBitmap());
+    cache.Insert(L"b|48", SampleBitmap());
 
     cache.SetMaxItems(0);
     Expect(cache.Size() <= 1, "zero cap degrades to a single item");
 }
 
 void TestSetMaxItemsGrow() {
-    FakeIconProvider provider;
     IconCache cache(2);
-    cache.Resolve(Entry(L"a"), Key(L"a"), provider);
-    cache.Resolve(Entry(L"b"), Key(L"b"), provider);
+    cache.Insert(L"a|48", SampleBitmap());
+    cache.Insert(L"b|48", SampleBitmap());
 
     cache.SetMaxItems(8);
     Expect(cache.Size() == 2, "growing the cap evicts nothing");
-    Expect(cache.Peek(Key(L"a").Encode()) != nullptr, "grow keeps existing entries");
-    Expect(cache.Peek(Key(L"b").Encode()) != nullptr, "grow keeps all existing entries");
+    Expect(cache.Peek(L"a|48") != nullptr, "grow keeps existing entries");
+    Expect(cache.Peek(L"b|48") != nullptr, "grow keeps all existing entries");
 }
 
-// NR-032: IconCache::Insert is the worker-side entry point; eviction matches
-// Resolve's LRU rule and empty bitmaps are rejected.
+// NR-032: IconCache::Insert is the worker-side entry point; empty bitmaps are
+// rejected so a failed decode is never cached.
 void TestInsertRejectsEmpty() {
     IconCache cache(2);
     cache.Insert(L"a|48", {});
@@ -233,7 +154,7 @@ void TestInsertRejectsEmpty() {
     Expect(cache.Peek(L"a|48") == nullptr, "rejected insert leaves no entry");
 }
 
-void TestInsertAddsAndEvictsLikeResolve() {
+void TestInsertAddsAndEvicts() {
     IconCache cache(2);
     IconBitmap icon;
     icon.width = 2;
@@ -273,10 +194,7 @@ void TestInsertRefreshesRecency() {
 } // namespace
 
 int wmain() {
-    TestMissThenInsertAndHit();
-    TestLruEviction();
-    TestReinsertRefreshesRecency();
-    TestProviderFailureNotCached();
+    TestInsertThenPeekHit();
     TestKeySeparatesVariant();
     TestDefaultCap();
     TestKeyEncodingIsStable();
@@ -287,7 +205,7 @@ int wmain() {
     TestSetMaxItemsZero();
     TestSetMaxItemsGrow();
     TestInsertRejectsEmpty();
-    TestInsertAddsAndEvictsLikeResolve();
+    TestInsertAddsAndEvicts();
     TestInsertRefreshesRecency();
     std::printf("NR-032 icon cache check PASSED\n");
     return 0;

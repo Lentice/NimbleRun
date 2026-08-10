@@ -66,9 +66,10 @@ std::size_t IconCacheCapacityFor(std::size_t pinned_count, std::size_t recent_co
 // IconCacheCapacityFor(0, 20) = 44, a start value before the live pin count and
 // recent_count setting are known; ShowPanel re-derives it. Keys are
 // IconKey::Encode() strings. A cache hit refreshes recency; inserting a
-// new key beyond the cap evicts the least recently used key. Provider failures
-// are not cached: Resolve returns empty and leaves the cache unchanged, so the
-// caller may keep a fallback without polluting eviction state.
+// new key beyond the cap evicts the least recently used key. Empty bitmaps
+// are not cached (Insert rejects them), so a failed decode leaves the cache
+// unchanged and the caller may keep a fallback without polluting eviction
+// state.
 class IconCache {
 public:
     explicit IconCache(std::size_t max_items = IconCacheCapacityFor(0, 20));
@@ -77,14 +78,9 @@ public:
     // Returns a pointer valid until the next mutation of this cache.
     const IconBitmap* Peek(const std::wstring& encoded_key) const;
 
-    // Cached bitmap for the key, or ask the provider on a miss and insert it
-    // on success. Returns empty only when the key is uncached and the provider
-    // failed. Internally routes through Insert(), so eviction is defined once.
-    IconBitmap Resolve(const AppEntry& entry, const IconKey& key, IconProvider& provider);
-
     // Insert an already-decoded bitmap (produced off-thread). Empty bitmaps are
-    // rejected, matching Resolve's "failures are not cached" rule. A non-empty
-    // insert for an existing key replaces the payload and refreshes recency.
+    // rejected so a failed decode is never cached. A non-empty insert for an
+    // existing key replaces the payload and refreshes recency.
     void Insert(const std::wstring& encoded_key, IconBitmap bitmap);
 
     // Re-derives the LRU cap (design-spec §FR-009). Raising the cap never

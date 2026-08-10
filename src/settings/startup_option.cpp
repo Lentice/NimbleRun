@@ -2,10 +2,7 @@
 
 #include <windows.h>
 
-#include <cstddef>
-#include <cwctype>
 #include <string>
-#include <string_view>
 
 namespace nimblerun {
 namespace {
@@ -29,68 +26,7 @@ std::wstring CurrentModulePath() {
     }
 }
 
-// Windows paths are compared case-insensitively.
-bool PathsMatch(std::wstring_view left, std::wstring_view right) {
-    if (left.size() != right.size()) {
-        return false;
-    }
-    for (std::size_t i = 0; i < left.size(); ++i) {
-        if (towlower(static_cast<wint_t>(left[i])) !=
-            towlower(static_cast<wint_t>(right[i]))) {
-            return false;
-        }
-    }
-    return true;
-}
-
 } // namespace
-
-StartupStatus GetStartupStatus(const StartupOptionRegistry& registry) {
-    HKEY key = nullptr;
-    LONG status = RegOpenKeyExW(registry.base, registry.subkey.c_str(), 0,
-                                KEY_QUERY_VALUE, &key);
-    if (status == ERROR_FILE_NOT_FOUND || status == ERROR_PATH_NOT_FOUND) {
-        return StartupStatus::Disabled;
-    }
-    if (status != ERROR_SUCCESS) {
-        return StartupStatus::UnknownError;
-    }
-
-    DWORD type = 0;
-    DWORD size = 0;
-    status = RegQueryValueExW(key, kRunValueName, nullptr, &type, nullptr, &size);
-    if (status == ERROR_FILE_NOT_FOUND) {
-        RegCloseKey(key);
-        return StartupStatus::Disabled;
-    }
-    if (status != ERROR_SUCCESS || type != REG_SZ) {
-        RegCloseKey(key);
-        return StartupStatus::UnknownError;
-    }
-    // NR-069: the Run value is untrusted input -- any same-user process can
-    // write it, and RegQueryValueExW does not guarantee a NUL terminator (the
-    // reported cbData is bytes, and may or may not include the terminator).
-    // One extra slot pre-filled with NUL absorbs an odd byte count (the API
-    // never writes past the slack) and gives find() a terminator to find; when
-    // the value truly has none, fall back to the read length instead of letting
-    // the resize throw length_error and kill the process.
-    std::wstring value(size / sizeof(wchar_t) + 1, L'\0');
-    status = RegQueryValueExW(key, kRunValueName, nullptr, &type,
-                              reinterpret_cast<BYTE*>(value.data()), &size);
-    RegCloseKey(key);
-    if (status != ERROR_SUCCESS) {
-        return StartupStatus::UnknownError;
-    }
-    const std::size_t length = value.find(L'\0');
-    value.resize(length == std::wstring::npos ? size / sizeof(wchar_t) : length);
-
-    const std::wstring module = CurrentModulePath();
-    if (module.empty()) {
-        return StartupStatus::UnknownError;
-    }
-    return PathsMatch(value, module) ? StartupStatus::Enabled
-                                     : StartupStatus::EnabledMoved;
-}
 
 bool SetStartupEnabled(bool enabled, const StartupOptionRegistry& registry) {
     HKEY key = nullptr;

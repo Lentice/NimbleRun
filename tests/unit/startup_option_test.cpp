@@ -2,10 +2,10 @@
 //
 // Drives the HKCU Run-key module (startup_option) against an isolated
 // HKCU\Software\NimbleRunTest\<pid> key — never the real Run key — plus the
-// SettingsEditor::SetAutoStart round-trip. Covers: fresh state, enable/disable
-// value creation/removal, preservation of unrelated values in the same key,
-// per-user scoping, moved-EXE detection and re-creation, and the settings
-// editor round-trip independent of the hotkey swap.
+// SettingsEditor::SetAutoStart round-trip. Covers: enable/disable value
+// creation/removal, preservation of unrelated values in the same key,
+// per-user scoping, re-creation after a moved EXE, and the settings editor
+// round-trip independent of the hotkey swap.
 
 #include "test_util.h"
 
@@ -36,7 +36,6 @@ using nimblerun::SettingsStore;
 using nimblerun::SettingsString;
 using nimblerun::SettingsStringText;
 using nimblerun::StartupOptionRegistry;
-using nimblerun::StartupStatus;
 
 namespace {
 
@@ -108,23 +107,6 @@ bool ReadValue(const std::wstring& name, std::wstring& out) {
     return true;
 }
 
-// NR-069: writes raw bytes as a REG_SZ, unlike WriteValue which always appends
-// the NUL terminator. RegSetValueExW accepts a byte count that does not include
-// the terminator (and an odd byte count), which is exactly the untrusted input
-// the production reader must survive.
-bool WriteRawBytes(const std::wstring& name, const void* data, DWORD byte_count) {
-    HKEY key = nullptr;
-    if (RegCreateKeyExW(HKEY_CURRENT_USER, TestSubkey().c_str(), 0, nullptr,
-                        REG_OPTION_NON_VOLATILE, KEY_SET_VALUE, nullptr, &key,
-                        nullptr) != ERROR_SUCCESS) {
-        return false;
-    }
-    const LONG status = RegSetValueExW(
-        key, name.c_str(), 0, REG_SZ, static_cast<const BYTE*>(data), byte_count);
-    RegCloseKey(key);
-    return status == ERROR_SUCCESS;
-}
-
 bool ValueExists(const std::wstring& name) {
     std::wstring dummy;
     return ReadValue(name, dummy);
@@ -159,21 +141,12 @@ struct FakeSwapper {
     }
 };
 
-void TestFreshStateIsDisabled() {
-    RemoveTestKey();
-    Expect(GetStartupStatus(TestRegistry()) == StartupStatus::Disabled,
-           "a missing value reports Disabled");
-    Expect(!ValueExists(L"NimbleRun"), "no value exists in the fresh state");
-}
-
 void TestEnableCreatesEntry() {
     RemoveTestKey();
     Expect(SetStartupEnabled(true, TestRegistry()), "enable writes the entry");
     std::wstring value;
     Expect(ReadValue(L"NimbleRun", value), "the Run value exists after enable");
     Expect(value == ModulePath(), "the value points at the current module path");
-    Expect(GetStartupStatus(TestRegistry()) == StartupStatus::Enabled,
-           "status is Enabled after enable");
 }
 
 void TestDisableRemovesOnlyOwnValue() {
@@ -186,8 +159,6 @@ void TestDisableRemovesOnlyOwnValue() {
     std::wstring other;
     Expect(ReadValue(L"OtherApp", other), "the unrelated value survives");
     Expect(other == L"C:\\Other\\app.exe", "the unrelated value is untouched");
-    Expect(GetStartupStatus(TestRegistry()) == StartupStatus::Disabled,
-           "status is Disabled after disable");
 }
 
 void TestDisableIsNoopWhenAbsent() {
@@ -209,40 +180,12 @@ void TestPerUserScoping() {
     // change can never affect the machine-wide Run key.
 }
 
-void TestMovedExeDetection() {
-    RemoveTestKey();
-    Expect(WriteValue(L"NimbleRun", L"C:\\elsewhere\\NimbleRun.exe"),
-           "write a stale path (EXE moved)");
-    Expect(GetStartupStatus(TestRegistry()) == StartupStatus::EnabledMoved,
-           "a value pointing elsewhere reports EnabledMoved");
-}
-
-// NR-069: a REG_SZ with no NUL terminator (cbData covers only the characters)
-// used to make find() return npos and resize(npos) throw, killing the process.
-void TestUnterminatedRegSzDoesNotCrash() {
-    RemoveTestKey();
-    // "abc" as 3 wide characters, no trailing NUL: cbData = 6 bytes.
-    const wchar_t raw[] = {L'a', L'b', L'c'};
-    Expect(WriteRawBytes(L"NimbleRun", raw, static_cast<DWORD>(sizeof(raw))),
-           "write an unterminated REG_SZ value");
-    const StartupStatus status = GetStartupStatus(TestRegistry());
-    Expect(status == StartupStatus::EnabledMoved,
-           "an unterminated value is read and compared, not a crash");
-}
-
-// NR-069: an odd byte count used to configure size/2 wide characters and tell
-// the API there was room for one more byte, a 1-byte out-of-bounds write.
-void TestOddByteRegSzDoesNotCrash() {
-    RemoveTestKey();
-    // L'a' (2 bytes) + 3 raw bytes = 5 bytes, an odd cbData for a REG_SZ.
-    const std::uint8_t raw[] = {0x61, 0x00, 0x41, 0x42, 0x43};
-    Expect(WriteRawBytes(L"NimbleRun", raw, static_cast<DWORD>(sizeof(raw))),
-           "write an odd-byte REG_SZ value");
-    const StartupStatus status = GetStartupStatus(TestRegistry());
-    Expect(status == StartupStatus::EnabledMoved,
-           "an odd-byte value is read and compared, not a crash");
-}
-
+// NR-128: GetStartupStatus and its tri-state (Enabled/Disabled/EnabledMoved)
+// were the only consumers of the moved-EXE and raw-REG_SZ read paths, which
+// are gone with the function. TestMovedExeDetection, TestUnterminatedRegSz-
+// DoesNotCrash and TestOddByteRegSzDoesNotCrash exercised only that read; the
+// moved-EXE re-creation behavior that production keeps is covered by
+// TestRecreateAfterMove below.
 void TestRecreateAfterMove() {
     RemoveTestKey();
     Expect(WriteValue(L"NimbleRun", L"C:\\elsewhere\\NimbleRun.exe"), "stale path");
@@ -250,8 +193,6 @@ void TestRecreateAfterMove() {
     std::wstring value;
     Expect(ReadValue(L"NimbleRun", value), "the value exists after re-create");
     Expect(value == ModulePath(), "re-created value points at the current module path");
-    Expect(GetStartupStatus(TestRegistry()) == StartupStatus::Enabled,
-           "status is Enabled after re-create");
 }
 
 void TestAutoStartEditorRoundTrip() {
@@ -305,14 +246,10 @@ void TestStartupStringsCentralized() {
 } // namespace
 
 int wmain() {
-    TestFreshStateIsDisabled();
     TestEnableCreatesEntry();
     TestDisableRemovesOnlyOwnValue();
     TestDisableIsNoopWhenAbsent();
     TestPerUserScoping();
-    TestMovedExeDetection();
-    TestUnterminatedRegSzDoesNotCrash();
-    TestOddByteRegSzDoesNotCrash();
     TestRecreateAfterMove();
     TestAutoStartEditorRoundTrip();
     TestAutoStartUncoupledFromHotkeyRollback();

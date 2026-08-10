@@ -2,7 +2,6 @@
 
 #include "catalog/app_filter.h"
 
-#include <cwctype>
 #include <string>
 #include <string_view>
 #include <unordered_map>

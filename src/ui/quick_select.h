@@ -7,7 +7,6 @@ namespace ui {
 // digit order is the visible-row slot order: Alt+1 -> slot 0, ... Alt+9 ->
 // slot 8, Alt+0 -> slot 9. Main-keyboard digit virtual key codes equal their
 // ASCII codes, so this header stays pure (no <windows.h>).
-inline constexpr wchar_t kQuickSelectDigits[] = L"1234567890";
 inline constexpr int kQuickSelectSlotCount = 10;
 
 // 0-based visible-row slot for a key code, or -1 when the key is not one of

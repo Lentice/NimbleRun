@@ -2,7 +2,6 @@
 #include <windowsx.h>
 #include <shellapi.h>
 #include <shlobj.h>
-#include <shellscalingapi.h>
 #include <dwmapi.h>
 
 #include "app_host/catalog_watcher.h"
@@ -166,8 +165,6 @@ UINT g_show_panel_message = 0;
 // semantics; the active combo alternates between two ids (see ActiveId()).
 nimblerun::GlobalHotkey g_hotkey;
 
-// Last hotkey registration failure code, kept for NR-017 diagnostics.
-DWORD g_last_hotkey_error = ERROR_SUCCESS;
 // NR-058: startup store-load failures, aggregated for a single tray balloon
 // (design-spec §10.4/§11). Cleared to None after the balloon is sent, so a
 // process notifies at most once.
@@ -2666,8 +2663,7 @@ void ShowItemMenu(HWND window, int cell, POINT screen_pos) {
     // false, but an explicit early exit does not depend on that coincidence.
     if (!nimblerun::PanelModel::IsMissingPin(entry)) {
         // NR-040: only offered for rows actually showing in the recent region;
-        // on a pinned row -- or on an NR-053 alphabetical filler row, which also
-        // sits after RecentStartIndex() but has no usage record -- the command
+        // on a pinned row (which sits before RecentStartIndex) the command
         // would silently change nothing.
         const int recent_start = g_model->RecentStartIndex();
         const bool in_recent = recent_start >= 0 && cell >= recent_start
@@ -3818,7 +3814,6 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
 
     AddTrayIcon(window);
     if (!hotkey_result.success) {
-        g_last_hotkey_error = hotkey_result.error;
         if (g_diag) {
             g_diag->Write(L"hotkey-register",
                           L"error " + std::to_wstring(hotkey_result.error));

@@ -28,23 +28,6 @@ const IconBitmap* IconCache::Peek(const std::wstring& encoded_key) const {
     return it == map_.end() ? nullptr : &it->second.first;
 }
 
-IconBitmap IconCache::Resolve(const AppEntry& entry, const IconKey& key, IconProvider& provider) {
-    const std::wstring encoded = key.Encode();
-    const auto it = map_.find(encoded);
-    if (it != map_.end()) {
-        order_.splice(order_.begin(), order_, it->second.second);  // refresh recency
-        return it->second.first;
-    }
-
-    IconBitmap loaded = provider.Load(entry, key);
-    if (loaded.Empty()) {
-        return {};  // failure is not cached; caller keeps the fallback
-    }
-
-    Insert(encoded, std::move(loaded));
-    return map_.at(encoded).first;
-}
-
 void IconCache::Insert(const std::wstring& encoded_key, IconBitmap bitmap) {
     if (bitmap.Empty()) {
         return;

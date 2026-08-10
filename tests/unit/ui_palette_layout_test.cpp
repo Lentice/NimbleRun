@@ -46,7 +46,6 @@ using nimblerun::palette::Rgb;
 using nimblerun::palette::SystemColors;
 using nimblerun::ui::QuickSelectLabelForSlot;
 using nimblerun::ui::QuickSelectSlotForKey;
-using nimblerun::ui::kQuickSelectDigits;
 using nimblerun::ui::kQuickSelectSlotCount;
 
 namespace {
@@ -459,18 +458,16 @@ void TestQuickSelectLabelForSlot() {
     Expect(QuickSelectLabelForSlot(-1) == nullptr, "negative slot has no label");
 }
 
-void TestQuickSelectDigitsUnique() {
+// NR-128: kQuickSelectDigits was a literal the test verified against itself.
+// The equivalent behavioral guarantee is a round-trip: every slot's label maps
+// back to its own slot, which also proves the digit labels are unique.
+void TestQuickSelectSlotLabelRoundTrip() {
     Expect(kQuickSelectSlotCount == 10, "quick-select slot count is 10");
-    const std::size_t length = std::char_traits<wchar_t>::length(kQuickSelectDigits);
-    Expect(length == 10, "kQuickSelectDigits has exactly 10 characters");
-    bool seen[10] = {};
-    for (std::size_t i = 0; i < length; ++i) {
-        const wchar_t c = kQuickSelectDigits[i];
-        const int digit = (c >= L'1' && c <= L'9') ? c - L'1' : 9;
-        Expect(digit >= 0 && digit < 10, "digit label maps to a valid slot");
-        Expect(!seen[static_cast<std::size_t>(digit)],
-               "kQuickSelectDigits has no duplicate characters");
-        seen[static_cast<std::size_t>(digit)] = true;
+    for (int slot = 0; slot < kQuickSelectSlotCount; ++slot) {
+        const wchar_t* label = QuickSelectLabelForSlot(slot);
+        Expect(label != nullptr, "every slot has a label");
+        Expect(QuickSelectSlotForKey(*label) == slot,
+               "slot label round-trips back to its own slot");
     }
 }
 
@@ -615,7 +612,7 @@ int wmain() {
     TestSearchFieldColors();
     TestQuickSelectSlotForKey();
     TestQuickSelectLabelForSlot();
-    TestQuickSelectDigitsUnique();
+    TestQuickSelectSlotLabelRoundTrip();
     TestRowHintReserveWidth();
     TestGridGeometryFits();
     TestFooterBandAlwaysVisible();
