@@ -578,6 +578,12 @@ INT_PTR CALLBACK SettingsDialogProc(HWND dialog, UINT message, WPARAM w_param, L
 bool ShowSettingsDialog(HWND owner, SettingsStore& store, UsageStore& usage,
                         GlobalHotkey& hotkey, const std::wstring& log_directory,
                         DiagnosticLog* diag) {
+    // NR-119: kSettingsMessage can arrive while the settings dialog's own modal
+    // loop is running (tray -> Settings re-entry). A nested ShowSettingsDialog
+    // would overwrite g_dialog and leave the outer dialog with a null editor.
+    if (g_dialog.editor != nullptr) {
+        return false;
+    }
     Settings current = DefaultSettings();
     // NR-058: the dialog's own re-read surfaces what it shows; only a log line,
     // never a balloon. The switch keeps every load result accounted for.
