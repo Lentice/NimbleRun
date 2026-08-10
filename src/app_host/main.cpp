@@ -508,6 +508,12 @@ bool CreateDeviceResources(HWND window) {
             &g_render_target))) {
         return false;
     }
+    // NR-150: the target inherits the factory's system DPI (primary monitor
+    // at factory creation) when none is specified; sync it with the window's
+    // actual DPI so painted rows and hit-test rows agree on mixed-DPI setups
+    // (NR-015: GetDpiForWindow is the single per-window DPI source).
+    g_render_target->SetDpi(static_cast<float>(GetDpiForWindow(window)),
+                            static_cast<float>(GetDpiForWindow(window)));
 
     // NR-015: font sizes are DIPs; D2D/DWrite scale them with the render
     // target's DPI, so they are not re-scaled here.
@@ -2793,6 +2799,15 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
                 SetWindowPos(window, nullptr, left, top, size.width, size.height,
                              SWP_NOACTIVATE | SWP_NOZORDER);
             }
+        }
+        // NR-150: GetDpiForWindow already reflects the new monitor's DPI here
+        // (the window moved), so resync the render target or painted rows
+        // diverge from hit-test rows (same sync as NR-149's sibling change in
+        // CreateDeviceResources; SetDpi with the unchanged value is a no-op on
+        // single-DPI setups).
+        if (g_render_target) {
+            const float dpi = static_cast<float>(GetDpiForWindow(window));
+            g_render_target->SetDpi(dpi, dpi);
         }
         UpdateViewportRows(window);
         RepositionSearchEdit(window);

@@ -90,4 +90,22 @@ rg -n "SetDpi" src/app_host/main.cpp
 # expect: 兩處（CreateDeviceResources 與 WM_DPICHANGED），皆以 GetDpiForWindow 為參數
 ```
 
-完成後在文件底部補齊本 item 的 Handoff 交接備註。
+## Handoff
+
+- 2026-08-10 完成（NR-150, commit `NR-150: sync render target DPI with the per-window DPI`）。
+- 變更：`src/app_host/main.cpp:515-518` — `CreateDeviceResources` 在
+  `CreateHwndRenderTarget` 成功後立即
+  `SetDpi(static_cast<float>(GetDpiForWindow(window)), ...)`（UINT→FLOAT 轉型），
+  NR-015 單一 per-window DPI 來源。`src/app_host/main.cpp:2807-2812` —
+  `WM_DPICHANGED` 分支套用新幾何（SetWindowPos）後，`if (g_render_target)` 守衛下以
+  `GetDpiForWindow(window)`（此處已反映新螢幕 DPI）`SetDpi(dpi, dpi)`；註解與 NR-149
+  互引。未重建 target、未動 hit-test／WM_SIZE／layout 常數。
+- 驗證：Release（llvm-mingw/Ninja）build 成功；新 warnings 0（既有
+  `main.cpp:1395 unused variable 'target_size'` 為 NR-120/NR-133 時代引入，stash 重編證實
+  與本 item 無關）；CTest 31/31 全綠（數量不變）。
+- grep 驗證：`rg -n "SetDpi"` 恰好兩個 call site（`main.cpp:515` 與 `main.cpp:2810`），
+  皆以 `GetDpiForWindow` 為值來源。
+- 交接：單一 DPI 環境下 `SetDpi(same, same)` 為 no-op，行為零變更；混合 DPI 下
+  paint 與 hit-test 共用同一 DPI 來源（NR-015），分歧根源（NR-064 bug 類別沿 DPI 軸）
+  已消除。後續 DPI 相關改動（如 NR-151 之後）請以 `GetDpiForWindow` 為唯一來源，勿再
+  讀取 WM_DPICHANGED 的 lParam。
