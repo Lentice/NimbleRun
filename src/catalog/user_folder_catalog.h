@@ -4,6 +4,7 @@
 #include "settings/settings_store.h"
 
 #include <atomic>
+#include <cstddef>
 #include <string>
 #include <vector>
 
@@ -16,9 +17,12 @@ namespace nimblerun {
 // NR-092); the caller keeps the source's old entries in that case
 // (design-spec §FR-008). Missing, unreadable and non-local roots, bad
 // subdirectories and anomalous files are still clean skips that never clear
-// source_ok (NR-063).
+// source_ok (NR-063). skipped_directories counts those unopenable roots and
+// subdirectories (design-spec §11 "保留設定、略過該來源並記錄一次");
+// NR-124: reported for diagnostics, never logged here.
 struct UserFolderEnumerateResult {
     std::vector<AppEntry> entries;
+    std::size_t skipped_directories = 0;
     bool source_ok = true;
 };
 

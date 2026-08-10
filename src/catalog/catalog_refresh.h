@@ -16,6 +16,17 @@ enum class CatalogSource {
     UserFolder,
 };
 
+// NR-124: one generation's diagnostic counters. corrupt_links (Start Menu) and
+// skipped_directories (UserFolder) are folded in from the enumerator results by
+// ApplySourceResult; ambiguous_kept / removed_duplicates are the dedup pass's
+// own counters (design-spec §FR-007 item 3). Pure value: no HWND, no Shell.
+struct GenerationDiagnostics {
+    std::size_t corrupt_links = 0;        // StartMenu: unloadable .lnk skipped
+    std::size_t skipped_directories = 0;  // UserFolder: unopenable dirs skipped
+    std::size_t ambiguous_kept = 0;       // dedup: kept unjudgeable name peers
+    std::size_t removed_duplicates = 0;   // dedup: collapsed exact duplicates
+};
+
 // Pure refresh coordinator (NR-011, design-spec §FR-008): owns per-source
 // dirty/debounce state, generation counters, per-source best-known entries and
 // the atomic merged snapshot. No HWND, no threads, no Shell/COM dependencies;
@@ -64,9 +75,12 @@ public:
     std::uint64_t BeginGeneration(std::vector<CatalogSource> sources);
 
     // Applies one source's fresh enumeration for `generation`. The source keeps
-    // its old entries when the generation is stale.
+    // its old entries when the generation is stale. `diagnostics` carries the
+    // enumerator's per-source counts and is folded into
+    // LastGenerationDiagnostics() for this generation.
     bool ApplySourceResult(std::uint64_t generation, CatalogSource source,
-                           std::vector<AppEntry> entries);
+                           std::vector<AppEntry> entries,
+                           const GenerationDiagnostics& diagnostics = {});
 
     // Records one source's failure for `generation`: the source keeps its old
     // entries, other sources' results still apply (design-spec §FR-008).
@@ -107,6 +121,14 @@ public:
     // only when a whole rebuild cycle has finished, not on the first source.
     bool GenerationComplete(std::uint64_t generation) const;
 
+    // NR-124: the current generation's diagnostic counters. Zeroed by
+    // BeginGeneration, folded in by ApplySourceResult and the dedup pass, so
+    // the host reads it once when the generation completes and writes at most
+    // three sanitized log lines (design-spec §FR-014).
+    const GenerationDiagnostics& LastGenerationDiagnostics() const {
+        return generation_diagnostics_;
+    }
+
 private:
     void RebuildMerged();
 
@@ -127,7 +149,18 @@ private:
     std::int64_t last_appsfolder_success_ms_ = 0;
     bool appsfolder_has_success_ = false;
     std::vector<AppEntry> merged_;
+    // NR-124: diagnostic counters for the current generation (see
+    // LastGenerationDiagnostics).
+    GenerationDiagnostics generation_diagnostics_;
 };
+
+// NR-124: the up-to-three sanitized diagnostic detail strings for a completed
+// generation ("<source-type> <count>", no paths, design-spec §FR-014). Empty
+// when every count is zero, so a clean generation writes nothing (zero noise).
+// The dedup pair shares one line, so a generation can emit at most three lines:
+// startmenu corrupt-links N, userfolder skipped-directories N, dedup ambiguous
+// N removed M.
+std::vector<std::wstring> RebuildDiagnosticLines(const GenerationDiagnostics& diagnostics);
 
 // NR-022: one-shot gate for the launch-failure background refresh (design-spec
 // §11: "先在背景觸發一次 Catalog refresh（已在進行則合併）"). Pure value state,

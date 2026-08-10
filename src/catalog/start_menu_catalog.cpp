@@ -129,13 +129,17 @@ ResolvedLink ResolveShortcut(const std::wstring& path) {
     return result;
 }
 
-void ProcessFile(const std::wstring& path, AppSource source, std::vector<AppEntry>& out) {
+void ProcessFile(const std::wstring& path, AppSource source, std::vector<AppEntry>& out,
+                 std::size_t& corrupt_links) {
     const std::wstring ext = Extension(path);
 
     ResolvedLink link;
     if (ext == L".lnk") {
         link = ResolveShortcut(path);
         if (!link.loadable) {
+            // NR-124: count the skip (design-spec §11 "記錄錯誤，繼續掃描");
+            // the caller reports it as a diagnostic, never logs here.
+            ++corrupt_links;
             return;  // corrupt shortcut: skip this entry, keep enumerating
         }
         if (link.web) {
@@ -199,7 +203,8 @@ void ProcessFile(const std::wstring& path, AppSource source, std::vector<AppEntr
 // (NR-098), so the collected prefix is never committed as a complete source.
 bool EnumerateDirectoryRecursive(const std::wstring& directory, AppSource source,
                                  std::vector<AppEntry>& out,
-                                 std::atomic<bool>* cancel) {
+                                 std::atomic<bool>* cancel,
+                                 std::size_t& corrupt_links) {
     if (cancel && cancel->load()) {
         return false;  // NR-098: cancelled before this subtree: report failure
     }
@@ -224,7 +229,7 @@ bool EnumerateDirectoryRecursive(const std::wstring& directory, AppSource source
             if ((find_data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0) {
                 // ponytail: junctions/symlinks are not followed so a loop cannot
                 // recurse forever; reparse-point app dirs are not a real source.
-                if (!EnumerateDirectoryRecursive(full, source, out, cancel)) {
+                if (!EnumerateDirectoryRecursive(full, source, out, cancel, corrupt_links)) {
                     failed = true;  // NR-091: a child's failure must reach the caller
                 }
             }
@@ -233,7 +238,7 @@ bool EnumerateDirectoryRecursive(const std::wstring& directory, AppSource source
         if (!AcceptExtension(full)) {
             continue;
         }
-        ProcessFile(full, source, out);
+        ProcessFile(full, source, out, corrupt_links);
     } while (FindNextFileW(find, &find_data) != FALSE);
     // NR-091: FALSE is a clean end only when it means the list ran out; any
     // other error (I/O, access) means this directory was not fully read, so the
@@ -271,7 +276,8 @@ StartMenuEnumerateResult EnumerateStartMenuCatalog(std::atomic<bool>* cancel) {
 
     const std::wstring user_root = KnownFolderPath(FOLDERID_Programs);
     if (!user_root.empty() &&
-        !EnumerateProgramsDirectory(user_root, AppSource::UserStartMenu, result.entries, cancel)) {
+        !EnumerateProgramsDirectory(user_root, AppSource::UserStartMenu, result.entries,
+                                    cancel, &result.corrupt_links)) {
         result.source_ok = false;  // NR-091: mid-walk failure: keep old entries
         if (cancel && cancel->load()) {
             return result;  // NR-098: cancelled: stop before the next root
@@ -279,7 +285,8 @@ StartMenuEnumerateResult EnumerateStartMenuCatalog(std::atomic<bool>* cancel) {
     }
     const std::wstring common_root = KnownFolderPath(FOLDERID_CommonPrograms);
     if (!common_root.empty() &&
-        !EnumerateProgramsDirectory(common_root, AppSource::CommonStartMenu, result.entries, cancel)) {
+        !EnumerateProgramsDirectory(common_root, AppSource::CommonStartMenu, result.entries,
+                                    cancel, &result.corrupt_links)) {
         result.source_ok = false;  // NR-091: mid-walk failure: keep old entries
     }
     // NR-063: at least one known folder resolved (even to an empty walk) is a
@@ -294,7 +301,8 @@ StartMenuEnumerateResult EnumerateStartMenuCatalog(std::atomic<bool>* cancel) {
 
 bool EnumerateProgramsDirectory(const std::wstring& root, AppSource source,
                                 std::vector<AppEntry>& out,
-                                std::atomic<bool>* cancel) {
+                                std::atomic<bool>* cancel,
+                                std::size_t* corrupt_links) {
     if (cancel && cancel->load()) {
         return false;  // NR-098: cancelled before the walk: report failure
     }
@@ -302,7 +310,12 @@ bool EnumerateProgramsDirectory(const std::wstring& root, AppSource source,
     if (!com.Usable()) {
         return false;  // source-level failure (design-spec §FR-008)
     }
-    return EnumerateDirectoryRecursive(root, source, out, cancel);
+    std::size_t count = 0;
+    const bool ok = EnumerateDirectoryRecursive(root, source, out, cancel, count);
+    if (corrupt_links != nullptr) {
+        *corrupt_links += count;
+    }
+    return ok;
 }
 
 } // namespace nimblerun

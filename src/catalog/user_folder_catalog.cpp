@@ -101,7 +101,8 @@ void ProcessFile(const std::wstring& path, DWORD find_attributes, std::vector<Ap
 // (NR-098), so the collected prefix is never committed as a complete source.
 bool ScanDirectory(const std::wstring& directory, bool recursive,
                    const std::vector<std::wstring>& extensions,
-                   std::vector<AppEntry>& out, std::atomic<bool>* cancel) {
+                   std::vector<AppEntry>& out, std::atomic<bool>* cancel,
+                   std::size_t& skipped_directories) {
     if (cancel && cancel->load()) {
         return false;  // NR-098: cancelled before this subtree: report failure
     }
@@ -109,6 +110,9 @@ bool ScanDirectory(const std::wstring& directory, bool recursive,
     WIN32_FIND_DATAW find_data{};
     const HANDLE find = FindFirstFileW(pattern.c_str(), &find_data);
     if (find == INVALID_HANDLE_VALUE) {
+        // NR-124: count the skip (design-spec §11 "記錄一次"); the caller
+        // reports it as a diagnostic, never logs here.
+        ++skipped_directories;
         return true;  // missing/unreadable directory: skip this subtree, keep others
     }
     bool failed = false;
@@ -126,7 +130,8 @@ bool ScanDirectory(const std::wstring& directory, bool recursive,
             if (recursive && (find_data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0) {
                 // ponytail: junctions/symlinks are not followed so a loop cannot
                 // recurse forever (design-spec §FR-005).
-                if (!ScanDirectory(full, recursive, extensions, out, cancel)) {
+                if (!ScanDirectory(full, recursive, extensions, out, cancel,
+                                   skipped_directories)) {
                     failed = true;  // NR-092: a child's failure must reach the caller
                 }
             }
@@ -169,7 +174,8 @@ UserFolderEnumerateResult EnumerateUserFolderCatalog(const Settings& settings,
         }
         // ponytail: duplicate roots are scanned once each, so a root listed
         // twice yields duplicate entries; NR-007 dedups across sources.
-        if (!ScanDirectory(root.path, root.recursive, extensions, result.entries, cancel)) {
+        if (!ScanDirectory(root.path, root.recursive, extensions, result.entries, cancel,
+                           result.skipped_directories)) {
             result.source_ok = false;  // NR-092: mid-walk failure: keep old entries
             if (cancel && cancel->load()) {
                 return result;  // NR-098: cancelled: stop scanning further roots

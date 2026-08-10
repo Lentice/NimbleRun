@@ -92,6 +92,7 @@ std::uint64_t CatalogRefreshCoordinator::BeginGeneration(std::vector<CatalogSour
     active_sources_ = std::move(sources);
     received_.clear();
     generation_event_snapshot_.clear();
+    generation_diagnostics_ = {};  // NR-124: fresh counters per generation
     for (const CatalogSource source : active_sources_) {
         received_[source] = false;
         // NR-065: snapshot the event timestamp at scan start; a source that
@@ -107,10 +108,16 @@ std::uint64_t CatalogRefreshCoordinator::BeginGeneration(std::vector<CatalogSour
 
 bool CatalogRefreshCoordinator::ApplySourceResult(std::uint64_t generation,
                                                   CatalogSource source,
-                                                  std::vector<AppEntry> entries) {
+                                                  std::vector<AppEntry> entries,
+                                                  const GenerationDiagnostics& diagnostics) {
     if (generation != generation_) {
         return false;  // a newer rebuild started; this worker is stale
     }
+    // NR-124: fold the enumerator's counts into the generation diagnostics. A
+    // source that failed never reaches this path, so a partial/failed walk's
+    // counts are never reported as complete.
+    generation_diagnostics_.corrupt_links += diagnostics.corrupt_links;
+    generation_diagnostics_.skipped_directories += diagnostics.skipped_directories;
     source_entries_[source] = std::move(entries);
     // NR-065: clear pending only when no event arrived after the scan started
     // (the BeginGeneration timestamp snapshot is unchanged). An event mid-scan
@@ -229,7 +236,28 @@ void CatalogRefreshCoordinator::RebuildMerged() {
             merged.insert(merged.end(), it->second.begin(), it->second.end());
         }
     }
-    SetSnapshot(DeduplicateCatalog(merged).entries);
+    // NR-124: keep the dedup pass's counts instead of discarding them; they are
+    // the ambiguity diagnostic (design-spec §FR-007 item 3) for this generation.
+    const DedupResult dedup = DeduplicateCatalog(merged);
+    generation_diagnostics_.ambiguous_kept = dedup.ambiguous_kept;
+    generation_diagnostics_.removed_duplicates = dedup.removed_duplicates;
+    SetSnapshot(std::move(dedup.entries));
+}
+
+std::vector<std::wstring> RebuildDiagnosticLines(const GenerationDiagnostics& d) {
+    std::vector<std::wstring> lines;
+    if (d.corrupt_links != 0) {
+        lines.push_back(L"startmenu corrupt-links " + std::to_wstring(d.corrupt_links));
+    }
+    if (d.skipped_directories != 0) {
+        lines.push_back(L"userfolder skipped-directories " +
+                        std::to_wstring(d.skipped_directories));
+    }
+    if (d.ambiguous_kept != 0 || d.removed_duplicates != 0) {
+        lines.push_back(L"dedup ambiguous " + std::to_wstring(d.ambiguous_kept) +
+                        L" removed " + std::to_wstring(d.removed_duplicates));
+    }
+    return lines;
 }
 
 bool LaunchFailureRefreshGate::OnLaunchAttempt(bool launch_succeeded,

@@ -184,8 +184,13 @@ void TestFixtureEnumeration() {
     }
 
     std::vector<AppEntry> entries;
-    Expect(EnumerateProgramsDirectory(root, AppSource::UserStartMenu, entries),
+    std::size_t corrupt_links = 0;
+    Expect(EnumerateProgramsDirectory(root, AppSource::UserStartMenu, entries,
+                                      /*cancel=*/nullptr, &corrupt_links),
            "clean fixture walk ends without failure");
+    // NR-124: the single corrupt .lnk is counted, not silently dropped
+    // (design-spec §11 "記錄錯誤，繼續掃描").
+    Expect(corrupt_links == 1, "corrupt fixture shortcut counted once");
 
     const AppEntry* notepad = FindByName(entries, L"Notepad");
     Expect(notepad != nullptr, "notepad entry present");

@@ -329,6 +329,10 @@ struct RebuildResult {
     nimblerun::CatalogSource source = nimblerun::CatalogSource::StartMenu;
     bool failed = false;
     std::vector<nimblerun::AppEntry> entries;
+    // NR-124: the enumerator's per-source counts, folded into the coordinator's
+    // generation diagnostics by ApplySourceResult. Only ever consumed on the
+    // UI thread's completion handler.
+    nimblerun::GenerationDiagnostics diagnostics;
 };
 
 // NR-077: rebuild results are registered in the shared handoff registry
@@ -1462,6 +1466,16 @@ void RefreshPanelSnapshot() {
 // completed generation (design-spec §FR-008). No InvalidateRect: the caller
 // owns the single repaint per handled message.
 void OnGenerationCompleteRefresh() {
+    // NR-124: write the completed generation's diagnostics -- at most three
+    // sanitized lines, zero-noise (a clean generation writes nothing). The
+    // enumerators never touch DiagnosticLog; the counts travel back through the
+    // coordinator and are written here, on the UI thread only.
+    if (g_diag && g_refresh) {
+        for (const std::wstring& line :
+             nimblerun::RebuildDiagnosticLines(g_refresh->LastGenerationDiagnostics())) {
+            g_diag->Write(L"rebuild", line);
+        }
+    }
     // NR-022: the refresh the launch-failure dialog scheduled has run
     // to completion, so a future failure can schedule a fresh refresh.
     g_launch_failure_refresh.OnRefreshComplete();
@@ -1708,6 +1722,8 @@ void StartRebuild(HWND window, std::vector<nimblerun::CatalogSource> sources) {
                     const auto res = nimblerun::EnumerateStartMenuCatalog(&g_rebuild_cancel);
                     result->failed = !res.source_ok;
                     result->entries = std::move(res.entries);
+                    // NR-124: carry the corrupt-link count to the completion handler.
+                    result->diagnostics.corrupt_links = res.corrupt_links;
                     break;
                 }
                 case nimblerun::CatalogSource::AppsFolder:
@@ -1731,6 +1747,8 @@ void StartRebuild(HWND window, std::vector<nimblerun::CatalogSource> sources) {
                         nimblerun::EnumerateUserFolderCatalog(settings_snapshot, &g_rebuild_cancel);
                     result->failed = !res.source_ok;
                     result->entries = std::move(res.entries);
+                    // NR-124: carry the skipped-directory count to the completion handler.
+                    result->diagnostics.skipped_directories = res.skipped_directories;
                     break;
                 }
                 }
@@ -3052,7 +3070,8 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
                 g_refresh->ApplySourceFailure(result->generation, result->source);
         } else {
             if (g_refresh->ApplySourceResult(result->generation, result->source,
-                                             std::move(result->entries))) {
+                                             std::move(result->entries),
+                                             result->diagnostics)) {
                 result_applied = true;
                 // NR-063: a successful source-ok enumeration refreshes the
                 // AppsFolder staleness clock; a failure keeps it stale so the

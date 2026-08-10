@@ -852,6 +852,112 @@ void TestSettingsCopyIsIndependent() {
            "copied catalog_extensions are untouched");
 }
 
+// NR-124: the diagnostic line builder. Nonzero counts produce the matching
+// line; all-zero counts produce nothing (zero-noise); the dedup pair shares one
+// line, so a generation can emit at most three lines total.
+void TestRebuildDiagnosticLines() {
+    using nimblerun::GenerationDiagnostics;
+    using nimblerun::RebuildDiagnosticLines;
+
+    Expect(RebuildDiagnosticLines(GenerationDiagnostics{}).empty(),
+           "clean generation writes no diagnostic lines");
+
+    GenerationDiagnostics corrupt;
+    corrupt.corrupt_links = 3;
+    const auto corrupt_lines = RebuildDiagnosticLines(corrupt);
+    Expect(corrupt_lines.size() == 1 &&
+               corrupt_lines[0] == L"startmenu corrupt-links 3",
+           "corrupt links produce one startmenu line");
+
+    GenerationDiagnostics skipped;
+    skipped.skipped_directories = 2;
+    const auto skipped_lines = RebuildDiagnosticLines(skipped);
+    Expect(skipped_lines.size() == 1 &&
+               skipped_lines[0] == L"userfolder skipped-directories 2",
+           "skipped directories produce one userfolder line");
+
+    GenerationDiagnostics dedup;
+    dedup.ambiguous_kept = 1;
+    dedup.removed_duplicates = 5;
+    const auto dedup_lines = RebuildDiagnosticLines(dedup);
+    Expect(dedup_lines.size() == 1 &&
+               dedup_lines[0] == L"dedup ambiguous 1 removed 5",
+           "dedup counts share one line");
+
+    GenerationDiagnostics all;
+    all.corrupt_links = 1;
+    all.skipped_directories = 2;
+    all.ambiguous_kept = 1;
+    all.removed_duplicates = 4;
+    const auto all_lines = RebuildDiagnosticLines(all);
+    Expect(all_lines.size() == 3, "at most three diagnostic lines per generation");
+    Expect(all_lines[0] == L"startmenu corrupt-links 1" &&
+               all_lines[1] == L"userfolder skipped-directories 2" &&
+               all_lines[2] == L"dedup ambiguous 1 removed 4",
+           "three lines cover all four counts");
+}
+
+// NR-124: ApplySourceResult folds the enumerator's per-source counts into the
+// generation's diagnostics as sources report; a source that failed (or was
+// cancelled) never contributes.
+void TestGenerationDiagnosticsAggregation() {
+    CatalogRefreshCoordinator c;
+    const std::uint64_t gen = c.BeginGeneration(
+        {CatalogSource::StartMenu, CatalogSource::AppsFolder, CatalogSource::UserFolder});
+
+    nimblerun::GenerationDiagnostics start;
+    start.corrupt_links = 1;
+    c.ApplySourceResult(gen, CatalogSource::StartMenu,
+                        {Entry(L"start", AppSource::UserStartMenu)}, start);
+
+    nimblerun::GenerationDiagnostics user;
+    user.skipped_directories = 2;
+    c.ApplySourceResult(gen, CatalogSource::UserFolder,
+                        {Entry(L"user", AppSource::UserFolder)}, user);
+
+    Expect(c.IsRebuildInProgress(), "generation still in progress (AppsFolder pending)");
+    const auto& partial = c.LastGenerationDiagnostics();
+    Expect(partial.corrupt_links == 1 && partial.skipped_directories == 2 &&
+               partial.ambiguous_kept == 0 && partial.removed_duplicates == 0,
+           "per-source counts accumulate before the generation completes");
+
+    // A failed source contributes nothing: repeat StartMenu as a failure.
+    const std::uint64_t gen_fail = c.BeginGeneration({CatalogSource::StartMenu});
+    c.ApplySourceFailure(gen_fail, CatalogSource::StartMenu);
+    const auto& failed = c.LastGenerationDiagnostics();
+    Expect(failed.corrupt_links == 0 && failed.skipped_directories == 0,
+           "a failed generation reports no enumerator counts");
+}
+
+// NR-124: the dedup pass's own counters land in the generation diagnostics
+// instead of being discarded, so the ambiguity diagnostic survives to the log.
+void TestGenerationDiagnosticsIncludesDedupCounts() {
+    CatalogRefreshCoordinator c;
+    const std::uint64_t gen = c.BeginGeneration(
+        {CatalogSource::StartMenu, CatalogSource::AppsFolder});
+    c.ApplySourceResult(gen, CatalogSource::StartMenu,
+                        {Entry(L"same", AppSource::UserStartMenu)});
+    c.ApplySourceResult(gen, CatalogSource::AppsFolder,
+                        {Entry(L"same", AppSource::AppsFolder)});  // duplicate id
+    const auto& dup = c.LastGenerationDiagnostics();
+    Expect(dup.removed_duplicates == 1, "dedup removed count reaches the diagnostics");
+    Expect(dup.ambiguous_kept == 0, "exact duplicates are not ambiguous");
+
+    CatalogRefreshCoordinator c2;
+    const std::uint64_t gen2 = c2.BeginGeneration(
+        {CatalogSource::StartMenu, CatalogSource::AppsFolder});
+    AppEntry path = Entry(L"Name", AppSource::UserStartMenu);
+    path.stable_id = L"path-id";
+    AppEntry shell = Entry(L"Name", AppSource::AppsFolder);
+    shell.stable_id = L"shell-id";
+    c2.ApplySourceResult(gen2, CatalogSource::StartMenu, {path});
+    c2.ApplySourceResult(gen2, CatalogSource::AppsFolder, {shell});
+    const auto& ambiguous = c2.LastGenerationDiagnostics();
+    Expect(ambiguous.removed_duplicates == 0, "unjudgeable pair removes nothing");
+    Expect(ambiguous.ambiguous_kept == 2,
+           "dedup ambiguous count reaches the diagnostics (both peers kept)");
+}
+
 } // namespace
 
 int wmain() {
@@ -893,6 +999,9 @@ int wmain() {
     TestConsecutiveFailuresTriggerOnce();
     TestSuccessNeverTriggers();
     TestSettingsCopyIsIndependent();
+    TestRebuildDiagnosticLines();
+    TestGenerationDiagnosticsAggregation();
+    TestGenerationDiagnosticsIncludesDedupCounts();
     std::printf("NR-011/NR-022 catalog refresh check PASSED\n");
     return 0;
 }
