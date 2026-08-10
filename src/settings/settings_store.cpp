@@ -7,9 +7,9 @@
 #include <windows.h>
 #include <shlobj.h>
 
-#include <cerrno>
-#include <cstdlib>
 #include <algorithm>
+#include <cstdint>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -29,14 +29,12 @@ constexpr std::size_t kMaxCatalogRoots = 32;
 constexpr std::size_t kMaxHotkeyLength = 256;
 
 bool ParseInt(std::wstring_view text, int& out) {
-    const std::wstring value = Trim(text);
-    if (value.empty()) {
-        return false;
-    }
-    wchar_t* end = nullptr;
-    errno = 0;
-    const long parsed = wcstol(value.c_str(), &end, 10);
-    if (errno == ERANGE || end == value.c_str() || *end != L'\0') {
+    // NR-144: the previous copy hand-rolled a wide-string-to-long parse with
+    // errno. ParseInt64 rejects ERANGE outright; the int-range guard keeps a
+    // value wider than int from narrowing into `out`.
+    std::int64_t parsed = 0;
+    if (!ParseInt64(text, parsed) || parsed > std::numeric_limits<int>::max() ||
+        parsed < std::numeric_limits<int>::min()) {
         return false;
     }
     out = static_cast<int>(parsed);
@@ -91,19 +89,10 @@ Theme ParseTheme(std::wstring_view text) {
 
 // A local absolute path: drive-letter root (e.g. C:\...). UNC, network,
 // URI and device paths are rejected (design-spec §FR-005).
+// NR-144: converges with IsDisplayablePath (app_filter.cpp) -- same predicate;
+// Trim kept because callers (UserDataDirFromLocalAppData, Load) rely on it.
 bool IsLocalAbsolutePath(std::wstring_view value) {
-    const std::wstring path = Trim(value);
-    if (path.size() < 3) {
-        return false;
-    }
-    const wchar_t drive = path[0];
-    if (!((drive >= L'a' && drive <= L'z') || (drive >= L'A' && drive <= L'Z'))) {
-        return false;
-    }
-    if (path[1] != L':' || (path[2] != L'\\' && path[2] != L'/')) {
-        return false;
-    }
-    return true;
+    return IsDisplayablePath(Trim(value));
 }
 
 Settings DefaultSettings() {

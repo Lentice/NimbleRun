@@ -115,6 +115,10 @@ target_link_libraries(nimblerun_settings
         kernel32
         advapi32
         shell32
+    PRIVATE
+        # NR-144: settings_store.cpp's IsLocalAbsolutePath delegates to
+        # IsDisplayablePath (app_filter.cpp).
+        nimblerun_catalog
 )
 
 # user_folder_catalog consumes the settings types and DefaultExtensions().

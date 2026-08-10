@@ -82,4 +82,31 @@ rg -n "wcstol|wcstoll" src/settings/settings_store.cpp
 # expect: 零命中
 ```
 
+## Handoff
+
+2026-08-10 完成（commit 見 `docs/work-items.md` 歷史）。實作如決策所述，行為零變更：
+
+- `IsLocalAbsolutePath` 收斂為 `return IsDisplayablePath(Trim(value));`（含 NR-144 註解；
+  Trim 保留，呼叫端 `UserDataDirFromLocalAppData` 與 `Load` 依賴其語意）。
+- `ParseInt` 收斂為 `ParseInt64`＋`std::numeric_limits<int>` 範圍守門（比照
+  `settings_dialog.cpp` `ParseCountText` 形狀）；`<cerrno>`／`<cstdlib>` include 移除，
+  新增 `<cstdint>`／`<limits>`。
+
+**與 item 預期的偏差（build 層級，item 未涵蓋）**：item 驗證了 include 層級
+（`app_filter.h` 已 include），但 `IsDisplayablePath` 的定義在 `nimblerun_catalog`
+靜態庫，`nimblerun_settings` 原本不連結它——收斂後三個只連結 settings 的測試
+（settings_ui／startup_option／hotkey_capture）產生 undefined symbol。修法：
+`CMakeLists.txt` 的 `nimblerun_settings` 加 `PRIVATE nimblerun_catalog`（與既有的
+`nimblerun_catalog PUBLIC nimblerun_settings` 形成靜態庫循環，CMake 對 static
+library cycle 會重複展開，lld 正常解析；NimbleRun.exe 已自帶 catalog 不受影響）。
+若未來有人想拆掉這個循環：把 `IsDisplayablePath` 移到更低層的共用庫（本 item
+Non-goals 不允許，留作候選）。
+
+- 驗證：Release Ninja llvm-mingw 建置零新增 warning；`ctest` 31/31 全綠（數量不變）；
+  `ctest -R settings` 2/2（settings_test、settings_ui_test）全綠；
+  `rg -n "wcstol|wcstoll" src/settings/settings_store.cpp` 零命中（註解用
+  "wide-string-to-long" 措辭以免命中檢查）。
+- 未加新測試：`settings_store_test` 的 recent_count／catalog_root 案例即為回歸網，
+  未發現未涵蓋邊界。
+
 完成後在文件底部補齊本 item 的 Handoff 交接備註。
