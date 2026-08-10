@@ -5,6 +5,7 @@
 #include <dwmapi.h>
 
 #include "app_host/catalog_watcher.h"
+#include "app_host/full_rescan_throttle.h"
 #include "app_host/hotkey.h"
 #include "app_host/message_loop.h"
 #include "app_host/panel_model.h"
@@ -157,6 +158,12 @@ constexpr wchar_t kReasonInvalid[] = L"The app entry is invalid.";
 constexpr wchar_t kReasonAccessDenied[] = L"Access was denied.";
 // NR-040: shown when the Shell's properties dialog cannot be opened.
 constexpr wchar_t kPropertiesFailed[] = L"Failed to open properties.";
+// NR-130: the single-instance mutex is held but no window could be reached
+// (a stale mutex, or the primary hung before showing). Shown before exiting
+// instead of exiting silently; the process never becomes primary (NR-110).
+constexpr wchar_t kRendezvousTimeout[] =
+    L"NimbleRun appears to be already running, but its window could not be "
+    L"contacted.";
 } // namespace dialog_strings
 
 UINT g_show_panel_message = 0;
@@ -255,6 +262,11 @@ nimblerun::CatalogWatcher* g_watcher = nullptr;
 // 1-based watcher watch index -> CatalogSource, aligned with the watcher's
 // root order (Start Menu folders first, then each user-folder root).
 std::vector<nimblerun::CatalogSource> g_watch_sources;
+// NR-130: last accepted full-rescan marker timestamp per source, so a storm of
+// posted markers (any same-session process can send them) does not force one
+// immediate rebuild per message. kFullRescanNever = no accepted marker yet.
+// UI-thread only, like the rest of the watch state.
+std::unordered_map<nimblerun::CatalogSource, std::int64_t> g_last_full_rescan_ms;
 
 // NR-049: rebuild threads are owned, not detached. Joined in WM_DESTROY so a
 // scan can never outlive the window it posts to, nor the globals it reads.
@@ -3013,17 +3025,29 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
         const bool full_rescan = l_param != 0;
         const nimblerun::CatalogSource source = WatchIndexToSource(index);
         if (full_rescan) {
-            g_refresh->MarkSourceFullRescan(source);
             const std::int64_t now = MonotonicMs();
-            if (g_refresh->ShouldStartRebuild(now)) {
-                const std::vector<nimblerun::CatalogSource> due = g_refresh->DueSources(now);
-                if (!due.empty()) {
-                    StartRebuild(window, due);
+            if (nimblerun::ShouldAcceptFullRescan(g_last_full_rescan_ms[source], now)) {
+                // NR-130: the marker passed the storm throttle; it is due
+                // immediately exactly as before.
+                g_last_full_rescan_ms[source] = now;
+                g_refresh->MarkSourceFullRescan(source);
+                if (g_refresh->ShouldStartRebuild(now)) {
+                    const std::vector<nimblerun::CatalogSource> due =
+                        g_refresh->DueSources(now);
+                    if (!due.empty()) {
+                        StartRebuild(window, due);
+                    }
+                } else if (!g_refresh->DueSources(now).empty()) {
+                    // NR-118: rebuild running; defer the full-rescan marker to the debounce
+                    // timer so it is serviced once the current generation completes (the
+                    // marker is always due per its kNever timestamp).
+                    ScheduleDebouncedRebuild(window);
                 }
-            } else if (!g_refresh->DueSources(now).empty()) {
-                // NR-118: rebuild running; defer the full-rescan marker to the debounce
-                // timer so it is serviced once the current generation completes (the
-                // marker is always due per its kNever timestamp).
+            } else {
+                // NR-130: throttled duplicate full-rescan marker from the same
+                // source; merge into the existing debounce path instead of
+                // forcing another immediate rebuild.
+                g_refresh->NotifySourceEvent(source, now);
                 ScheduleDebouncedRebuild(window);
             }
         } else {
@@ -3600,6 +3624,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         }
         if (existing) {
             PostMessageW(existing, g_show_panel_message, 0, 0);
+        } else {
+            // NR-130: the mutex is held but the window could not be reached
+            // within the rendezvous window. Give the user feedback instead of
+            // silently exiting; never steal the mutex and continue, which would
+            // reopen NR-110's dual-instance startup race.
+            MessageBoxW(nullptr, dialog_strings::kRendezvousTimeout,
+                        dialog_strings::kTitle, MB_OK | MB_ICONWARNING);
         }
         CloseHandle(mutex);
         CloseHandle(startup_ready);

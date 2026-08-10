@@ -800,6 +800,8 @@ flowchart TD
 
 錯誤提示不得使用會搶焦點的連續 MessageBox。面板內提示或 tray balloon 只在使用者可採取動作時使用。
 
+同 user process 可偽造 `WM_APP` 命令訊息，屬 Windows 固有模型（`PostMessage` 無 sender 認證）；偽造退出訊息與偽造 `WM_CLOSE` 同級，NimbleRun 不試圖消除，只對可被無限重複驅動的重掃描路徑限流（NR-130）。
+
 ---
 
 ## 12. 測試策略
