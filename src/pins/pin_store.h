@@ -64,6 +64,13 @@ class PinStore {
 public:
     explicit PinStore(std::wstring directory);
 
+    // NR-122: favorites.txt is untrusted input parsed on the UI thread; a file
+    // with more rows than this is quarantined as corrupt instead of parsed, so
+    // a hand-written or malicious file cannot freeze Alt+Space or blow up the
+    // icon LRU (IconCacheCapacityFor reads the pin count). Single source of
+    // the cap.
+    static constexpr std::size_t kMaxRows = 20000;
+
     // Loads favorites.txt, replacing any in-memory pins.
     PinLoadResult Load();
 

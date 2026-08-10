@@ -219,6 +219,25 @@ void TestCorruptMidFileUsesDefaults(const std::wstring& dir) {
            "corrupt content preserved verbatim");
 }
 
+// NR-122: a settings.ini larger than kMaxReadBytes is rejected by ReadAllBytes
+// before any parse. The body is one valid unknown key (ignored), so without the
+// size cap the file would load cleanly -- it is the cap, not the content, that
+// quarantines it, and the live settings fall back to the safe defaults.
+void TestOversizeFileCorrupt(const std::wstring& dir) {
+    std::string content = "schema=1\n";
+    content.append(nimblerun::kMaxReadBytes, 'x');
+    content += "\n";
+    WriteBytes(dir + L"\\settings.ini", content);
+    SettingsStore store(dir);
+    Settings settings;
+    Expect(store.Load(settings) == SettingsLoadResult::Corrupt,
+           "oversize settings.ini reports Corrupt");
+    Expect(settings.hotkey == L"Alt+Space", "oversize load uses default hotkey");
+    Expect(settings.theme == Theme::System, "oversize load uses default theme");
+    Expect(!fs::exists(dir + L"\\settings.ini"), "oversize file moved aside");
+    Expect(fs::exists(dir + L"\\settings.ini.corrupt"), "oversize file preserved");
+}
+
 void TestNewerSchema(const std::wstring& dir) {
     const std::string content = "schema=99\nrecent_count=30\n";
     WriteBytes(dir + L"\\settings.ini", content);
@@ -425,6 +444,7 @@ int wmain() {
     TestCatalogRootsValidation(MakeTempDir("catalogvalidation"));
     TestCorrupt(MakeTempDir("corrupt"));
     TestCorruptMidFileUsesDefaults(MakeTempDir("midcorrupt"));
+    TestOversizeFileCorrupt(MakeTempDir("oversize"));
     TestNewerSchema(MakeTempDir("newer"));
     TestNewerSchemaSaveRefused(MakeTempDir("newersave"));
     TestMissingLoadSaveWritesFile(MakeTempDir("writable_missing"));

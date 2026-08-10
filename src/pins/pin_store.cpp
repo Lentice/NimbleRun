@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -47,10 +48,31 @@ PinLoadResult PinStore::Load() {
         return PinLoadResult::Corrupt;
     }
 
+    // NR-122: the O(n²) dedup scan per row became an O(n) membership set. Line
+    // order is pin order, so a duplicated stable id keeps its first position.
+    // The set holds views into each accepted pin's stable_id; the underlying
+    // buffers are moved (never mutated or reallocated) into pins_, which is
+    // reserved up front so those views stay valid for the whole loop.
+    //
+    // The row cap counts parsed (non-empty) rows, not raw lines: SplitLines
+    // adds one trailing empty line for a file that ends in '\n' -- exactly how
+    // Save() writes it -- and the empty lines are skipped here, so a raw-line
+    // pre-check would quarantine our own cap-exact output. Reaching the cap
+    // aborts mid-parse, which is the same corrupt path as any over-limit file.
+    const std::size_t reserve_size = std::min(lines.size(), kMaxRows);
+    std::unordered_set<std::wstring_view> seen;
+    seen.reserve(reserve_size);
+    pins_.reserve(reserve_size);
+    std::size_t data_rows = 0;
     for (std::size_t i = 0; i < lines.size(); ++i) {
         const std::wstring line = Trim(lines[i]);
         if (line.empty()) {
             continue;
+        }
+        if (++data_rows > kMaxRows) {
+            PreserveCorrupt(directory_, kFileName);
+            pins_.clear();
+            return PinLoadResult::Corrupt;
         }
         const std::vector<std::wstring_view> fields = SplitFields(line);
         // NR-062: schema=1 lines have 2 fields (no display_name); schema=2
@@ -71,10 +93,8 @@ PinLoadResult PinStore::Load() {
         if (fields.size() >= 3) {
             pin.display_name = UnescapeText(fields[2]);
         }
-        // Line order is pin order, so a duplicated stable id keeps its first
-        // position.
-        if (IsPinned(pin.stable_id)) {
-            continue;
+        if (!seen.insert(pin.stable_id).second) {
+            continue;  // duplicated stable id keeps its first position
         }
         pins_.push_back(std::move(pin));
     }
@@ -204,12 +224,21 @@ void PinStore::Reconcile(const std::vector<AppEntry>& catalog, std::int64_t now)
         return;
     }
 
+    // NR-122: build a membership set of the catalog's stable ids once, so each
+    // pin is a single O(1) lookup instead of a full catalog scan -- the
+    // reconcile drops from O(pins × catalog) to O(n + m). The views point into
+    // `catalog`, which is immutable for the call, so they stay valid. The empty
+    // catalog early-return above is unchanged (design-spec §FR-011).
+    std::unordered_set<std::wstring_view> present;
+    present.reserve(catalog.size());
+    for (const AppEntry& entry : catalog) {
+        present.insert(entry.stable_id);
+    }
+
     std::vector<PinRecord> kept;
     kept.reserve(pins_.size());
     for (PinRecord& pin : pins_) {
-        const bool present = std::any_of(catalog.begin(), catalog.end(),
-            [&](const AppEntry& entry) { return entry.stable_id == pin.stable_id; });
-        if (present) {
+        if (present.find(pin.stable_id) != present.end()) {
             pin.last_seen_utc = now;  // seen again: restart the retention clock
             kept.push_back(std::move(pin));
         } else if (pin.last_seen_utc == 0 ||

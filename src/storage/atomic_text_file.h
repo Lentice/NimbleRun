@@ -58,6 +58,13 @@ inline std::string EncodeUtf8(std::wstring_view text) {
     return out;
 }
 
+// NR-122: every user-data store file is untrusted input on the UI thread
+// (design-spec §11), so a read is capped. A file larger than this is treated
+// as unreadable -- ReadAllBytes returns false and each caller's existing
+// Unreadable/Malformed disposition runs (PreserveCorrupt per store) instead of
+// a multi-GB allocation on a hot path. Single source for all stores.
+inline constexpr std::size_t kMaxReadBytes = 16 * 1024 * 1024;
+
 inline bool ReadAllBytes(const std::wstring& path, std::string& out) {
     const HANDLE file = CreateFileW(path.c_str(), GENERIC_READ,
         FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -74,6 +81,10 @@ inline bool ReadAllBytes(const std::wstring& path, std::string& out) {
             break;
         }
         if (read == 0) {
+            break;
+        }
+        if (out.size() + read > kMaxReadBytes) {
+            ok = FALSE;  // NR-122: over the read cap -> treated as unreadable
             break;
         }
         out.append(buffer, read);

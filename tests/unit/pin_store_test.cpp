@@ -6,6 +6,7 @@
 
 #include <windows.h>
 
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -363,6 +364,90 @@ void TestLoadSchema1File() {
     fs::remove_all(dir);
 }
 
+// NR-122: a favorites.txt with more than the row cap is untrusted input big
+// enough to freeze the UI thread, so it takes the existing corrupt path: the
+// original is preserved and the live store stays empty.
+void TestTooManyRowsCorrupt() {
+    const std::wstring dir = MakeTempDir("toomanyrows");
+    std::string content = "schema=2\n";
+    for (std::size_t i = 0; i < PinStore::kMaxRows + 1; ++i) {
+        content += "app" + std::to_string(i) + "\t1000\tApp\n";
+    }
+    WriteBytes(dir + L"\\favorites.txt", content);
+    PinStore store(dir);
+    Expect(store.Load() == PinLoadResult::Corrupt, "over-limit rows report Corrupt");
+    Expect(store.OrderedPins().empty(), "over-limit load yields the empty safe default");
+    Expect(!fs::exists(dir + L"\\favorites.txt"), "over-limit file moved aside");
+    Expect(fs::exists(dir + L"\\favorites.txt.corrupt"), "over-limit file preserved");
+    fs::remove_all(dir);
+}
+
+// NR-122: the O(n) dedup keeps the exact "first position wins" semantics the
+// linear scan had -- a duplicated stable id keeps the first occurrence's
+// position, last_seen and display name.
+void TestLoadDedupKeepsFirstPosition() {
+    const std::wstring dir = MakeTempDir("loaddedup");
+    const std::string content =
+        "schema=2\napp1\t1000\tOne\napp2\t2000\tTwo\napp1\t3000\tOneAgain\n";
+    WriteBytes(dir + L"\\favorites.txt", content);
+    PinStore store(dir);
+    Expect(store.Load() == PinLoadResult::Loaded, "duplicate-id file loads");
+    Expect(SameIds(store.OrderedPins(), {L"app1", L"app2"}),
+           "a duplicated stable id keeps its first position");
+    Expect(store.Records()[0].last_seen_utc == 1000, "first occurrence's last_seen kept");
+    Expect(store.Records()[0].display_name == L"One", "first occurrence's name kept");
+    fs::remove_all(dir);
+}
+
+// NR-122: timing block for the two hot paths this item linearized. A
+// cap-boundary load (kMaxRows rows) measures the O(n) dedup load; a 50,000-pin
+// reconcile against a 5,000-entry catalog measures the O(n+m) membership set.
+// Thresholds are orders of magnitude above the measured times so they only flag
+// a regression that re-introduces the O(n²) load or O(pins×catalog) reconcile.
+void TestLoadAndReconcileTiming() {
+    const std::wstring dir = MakeTempDir("timing");
+    {
+        std::string content = "schema=2\n";
+        for (std::size_t i = 0; i < PinStore::kMaxRows; ++i) {
+            content += "app" + std::to_string(i) + "\t1000\tApp " + std::to_string(i) + "\n";
+        }
+        WriteBytes(dir + L"\\favorites.txt", content);
+        PinStore store(dir);
+        const auto load_start = std::chrono::steady_clock::now();
+        Expect(store.Load() == PinLoadResult::Loaded, "cap-boundary file loads");
+        const auto load_us = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - load_start).count();
+        std::wprintf(L"NR-122: PinStore::Load over %zu rows took %lld us (%lld ms)\n",
+                     static_cast<std::size_t>(PinStore::kMaxRows), load_us, load_us / 1000);
+        Expect(store.Records().size() == PinStore::kMaxRows,
+               "cap-boundary load keeps every row");
+        Expect(load_us / 1000 < 2000, "cap-boundary load stays under 2 s");
+        fs::remove_all(dir);
+    }
+    {
+        const std::wstring dir2 = MakeTempDir("timing_reconcile");
+        PinStore store(dir2);
+        store.Load();
+        for (int i = 0; i < 50000; ++i) {
+            store.Pin(L"pin" + std::to_wstring(i), L"Pin " + std::to_wstring(i), 1000 + i);
+        }
+        std::vector<AppEntry> catalog;
+        catalog.reserve(5000);
+        for (int i = 0; i < 5000; ++i) {
+            catalog.push_back(Entry(L"pin" + std::to_wstring(i), L"Pin " + std::to_wstring(i)));
+        }
+        const auto rec_start = std::chrono::steady_clock::now();
+        store.Reconcile(catalog, 1000 + 50000 + 1);
+        const auto rec_us = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - rec_start).count();
+        std::wprintf(L"NR-122: PinStore::Reconcile over 50000 pins x 5000 catalog took %lld us (%lld ms)\n",
+                     rec_us, rec_us / 1000);
+        Expect(store.Records().size() == 50000, "reconcile keeps every present pin");
+        Expect(rec_us / 1000 < 2000, "reconcile stays under 2 s");
+        fs::remove_all(dir2);
+    }
+}
+
 // NR-087: a same-schema file with an unknown trailing column (a future field
 // written by a newer build that forgot the schema bump) loads like a 3-field
 // file instead of quarantining the whole user file as corrupt.
@@ -536,6 +621,9 @@ int wmain() {
     TestNewerSchemaSaveRefused();
     TestNormalLoadsRemainWritable();
     TestLoadSchema1File();
+    TestTooManyRowsCorrupt();
+    TestLoadDedupKeepsFirstPosition();
+    TestLoadAndReconcileTiming();
     TestLoadTrailingFieldsIgnored();
     TestSaveRoundTripsDisplayName();
     TestSaveWritesSchema2();

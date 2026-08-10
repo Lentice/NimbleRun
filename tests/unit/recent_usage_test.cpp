@@ -218,6 +218,43 @@ void TestMalformedRow() {
     fs::remove_all(dir);
 }
 
+// NR-122: a usage.tsv with more than the row cap is untrusted input big enough
+// to freeze the UI thread, so it takes the existing corrupt path: the original
+// is preserved and the live store stays empty.
+void TestTooManyRowsCorrupt() {
+    const std::wstring dir = MakeTempDir("toomanyrows");
+    std::string content = "schema=1\n";
+    for (std::size_t i = 0; i < UsageStore::kMaxRows + 1; ++i) {
+        content += "app" + std::to_string(i) + "\t1\t1000\n";
+    }
+    WriteBytes(dir + L"\\usage.tsv", content);
+    UsageStore store(dir);
+    Expect(store.Load() == UsageLoadResult::Corrupt, "over-limit rows report Corrupt");
+    Expect(store.Records().empty(), "over-limit load yields the empty safe default");
+    Expect(store.Recent().empty(), "over-limit load yields the empty safe default");
+    Expect(!fs::exists(dir + L"\\usage.tsv"), "over-limit file moved aside");
+    Expect(fs::exists(dir + L"\\usage.tsv.corrupt"), "over-limit file preserved");
+    fs::remove_all(dir);
+}
+
+// NR-122: the O(n) index map keeps the exact "last line wins, first position
+// kept" semantics the linear find_if had -- a duplicated stable id is
+// overwritten in place, never duplicated, never moved.
+void TestLoadDuplicateLastLineWins() {
+    const std::wstring dir = MakeTempDir("loaddup");
+    const std::string content =
+        "schema=1\napp1\t5\t1000\napp2\t7\t2000\napp1\t9\t3000\n";
+    WriteBytes(dir + L"\\usage.tsv", content);
+    UsageStore store(dir);
+    Expect(store.Load() == UsageLoadResult::Loaded, "duplicate-id file loads");
+    const std::vector<UsageRecord> recent = store.Recent();
+    Expect(recent.size() == 2, "a duplicated id keeps one record");
+    Expect(SameRecord(recent[0], {L"app1", 9, 3000}),
+           "the last line's values win and the app ranks newest");
+    Expect(SameRecord(recent[1], {L"app2", 7, 2000}), "the other record is intact");
+    fs::remove_all(dir);
+}
+
 // NR-070: usage.tsv is untrusted input -- a hand-edited total_launches=-1 used
 // to load as ULLONG_MAX (wcstoull accepts '-' and wraps without ERANGE), pinning
 // the app at the top of the usage order and persisting itself on the next save.
@@ -562,6 +599,8 @@ int wmain() {
     TestRoundTrip();
     TestCorrupt();
     TestMalformedRow();
+    TestTooManyRowsCorrupt();
+    TestLoadDuplicateLastLineWins();
     TestNegativeTotalLaunchesRejected();
     TestCorruptMidFileClearsRecords();
     TestNewerSchema();

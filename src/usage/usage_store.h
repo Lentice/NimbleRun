@@ -36,6 +36,12 @@ class UsageStore {
 public:
     explicit UsageStore(std::wstring directory);
 
+    // NR-122: usage.tsv is untrusted input parsed on the UI thread; a file
+    // with more rows than this is quarantined as corrupt instead of parsed,
+    // so a hand-written or malicious file cannot freeze every Alt+Space.
+    // Single source of the cap.
+    static constexpr std::size_t kMaxRows = 20000;
+
     // Loads usage.tsv, replacing any in-memory records.
     UsageLoadResult Load();
 
