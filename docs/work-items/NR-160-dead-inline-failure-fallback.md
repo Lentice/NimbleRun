@@ -79,3 +79,24 @@ rg -n -B 2 -A 8 "else if \(!post_to_ui_" src/app_host/rebuild_pipeline.cpp
 ```
 
 完成後在文件底部補齊本 item 的 Handoff 交接備註。
+
+## Handoff
+
+- 2026-08-11 完成（NR-160, commit `NR-160: route the OOM failure fallback through handoff tokens`）。
+- 變更：`src/app_host/rebuild_pipeline.cpp` — `QueueFailure`（:150-190）的
+  `!recorded`（double-OOM）分支刪除 inline `(generation, source-value)` post；
+  token 保送路徑提升為兩分支共用（先 `new RebuildResult` try/catch、再
+  `handoffs_.Register`、再 post `kRebuildDeliveryFailedMessage` `(generation,
+  token)`，與 recorded 分支同形）。recorded 分支的 `(0,0)` + `failure_event_`
+  fallback 原樣保留；`!recorded` 分支 `Register` 回 0 或 post 失敗即放棄
+  （`on_exception_` 診斷）——接受 stuck generation，由下一次 rebuild 觸發的
+  `Shutdown` 取消（既有機制）。`OnDeliveryFailureMessage` 未動。
+- 驗證：Release（llvm-mingw/Ninja）build 成功、零新增 warning；CTest 31/31
+  全綠（數量不變）；`-R rebuild_pipeline` 綠燈（含 NR-151 的
+  `TestForgedDeliveryFailureIgnored`／`TestDeliveryFailureCompletesOnce`）。
+  grep 檢查：`QueueFailure` 內所有 `kRebuildDeliveryFailedMessage` post 的
+  lParam 只可能是已註冊 token 或 `(0,0)`，不再有 raw `source` 值。
+- 交接：`QueueFailure` 現在兩分支共用同一段 token 保送，唯一分歧是
+  recorded 分支多了 `(0,0)`/`failure_event_` 兜底（記錄在 `failures_` 的
+  失敗仍可靠 drain 套用）。後續勿再引入任何「直接把 `generation`/`source`
+  當 lParam」的 post——接收端 `OnDeliveryFailureMessage` 只理解 token。

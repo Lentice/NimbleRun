@@ -156,37 +156,39 @@ void RebuildPipeline::QueueFailure(std::uint64_t generation, CatalogSource sourc
     } catch (...) {
         if (on_exception_) on_exception_();
     }
-    if (recorded) {
-        // NR-151: deliver through the handoff registry, same shape as
-        // OnResultMessage, so a forged message can never name a source by
-        // value. The failures_ entry stays: the drain path and the
-        // failure_event_ fallback below still rely on it.
-        bool posted_token = false;
-        try {
-            std::unique_ptr<RebuildResult> owned(new RebuildResult);
-            owned->generation = generation;
-            owned->source = source;
-            owned->failed = true;
-            const std::uintptr_t token = handoffs_.Register(std::move(owned));
-            if (token) {
-                if (post_to_ui_(kRebuildDeliveryFailedMessage,
-                                static_cast<WPARAM>(generation),
-                                static_cast<LPARAM>(token))) {
-                    posted_token = true;
-                } else {
-                    handoffs_.Erase(token);
-                }
+    // NR-151: deliver through the handoff registry, same shape as
+    // OnResultMessage, so a forged message can never name a source by
+    // value. The failures_ entry stays: the drain path and the
+    // failure_event_ fallback below still rely on it.
+    bool posted_token = false;
+    try {
+        std::unique_ptr<RebuildResult> owned(new RebuildResult);
+        owned->generation = generation;
+        owned->source = source;
+        owned->failed = true;
+        const std::uintptr_t token = handoffs_.Register(std::move(owned));
+        if (token) {
+            if (post_to_ui_(kRebuildDeliveryFailedMessage,
+                            static_cast<WPARAM>(generation),
+                            static_cast<LPARAM>(token))) {
+                posted_token = true;
+            } else {
+                handoffs_.Erase(token);
             }
-        } catch (...) {
-            if (on_exception_) on_exception_();
         }
+    } catch (...) {
+        if (on_exception_) on_exception_();
+    }
+    if (recorded) {
         if (!posted_token && !post_to_ui_(kRebuildDeliveryFailedMessage, 0, 0) &&
             failure_event_) {
             SetEvent(failure_event_);
         }
-    } else if (!post_to_ui_(kRebuildDeliveryFailedMessage,
-                            static_cast<WPARAM>(generation),
-                            static_cast<LPARAM>(source)) && on_exception_) {
+    } else if (!posted_token && on_exception_) {
+        // NR-160: register or post failure here means the OOM condition
+        // persists. Give up -- no inline fallback, the receiver only
+        // understands tokens -- and accept the stuck generation: the next
+        // rebuild trigger cancels it via Shutdown.
         on_exception_();
     }
 }
