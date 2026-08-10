@@ -15,7 +15,6 @@ namespace nimblerun {
 namespace {
 
 constexpr std::wstring_view kFileName = L"favorites.txt";
-constexpr std::wstring_view kSchemaPrefix = L"schema=";
 constexpr int kSchemaVersion = 2;
 
 } // namespace

@@ -1,22 +1,44 @@
 #pragma once
 
+#include <cwctype>
 #include <string>
 #include <string_view>
 
 namespace nimblerun {
 
 // Case-folds a string via towlower, used for extension and stem comparisons.
-std::wstring ToLower(std::wstring_view value);
+inline std::wstring ToLower(std::wstring_view value) {
+    std::wstring out;
+    out.reserve(value.size());
+    for (const wchar_t c : value) {
+        out.push_back(static_cast<wchar_t>(towlower(static_cast<wint_t>(c))));
+    }
+    return out;
+}
 
 // Final path segment, e.g. "C:\A\B.exe" -> "B.exe".
-std::wstring_view FileName(std::wstring_view path);
+inline std::wstring_view FileName(std::wstring_view path) {
+    const std::size_t slash = path.find_last_of(L"/\\");
+    return slash == std::wstring_view::npos ? path : path.substr(slash + 1);
+}
 
 // File name without the final extension, e.g. "Notepad.lnk" -> "Notepad".
-std::wstring FileStem(std::wstring_view path);
+inline std::wstring FileStem(std::wstring_view path) {
+    const std::wstring_view name = FileName(path);
+    const std::size_t dot = name.find_last_of(L'.');
+    return std::wstring(dot == std::wstring_view::npos ? name : name.substr(0, dot));
+}
 
 // Lowercased extension including the dot, or empty when none. A trailing dot in
 // a directory name is not treated as an extension.
-std::wstring Extension(std::wstring_view path);
+inline std::wstring Extension(std::wstring_view path) {
+    const std::wstring_view name = FileName(path);
+    const std::size_t dot = name.find_last_of(L'.');
+    if (dot == std::wstring_view::npos) {
+        return {};
+    }
+    return ToLower(name.substr(dot));
+}
 
 // "scheme://..." with a valid RFC scheme prefix.
 bool IsUrlTarget(std::wstring_view target);

@@ -12,9 +12,6 @@
 namespace nimblerun {
 namespace {
 
-constexpr int kMinRecentCount = 8;
-constexpr int kMaxRecentCount = 40;
-
 bool AreEqualCaseInsensitive(std::wstring_view left, std::wstring_view right) {
     if (left.size() != right.size()) {
         return false;

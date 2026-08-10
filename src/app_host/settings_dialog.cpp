@@ -15,7 +15,8 @@
 #include <shlobj.h>
 
 #include <algorithm>
-#include <cstdlib>
+#include <cstdint>
+#include <limits>
 #include <optional>
 #include <string>
 #include <utility>
@@ -307,9 +308,13 @@ void Populate(HWND dialog, const Settings& settings) {
 }
 
 int ParseCountText(const wchar_t* text) {
-    wchar_t* end = nullptr;
-    const long value = wcstol(text, &end, 10);
-    if (end == text || *end != L'\0') {
+    // NR-127: the previous copy used wcstol without an errno check, so an
+    // overlong digit string returned LONG_MAX (ERANGE) and relied on the
+    // caller's 8..40 range check. ParseInt64 rejects it outright; the extra
+    // int-range guard keeps the value from narrowing before SetRecentCount.
+    std::int64_t value = 0;
+    if (!ParseInt64(text, value) || value > std::numeric_limits<int>::max() ||
+        value < std::numeric_limits<int>::min()) {
         return -1;
     }
     return static_cast<int>(value);

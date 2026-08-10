@@ -16,7 +16,6 @@ namespace nimblerun {
 namespace {
 
 constexpr std::wstring_view kFileName = L"usage.tsv";
-constexpr std::wstring_view kSchemaPrefix = L"schema=";
 constexpr int kSchemaVersion = 1;
 
 } // namespace

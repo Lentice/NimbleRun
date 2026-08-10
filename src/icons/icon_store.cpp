@@ -1,6 +1,7 @@
 #include "icons/icon_store.h"
 
 #include "diagnostics/diagnostic_log.h"
+#include "icons/icon_cache.h"
 #include "pins/pin_store.h"
 
 #include <algorithm>
@@ -11,10 +12,6 @@ namespace nimblerun {
 namespace {
 
 constexpr std::uint64_t kGrowGranularity = 64u * 1024u;
-
-std::wstring KeyFor(const std::wstring& stable_id, int variant) {
-    return stable_id + L'|' + std::to_wstring(variant);
-}
 
 // The atomic replace can transiently fail with a sharing/access error when a
 // real-time scanner opens the freshly written pack for a look. Retry a few
@@ -382,7 +379,7 @@ void IconStore::Put(const std::wstring& stable_id, int variant,
     pending.source_stamp = source_stamp;
     pending.fetched_utc = now_utc;
     pending.last_used_utc = now_utc;
-    pending_[KeyFor(stable_id, variant)] = std::move(pending);
+    pending_[IconKey{stable_id, variant}.Encode()] = std::move(pending);
 }
 
 bool IconStore::Flush(const std::vector<std::wstring>& pinned_ids, std::uint64_t now_utc) {

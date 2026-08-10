@@ -17,6 +17,12 @@ namespace nimblerun {
 // disk, a schema version on the first line, and a tmp + flush + atomic replace
 // write so a crash mid-write never corrupts the real file (design-spec §10.2).
 
+// The schema header every versioned text store writes and reads: the first
+// line of a store file is kSchemaPrefix followed by the schema version number
+// (design-spec §10.2). One definition shared by the stores' Save() paths and
+// by ReadVersionedLines.
+inline constexpr std::wstring_view kSchemaPrefix = L"schema=";
+
 inline std::wstring JoinPath(std::wstring_view directory, std::wstring_view name) {
     if (directory.empty()) {
         return {};
@@ -295,7 +301,6 @@ inline VersionedReadStatus ReadVersionedLines(std::wstring_view directory,
         return VersionedReadStatus::Malformed;
     }
 
-    constexpr std::wstring_view kSchemaPrefix = L"schema=";
     const std::wstring schema_line = Trim(all_lines[0]);
     if (schema_line.size() <= kSchemaPrefix.size() ||
         schema_line.compare(0, kSchemaPrefix.size(), kSchemaPrefix) != 0) {

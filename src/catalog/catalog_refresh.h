@@ -16,6 +16,15 @@ enum class CatalogSource {
     UserFolder,
 };
 
+// Every source, in the coordinator's stable iteration order (design-spec
+// §FR-008). The "all sources" set for a full rebuild; shared by the
+// coordinator and the host's four all-sources StartRebuild call sites.
+inline constexpr CatalogSource kSources[] = {
+    CatalogSource::StartMenu,
+    CatalogSource::AppsFolder,
+    CatalogSource::UserFolder,
+};
+
 // NR-124: one generation's diagnostic counters. corrupt_links (Start Menu) and
 // skipped_directories (UserFolder) are folded in from the enumerator results by
 // ApplySourceResult; ambiguous_kept / removed_duplicates are the dedup pass's

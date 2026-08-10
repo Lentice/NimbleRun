@@ -24,6 +24,11 @@ struct CatalogRoot {
 // Loaded/saved as lowercase, dot-prefixed.
 std::vector<std::wstring> DefaultExtensions();
 
+// Recent-apps count bounds (design-spec §FR-013). One definition shared by
+// SettingsStore::Load (range check) and SettingsEditor::SetRecentCount.
+inline constexpr int kMinRecentCount = 8;
+inline constexpr int kMaxRecentCount = 40;
+
 // True when value is a local drive-letter absolute path (e.g. C:\Tools).
 // UNC, network, URI and device paths are rejected (design-spec §FR-005).
 // Shared with the user-folder catalog enumerator for its defensive guard.

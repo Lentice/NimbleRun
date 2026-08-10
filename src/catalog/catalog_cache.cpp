@@ -16,7 +16,6 @@ namespace nimblerun {
 namespace {
 
 constexpr std::wstring_view kFileName = L"catalog.cache";
-constexpr std::wstring_view kSchemaPrefix = L"schema=";
 constexpr int kSchemaVersion = 2;
 
 constexpr int kFieldCount = 7;  // stable_id, display_name, normalized_name,

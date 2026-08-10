@@ -45,6 +45,7 @@
 #include <ctime>
 #include <cwchar>
 #include <filesystem>
+#include <iterator>
 #include <memory>
 #include <mutex>
 #include <set>
@@ -1083,12 +1084,8 @@ void ActivateRow(std::size_t index, HWND window) {
         if (g_refresh &&
             g_launch_failure_refresh.OnLaunchAttempt(false,
                                                      g_refresh->IsRebuildInProgress())) {
-            const std::vector<nimblerun::CatalogSource> all = {
-                nimblerun::CatalogSource::StartMenu,
-                nimblerun::CatalogSource::AppsFolder,
-                nimblerun::CatalogSource::UserFolder,
-            };
-            StartRebuild(window, all);
+            StartRebuild(window, {std::cbegin(nimblerun::kSources),
+                                  std::cend(nimblerun::kSources)});
         }
         if (g_diag) {
             g_diag->Write(L"launch",
@@ -3008,12 +3005,8 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
         // NR-011: Ctrl+R / tray "Refresh Apps" forces a full rebuild of every
         // source. A successful launch never triggers this (see ActivateRow).
         if (g_refresh) {
-            const std::vector<nimblerun::CatalogSource> all = {
-                nimblerun::CatalogSource::StartMenu,
-                nimblerun::CatalogSource::AppsFolder,
-                nimblerun::CatalogSource::UserFolder,
-            };
-            StartRebuild(window, all);
+            StartRebuild(window, {std::cbegin(nimblerun::kSources),
+                                  std::cend(nimblerun::kSources)});
         }
         return 0;
     }
@@ -3157,12 +3150,8 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
                         g_pins ? g_pins->OrderedPins().size() : 0,
                         g_settings.recent_count));
                 }
-                const std::vector<nimblerun::CatalogSource> all = {
-                    nimblerun::CatalogSource::StartMenu,
-                    nimblerun::CatalogSource::AppsFolder,
-                    nimblerun::CatalogSource::UserFolder,
-                };
-                StartRebuild(window, all);
+                StartRebuild(window, {std::cbegin(nimblerun::kSources),
+                                      std::cend(nimblerun::kSources)});
             }
         }
         return 0;
@@ -3862,12 +3851,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     // NR-011: kick off the background full rebuild now that the panel can serve
     // the cached snapshot; the results arrive through kRebuildDoneMessage.
     if (g_refresh) {
-        const std::vector<nimblerun::CatalogSource> all = {
-            nimblerun::CatalogSource::StartMenu,
-            nimblerun::CatalogSource::AppsFolder,
-            nimblerun::CatalogSource::UserFolder,
-        };
-        StartRebuild(window, all);
+        StartRebuild(window, {std::cbegin(nimblerun::kSources),
+                              std::cend(nimblerun::kSources)});
     }
 
     MSG message{};

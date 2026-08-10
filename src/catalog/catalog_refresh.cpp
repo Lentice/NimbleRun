@@ -15,12 +15,6 @@ constexpr std::int64_t kNever = std::numeric_limits<std::int64_t>::min();
 // "did the timestamp change during the scan?" comparison stays truthful.
 constexpr std::int64_t kNoEventSentinel = std::numeric_limits<std::int64_t>::max();
 
-constexpr CatalogSource kSources[] = {
-    CatalogSource::StartMenu,
-    CatalogSource::AppsFolder,
-    CatalogSource::UserFolder,
-};
-
 } // namespace
 
 void CatalogRefreshCoordinator::NotifySourceEvent(CatalogSource source, std::int64_t now_ms) {

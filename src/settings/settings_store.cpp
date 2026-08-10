@@ -1,3 +1,5 @@
+#include "catalog/app_filter.h"
+
 #include "settings/settings_store.h"
 
 #include "storage/atomic_text_file.h"
@@ -7,7 +9,6 @@
 
 #include <cerrno>
 #include <cstdlib>
-#include <cwctype>
 #include <algorithm>
 #include <optional>
 #include <string>
@@ -19,19 +20,7 @@ namespace nimblerun {
 namespace {
 
 constexpr std::wstring_view kFileName = L"settings.ini";
-constexpr std::wstring_view kSchemaPrefix = L"schema=";
 constexpr int kSchemaVersion = 1;
-constexpr int kMinRecentCount = 8;
-constexpr int kMaxRecentCount = 40;
-
-std::wstring ToLower(std::wstring_view value) {
-    std::wstring out;
-    out.reserve(value.size());
-    for (const wchar_t c : value) {
-        out.push_back(static_cast<wchar_t>(towlower(static_cast<wint_t>(c))));
-    }
-    return out;
-}
 
 bool ParseInt(std::wstring_view text, int& out) {
     const std::wstring value = Trim(text);
@@ -57,15 +46,6 @@ std::optional<bool> ParseBool(std::wstring_view text) {
         return false;
     }
     return std::nullopt;
-}
-
-// Lowercased extension including the dot, or empty when there is none.
-std::wstring Extension(std::wstring_view path) {
-    const std::size_t slash = path.find_last_of(L"/\\");
-    const std::wstring_view name =
-        slash == std::wstring_view::npos ? path : path.substr(slash + 1);
-    const std::size_t dot = name.find_last_of(L'.');
-    return dot == std::wstring_view::npos ? std::wstring{} : ToLower(name.substr(dot));
 }
 
 bool IsSupportedExtension(std::wstring_view extension) {
@@ -121,14 +101,10 @@ bool IsLocalAbsolutePath(std::wstring_view value) {
 }
 
 Settings DefaultSettings() {
+    // All defaults come from the Settings member initializers (settings_store.h);
+    // keep the catalog_extensions assignment to state the derived allowlist
+    // (DefaultExtensions()) explicitly.
     Settings settings;
-    settings.hotkey = L"Alt+Space";
-    settings.auto_start = false;
-    settings.theme = Theme::System;
-    settings.recent_count = 20;
-    settings.hide_after_launch = true;
-    settings.include_windows_apps = true;
-    settings.catalog_roots.clear();
     settings.catalog_extensions = DefaultExtensions();
     return settings;
 }
