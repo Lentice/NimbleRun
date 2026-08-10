@@ -25,6 +25,8 @@ using nimblerun::layout::ClampWindowSize;
 using nimblerun::layout::FooterTopDip;
 using nimblerun::layout::LayoutForDpi;
 using nimblerun::layout::ViewportRowsForHeightDip;
+using nimblerun::layout::SlotAtPointDip;
+using nimblerun::layout::SlotRect;
 using nimblerun::layout::kCellHeightDip;
 using nimblerun::layout::kCellWidthDip;
 using nimblerun::layout::kFooterTopDip;
@@ -571,6 +573,40 @@ void TestClampedPanelKeepsFooter() {
     }
 }
 
+void TestSlotGeometryRoundTrips() {
+    const float heights[] = {kPanelHeightDip, 464.0f, 348.0f};
+    const int columns[] = {1, kGridColumns};
+    const float dpis[] = {96.0f, 144.0f, 192.0f};
+    for (const float dpi : dpis) {
+        const float scale = dpi / 96.0f;
+        for (const int column_count : columns) {
+            for (const float height : heights) {
+                const int rows = ViewportRowsForHeightDip(height, column_count);
+                for (int slot = 0; slot < rows * column_count; ++slot) {
+                    const auto rect = SlotRect(slot, column_count, height);
+                    const float center_x_px =
+                        (rect.left + rect.right) * scale / 2.0f;
+                    const float center_y_px =
+                        (rect.top + rect.bottom) * scale / 2.0f;
+                    const int round_trip = SlotAtPointDip(
+                        center_x_px / scale, center_y_px / scale,
+                        column_count, rows, height);
+                    Expect(round_trip == slot, "slot center round-trips at every DPI and height");
+                }
+                const float footer_x = column_count > 1
+                    ? kGridLeftDip + kCellWidthDip / 2.0f : kListLeftDip;
+                Expect(SlotAtPointDip(footer_x, FooterTopDip(height) + 1.0f,
+                                      column_count, rows, height) == -1,
+                       "footer band is not a slot");
+                Expect(SlotAtPointDip(kListLeftDip, kListTopDip + rows *
+                                      (column_count > 1 ? kCellHeightDip : kRowHeightDip) + 1.0f,
+                                      column_count, rows, height) == -1,
+                       "past-viewport slot is not a hit");
+            }
+        }
+    }
+}
+
 
 // NR-029: grid hover needs a visible fill in every theme. Light/dark use the
 // card-level fill; high contrast collapses card to the window background, so
@@ -618,6 +654,7 @@ int wmain() {
     TestFooterBandAlwaysVisible();
     TestViewportRowsShrinkForFooter();
     TestClampedPanelKeepsFooter();
+    TestSlotGeometryRoundTrips();
     TestGridHoverFillVisible();
     std::printf("NR-015/NR-024/NR-029/NR-111 accessibility check PASSED\n");
     return 0;

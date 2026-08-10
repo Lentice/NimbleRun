@@ -63,5 +63,52 @@ int ViewportRowsForHeightDip(float client_height_dip, int columns) {
     return std::max(1, static_cast<int>(result_height / row_height));
 }
 
+// NR-133: the forward slot geometry, exactly the arithmetic the renderer used
+// (grid: kGridLeftDip + col*kCellWidthDip, kListTopDip + row*kCellHeightDip;
+// list: kListLeftDip/kListRightDip, kListTopDip + slot*kRowHeightDip).
+SlotRectDip SlotRect(int slot, int columns, float client_height_dip) {
+    (void)client_height_dip;  // NR-133: mirrors SlotAtPointDip's footer bound
+    SlotRectDip rect{};
+    if (columns <= 1) {
+        rect.left = kListLeftDip;
+        rect.right = kListRightDip;
+        rect.top = kListTopDip + static_cast<float>(slot) * kRowHeightDip;
+        rect.bottom = rect.top + kRowHeightDip;
+    } else {
+        const int row = slot / columns;
+        const int col = slot % columns;
+        rect.left = kGridLeftDip + static_cast<float>(col) * kCellWidthDip;
+        rect.top = kListTopDip + static_cast<float>(row) * kCellHeightDip;
+        rect.right = kGridLeftDip + static_cast<float>(col + 1) * kCellWidthDip;
+        rect.bottom = kListTopDip + static_cast<float>(row + 1) * kCellHeightDip;
+    }
+    return rect;
+}
+
+// NR-133: the inverse of SlotRect. The footer band (NR-064/NR-120, clamped via
+// FooterTopDip) and the painted-row bound (NR-082) are both checked here once,
+// in the same shared pre-check the old CellAtPoint used.
+int SlotAtPointDip(float x, float y, int columns, int viewport_rows,
+                   float client_height_dip) {
+    if (y < kListTopDip || y >= FooterTopDip(client_height_dip)) {
+        return -1;
+    }
+    if (columns <= 1) {
+        if (x < kListLeftDip || x >= kListRightDip) {
+            return -1;
+        }
+        const int row = static_cast<int>(std::floor((y - kListTopDip) / kRowHeightDip));
+        return row >= 0 && row < viewport_rows ? row : -1;
+    }
+    // std::floor (not truncation) so x left of the grid maps to a negative col
+    // and misses instead of wrapping to column 0 (NR-064).
+    const int col = static_cast<int>(std::floor((x - kGridLeftDip) / kCellWidthDip));
+    const int row = static_cast<int>(std::floor((y - kListTopDip) / kCellHeightDip));
+    if (col < 0 || col >= columns || row < 0 || row >= viewport_rows) {
+        return -1;
+    }
+    return row * columns + col;
+}
+
 }  // namespace layout
 }  // namespace nimblerun

@@ -167,6 +167,14 @@
 | NR-128 | 死碼與 test-only API 移除（g_last_hotkey_error、GetStartupStatus、Resolve 等） | 3 | `done` | NR-127 | [NR-128](work-items/NR-128-dead-code-removal.md) |
 | NR-129 | 25 份逐字相同的測試 Expect helper 收斂 | 3 | `done` | NR-055 | [NR-129](work-items/NR-129-shared-test-expect-helper.md) |
 | NR-130 | 同 user DoS 面：full-rescan 限流＋single-instance 靜默退出 | 1 | `done` | NR-002, NR-077, NR-110 | [NR-130](work-items/NR-130-same-user-dos-surface.md) |
+| NR-131 | Token 交接註冊表收斂為模組，rebuild 停止借用 icon worker 的 mutex | 3 | `ready` | NR-077, NR-127 | [NR-131](work-items/NR-131-handoff-registry-module.md) |
+| NR-132 | Rebuild 編排抽成 RebuildPipeline（九個全域／五啟動點／四完成點） | 3 | `planned` | NR-131, NR-100, NR-115, NR-116, NR-118, NR-123, NR-130 | [NR-132](work-items/NR-132-rebuild-pipeline-module.md) |
+| NR-133 | Slot 幾何單一來源 `SlotRect`／`SlotAtPointDip`（四份拷貝、footer 界已分歧） | 3 | `done` | NR-064, NR-082, NR-120 | [NR-133](work-items/NR-133-slot-geometry-single-source.md) |
+| NR-134 | Snapshot 組裝順序契約要有擁有者：`CatalogSnapshotAssembler` | 3 | `ready` | NR-061, NR-072, NR-083, NR-116 | [NR-134](work-items/NR-134-snapshot-assembly-module.md) |
+| NR-135 | `wWinMain` RAII 收尾（`HandleGuard`＋`ComGuard`）與刪除 `message_loop.h` | 3 | `ready` | NR-051, NR-117 | [NR-135](work-items/NR-135-winmain-raii-and-message-loop-inline.md) |
+| NR-136 | 釘選拖曳狀態機收斂為 `PinDragState`（六全域／五 handler／四份重置） | 3 | `ready` | NR-039, NR-046 | [NR-136](work-items/NR-136-pin-drag-state-module.md) |
+| NR-137 | 兩份逐字相同的遞迴目錄走訪收斂為 `DirectoryWalker`（同一 bug 修過兩次） | 2 | `ready` | NR-063, NR-091, NR-092, NR-098, NR-124 | [NR-137](work-items/NR-137-directory-walker-module.md) |
+| NR-138 | Icon 請求狀態收斂為 `IconRequestSession`＋prewarm 直接取 entries | 3 | `ready` | NR-012, NR-032, NR-099, NR-109, NR-114 | [NR-138](work-items/NR-138-icon-request-session.md) |
 
 ## Dependency lanes
 
@@ -323,6 +331,8 @@ NR-117（GetMessageW error result 被誤當成可 dispatch）── 依賴 NR-11
 | 另立一套搜尋鍵抽象：`SearchKeys(entry)` 存取器或 `std::vector<std::wstring> search_keys` | NR-047 §How this stays maintainable | vector 會在熱掃描路徑上多一次 per-entry 堆積配置與一層內迴圈，換來的是目前不存在的擴充性。新增搜尋鍵請從既有的 `search_alias` 欄位與 `MatchRank::Alias` 層級接。 |
 | 中文拼音／注音／同義詞展開 | `docs/design-spec.md:180`（§4.4）、`:1046` | MVP 明文排除。這是**唯一真正通用**解決「不想打中文」的方案，但要重開屬於 spec 層級決策（需要對照資料與 §4.5 的新層級），**先問使用者是否把它移出 MVP 排除清單，不要逕自開 item**。 |
 | 用 Catalog 項目把空白狀態的格狀填滿（NR-053 的 §4.2 規則 3） | NR-061 的使用者決策（2026-08-07） | 實機上填出 40 格 `3D Vision 相...`／`AccessPort`／`AlertMail48` 這類從未開過的項目，把「我釘的或我用過的」這個唯一語意稀釋掉，且這些格子的右鍵「Remove from recent」按了毫無反應。空白狀態的內容一律只來自釘選清單與使用紀錄；沒有就顯示一行提示。**NR-053 依 `usage_score` 排序的那一半保留。**（2026-08-07 由 NR-071 覆寫：常用區改依最後啟動時間排序、最新在最前，`usage_score` 僅留給 §4.5 搜尋結果的次要排序。「不用其他 App 填充」這條不受影響，仍然有效。） |
+| 把 icons 疊層（icon_cache／icon_pack_format／png_codec／icon_store／icon_worker／shell_icon_provider）重寫成單一「icon acquisition」深模組 | 2026-08-10 三方架構審查 | 這不是碎片化，是真正的分層：每層有各自的存在理由與各自的測試，Shell／COM 邊界恰好收在單一執行緒上。重寫換不到 locality，只會把六份可測的介面換成一份不可測的大介面。**真正的問題是 token 交接註冊表沒有模組**，那一條已由 NR-131 處理；UI 端的 pending-key 集合若仍是負擔，開新 item 時必須提出 icons 疊層本身造成的具體 bug 或修補紀錄作為新證據。 |
+| 抽一個泛用的「versioned persistence policy」深模組，讓 settings／pin／usage 三個 store 共用 schema 守門與 atomic commit | 2026-08-10 三方架構審查 | 機制層已經共用（`src/storage/atomic_text_file.h`），NR-057／NR-127 也已把 `kSchemaPrefix` 等常數收斂到一份。剩下的重複只是每個 store 各自幾行的守門呼叫，套用刪除測試——刪掉這層抽象，複雜度**不集中**，只是回到三個各自正確且各自有測試的 store。要重開必須先指出一個「三份守門已經漂移」的具體實例（NR-072／NR-080／NR-096 修的是三個**不同**的邊界，不是同一條規則的三份拷貝）。**特別不得**把三種 domain 格式壓成一個泛用 parser。 |
 | 把 FR-004a 的 program-like 判準套用到 FR-005 使用者自訂資料夾 | `docs/design-spec.md:354` | 明文「此判準**不套用於** FR-005 的使用者自訂資料夾」。該來源的把關者是使用者自己勾選的副檔名清單；二次過濾會無聲擋掉使用者手動加入的副檔名。 |
 
 ## 稽核修補 lane 10（NR-118，2026-08-09 第十二次 fresh audit 產出）
@@ -370,8 +380,120 @@ NR-130（同 user DoS 面）── 依賴 NR-002、NR-077、NR-110（done）；L
         採限流＋逾時 MessageBoxW 回饋，不驗證 sender、不搶回 mutex
 ```
 
+## 架構深化 lane 12（NR-131～NR-136，2026-08-10 三方架構審查產出）
+
+```
+NR-131（HandoffRegistry 模組）── 依賴 NR-077、NR-127（done）；MEDIUM；
+        icon_worker.h:56 的 g_handoff_mutex 被 rebuild 路徑跨 seam 借用六處，兩條無關通道
+        互相序列化；收成 src/win/handoff_registry.h template，兩個實例各持一把鎖。
+        「未知 token 回 nullptr」（§NFR-004）首度可測。NR-132 的前置
+NR-132（RebuildPipeline 抽出）── 依賴 NR-131 與六個 rebuild item；IMPORTANT；
+        九個全域＋五個啟動點＋四個完成排空點守同一條「每來源恰好完成一次」不變式，
+        近 15 次修補中 7 次落在這段膠水碼且零測試；抽一個物件（不拆多個），注入
+        post-to-UI 與 enumerate-source 兩個 seam，full_rescan_throttle.h 併入
+NR-133（slot 幾何單一來源）── 依賴 NR-064、NR-082、NR-120（done）；IMPORTANT；
+        同一算式四份拷貝**已分歧**：CellAtPoint 用未 clamp 的 kFooterTopDip*scale，
+        Render／SyncAccessibility 用 NR-120 的 FooterTopDip(client_height)；
+        目前靠 NR-082 的 ViewportRows() 另一道守門才沒出事。加互逆純函式＋round-trip 測試
+NR-134（CatalogSnapshotAssembler）── 依賴 NR-061、NR-072、NR-083、NR-116（done）；MEDIUM；
+        RefreshPanelSnapshot 45 行、五個全域、四條只存在於註解的跨模組順序不變式
+        （含 NR-061 的資料遺失守門與 NR-083 的 borrowed-view 生命週期），組合零測試
+NR-135（wWinMain RAII＋刪 message_loop.h）── 依賴 NR-051、NR-117（done）；LOW；
+        六段手抄 CloseHandle／CoUninitialize 收尾＋隔壁已有 ComGuard 沒被用；
+        message_loop.h 全文是 `return r > 0;`，刪除測試零複雜度轉移。**覆寫 NR-117 的抽出形狀**
+NR-136（PinDragState）── 依賴 NR-039、NR-046（done）；LOW；
+        六個全域／五個 handler／逐字四份重置三連；DragPreviewOrder 是純排列且含
+        「拖曳中途釘選區縮小」守門，零測試
+```
+
+```
+NR-137（DirectoryWalker）── 依賴 NR-063、NR-091、NR-092、NR-098、NR-124（done）；IMPORTANT；
+        start_menu_catalog.cpp:204-251 與 user_folder_catalog.cpp:70-121 是逐字相同的
+        FindFirstFileW 遞迴走訪（連註解都只差 NR 編號），三條語意各一份拷貝；
+        NR-091 與 NR-092 是兩個獨立 item 各修了同一個 ERROR_NO_MORE_FILES 錯誤一次，
+        兩次都是 HIGH 級資料完整性。只收斂走訪機制，過濾器與 root 語意留在枚舉器
+NR-138（IconRequestSession）── 依賴 NR-012、NR-032、NR-099、NR-109、NR-114（done）；LOW；
+        兩個 set 全域＋六個散點守「一 key 一請求／失敗不重發／dropped 排空」；
+        兩處「該不該發」形狀不同（Prewarm 多查 cache）。與 NR-131 互補（那是 worker 側，
+        這是 UI 側）。併入 prewarm 改為直接取 entries，刪掉對 Snapshot() 的線性掃描
+```
+
+### 建議實作順序（open items，2026-08-10）
+
+依「先做已經漂移的正確性風險 → 再做前置 → 再做最大宗 → 最後做會動測試計數的整理」。
+表格的 Depends on 只列**技術性**依賴；下表的順序是排程建議，除 NR-131→NR-132 外都不是硬阻塞。
+
+| 順序 | ID | 難度 | 為什麼排這裡 |
+|---:|---|---|---|
+| 1 | NR-133 | 中 | 四份拷貝**已經分歧**（clamp 前後的 footer 界），目前只靠另一道守門沒出事；獨立、1 天、property test 一次守住 NR-064/082/120 三次修補 |
+| 2 | NR-137 | 中 | 證據最硬：同一個 bug 已在兩份拷貝各修過一次（NR-091／NR-092）。只動 `catalog/`，與 main.cpp 的三個大件零衝突，可與 1 並行 |
+| 3 | NR-131 | 低 | NR-132 的前置，小而獨立；先做讓 NR-132 變成純搬移 |
+| 4 | NR-132 | 高 | 最大宗：九全域＋五啟動點＋四完成點＋watcher 對照表。單獨一輪做完，不要與其他動 main.cpp 的 item 並行 |
+| 5 | NR-134 | 中 | 也重度改 main.cpp，排在 NR-132 之後以免同時改同一區；它是 NR-132 完成回呼的天然消費者 |
+| 6 | NR-138 | 低 | main.cpp 的 icon 路徑，與 4／5 的區域不同但仍建議序列化 |
+| 7 | NR-136 | 低 | 獨立、範圍最小、風險最低 |
+| 8 | NR-135 | 低 | **排最後**：它會改變 CTest 數，連帶要同步 `docs/testing.md` 與重產 release evidence；放在其他 item 都落地後只做一次 |
+
+做完 4 與 5 之後**重新評估** `PanelHost` 候選——屆時大部分全域已被移走，那個 diff 才划算。
+
+### 候選（尚未開 item）
+
+- **`main.cpp` 的 ~28 個子系統全域收成一個 `PanelHost` struct**：`wWinMain`（`:3714-3804`）
+  把十一個子系統當 stack local 建構後立刻發佈成裸指標全域，銷毀順序是隱性且 load-bearing
+  （`:3783-3786` 的註解是唯一保護）；每個 host 函式頂端的 `if (!g_x) return;` 是為了一個
+  視窗存在後就不可能發生的狀態。純機械但巨大的 diff，**必須排在 NR-132 與 NR-134 之後**
+  ——那兩個 item 會先移走大部分全域，順序比範圍更關鍵。
+- **`Render()`（`main.cpp:1939-2400`，460 行）抽出 `std::vector<RowVisual>` builder**：
+  把「畫什麼」與「怎麼畫」分開，`SyncAccessibility` 可共用同一份決策（目前獨立重推
+  `selected`／`disabled`，是與 NR-133 同型的第三份分歧）。**不是** render command list。
+  近期無任何 bug 修補指向 `Render` 的狀態邏輯，故列候選不開 item；若它開始出現在 bug 報告再開。
+  `PanelHost` 候選另應順帶擁有 **applied-settings 三份部分鏡像**（`main.cpp:2432-2442` ShowPanel
+  只複製 `recent_count`、`:3159-3162` 對話框套用、`:3714-3717` `wWinMain`），那條
+  「catalog 來源欄位只能經由 rebuild 改變」的規則目前只活在 `:2439-2441` 的註解裡。
+- **`ModalScope` RAII**（`g_context_menu_active`／`g_dialog_active` 的五處手動 set/clear，
+  `main.cpp:201-205`、`:928-931`、`:980-983`、`:2697-2700`、`:3459-3462`）：與 NR-119 修掉的
+  是同一類共用狀態覆寫，但**沒有第二次出事的證據**，NR-119 的一行入口守門已經擋住那個 crash。
+  列候選不開 item；若日後真的做，讓它搭 NR-135 的 RAII 一起走，不要單開。
+
 ## 計畫決策紀錄
 
+- 2026-08-10（NR-137～NR-138 ready，架構審查第二輪）：opencode 在第一輪未交付（見下條），
+  改以 Herdr pane 起互動式 opencode 重跑同一題，這次交出完整報告（6 個候選）。主 Agent 逐條
+  重讀原始碼驗證後採納兩條、併一條進 NR-132、兩條列候選不開 item。**採納 NR-137（IMPORTANT）**
+  ——`start_menu_catalog.cpp:204-251` 與 `user_folder_catalog.cpp:70-121` 逐行比對確認結構
+  與註解幾乎逐字相同（只差 NR 編號），而 NR-091 與 NR-092 是**兩個獨立 item 各修了同一個
+  `FindNextFileW`／`ERROR_NO_MORE_FILES` 錯誤一次**，兩次都是 HIGH 級資料完整性；這是 repo
+  自己記錄在案的「重複拷貝各自出過事」，證據強度高於本輪任何其他候選。只收斂走訪機制，
+  **不動兩來源的 root 語意**（那是 NR-091／092 明確保留的決策）。**採納 NR-138（LOW）**——
+  形狀與 NR-136 同型，且是 NR-131 沒搬走的 UI 側另一半；把 opencode 的 prewarm 線性掃描
+  候選併進同一個 item，因為兩者落在 `PrewarmEmptyStatePage` 同一段碼。**併入 NR-132**——
+  watcher 索引↔來源對照表（`WatchIndexToSource` 對越界索引靜默回 `StartMenu`）；不另開 item，
+  因為 `g_watch_sources` 本來就在 NR-132 的九個全域裡，另開會兩個 item 改同一行。
+  **不開 item 的兩條**：`ModalScope` RAII（與 NR-119 同類但**沒有第二次出事的證據**，
+  一行入口守門已擋住；要做就搭 NR-135）、applied-settings 三份鏡像（併入 `PanelHost` 候選）。
+  同時把 open items 的**建議實作順序與難度**寫進本頁 lane 12，排序原則是
+  「先做已漂移的正確性風險 → 再做前置 → 再做最大宗 → 最後做會動測試計數的整理」，
+  NR-135 排最後的理由是它會改變 CTest 數並連帶要重產 release evidence。
+- 2026-08-10（NR-131～NR-136 ready／planned，三方架構審查產出）：NR-119～NR-130 完成後，
+  以三個獨立來源做同一件事——Codex CLI（HTML 報告，4 個候選）、Claude 唯讀 subagent
+  （8 個候選）、opencode（**未交付**：兩次執行都只回一句開場白就結束，182 output tokens，
+  resume 只重播同一則快取訊息；不列入合議）。主 Agent 對每個候選重讀原始碼驗證後收斂成 6 個 item。
+  **合議最強的一條**：Codex 候選 01 與 Claude 候選 1 在互不知情下指向同一個首選——rebuild 編排
+  （NR-132），且兩份都提出「coordinator 是深模組、bug 全在它周圍的膠水碼」這個同一診斷；
+  git 證據支持（`main.cpp` 佔 repo 源碼 16%、近 40 次 commit 的 40% churn，近 15 次修補中 7 次
+  落在 rebuild 膠水碼）。**排序依「先建前置、再做已分歧的正確性風險、再做無擁有者的資料不變式、
+  最後才是整理」**：NR-131（前置）→ NR-133（已分歧，含潛在命中 bug）→ NR-132（最大宗）→
+  NR-134 → NR-135／NR-136。逐項「為什麼不那樣做」：**NR-132 不拆成多個小類**——整個要點是同一個
+  物件持有「每來源恰好完成一次」那條不變式，拆開等於把現況的分散原樣搬家；**NR-133 保留
+  NR-082 的 `ViewportRows()` 守門**——那是模型狀態守門不是幾何，兩者職責不同；**NR-134 的
+  pin load notice 必須改成回傳值**，否則模組不是 HWND-free（違反 AGENTS.md）；**NR-135 覆寫
+  NR-117 的抽出形狀但不改其行為**，新證據是刪除測試——`message_loop.h` 全文 `return r > 0;`，
+  刪掉零複雜度轉移，而 NR-117 的真正風險（`-1` 分支的 logging 與收尾）那個測試根本沒碰到，
+  抽出提供的是假覆蓋率。**兩條否決已寫入 §已否決的方向**（Codex 候選 03 的 icons 重寫、
+  候選 04 的泛用 versioned persistence）。**兩條列為候選不開 item**（`PanelHost` struct 收全域、
+  `Render` 的 RowVisual builder）——前者必須排在 NR-132／NR-134 之後才划算，後者近期零 bug 修補
+  指向它，YAGNI。全部 6 個 item 均為**行為零變更**，既有測試即回歸網，並要求搬移時把註解連同
+  NR 編號一起帶走（那些註解是本 repo 真正的設計紀錄）。
 - 2026-08-10（NR-119～NR-130 ready，第十三次全 repo 稽核產出）：NR-118 完成後派四個平行唯讀
   subagent 分軸審計（ponytail 過度設計／正確性穩健性／spec 符合度／安全性不受信輸入），主 Agent
   對所有 CRITICAL/IMPORTANT 與跨軸交叉發現逐一重讀原始碼驗證後收斂成 12 個 item。**排序依

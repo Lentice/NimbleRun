@@ -692,60 +692,28 @@ int CellAtPoint(HWND window, int x, int y) {
     const nimblerun::layout::LayoutPx layout =
         nimblerun::layout::LayoutForDpi(GetDpiForWindow(window));
     // NR-064: the footer band begins at kFooterTopDip for both layouts (grid 4
-    // rows and list 8 rows both end at 456 DIP), so y >= footer_top is a miss.
+    // rows and list 8 rows both end at 456 DIP), so y >= footer top is a miss.
     // Without this lower bound a footer click computed row first+8 (the 9th,
     // unpainted result) and launched an app the user could not see; the point is
-    // now a window-drag (NR-039), not a launch. The hit-test bound is computed
-    // here exactly like the grid_left bound below; LayoutPx carries no footer
-    // field on purpose -- it is hit-test-only geometry, not layout geometry.
-    const int footer_top = static_cast<int>(std::lround(
-        nimblerun::layout::kFooterTopDip * layout.scale));
-    if (y < layout.list_top || y >= footer_top) {
+    // now a window-drag (NR-039), not a launch. NR-082 adds the painted-row
+    // bound for the clamp-shrunk strip between the last row and the footer.
+    // Both bounds, plus the grid/list margins, now live in the single DIP
+    // hit-test SlotAtPointDip (NR-133), the same geometry the renderer paints;
+    // the caller converts physical px to DIP via layout.scale and applies the
+    // model's FirstVisibleRow() offset and Rows().size() bounds below.
+    RECT client{};
+    GetClientRect(window, &client);
+    const float client_height_dip =
+        static_cast<float>(std::max(0L, client.bottom - client.top)) / layout.scale;
+    const int slot = nimblerun::layout::SlotAtPointDip(
+        static_cast<float>(x) / layout.scale,
+        static_cast<float>(y) / layout.scale,
+        g_model->Columns(), g_model->ViewportRows(), client_height_dip);
+    if (slot < 0) {
         return -1;
     }
-    const int columns = g_model->Columns();
-    if (columns > 1) {
-        const int cell_width = static_cast<int>(std::lround(
-            nimblerun::layout::kCellWidthDip * layout.scale));
-        const int cell_height = static_cast<int>(std::lround(
-            nimblerun::layout::kCellHeightDip * layout.scale));
-        const int grid_left = static_cast<int>(std::lround(
-            nimblerun::layout::kGridLeftDip * layout.scale));
-        // NR-064: C++ integer division truncates toward zero, so an x left of
-        // the grid (e.g. the 17 DIP margin) used to map to column 0 and launch
-        // the first cell. Reject before dividing.
-        if (x < grid_left) {
-            return -1;
-        }
-        const int col = (x - grid_left) / cell_width;
-        const int row = (y - layout.list_top) / cell_height;
-        // NR-082: when ClampWindowSize shortens the panel (small screen + high
-        // DPI), the last painted row ends before the footer, so the NR-064
-        // footer bound alone leaves a strip that maps to rows beyond the
-        // viewport -- and a click there launched an app in an unpainted cell
-        // (design-spec §4.8 "滑鼠命中僅限實際繪製的可見格／列"). ViewportRows()
-        // is the UpdateViewportRows-derived count of actually painted rows.
-        if (col < 0 || col >= columns || row < 0 ||
-            row >= g_model->ViewportRows()) {
-            return -1;
-        }
-        const int index = g_model->FirstVisibleRow() + row * columns + col;
-        return index < static_cast<int>(g_model->Rows().size()) ? index : -1;
-    }
-    // NR-064: the margin between the row text and the window's right edge used
-    // to hit the row anyway; only the painted list region selects.
-    if (x < layout.list_left || x >= layout.list_right) {
-        return -1;
-    }
-    // NR-082: same clamp-shrunk gap as the grid branch -- only rows the model
-    // actually paints may be hit; the row below the last painted one used to
-    // select and launch an invisible result.
-    const int row_index = (y - layout.list_top) / layout.row_height;
-    if (row_index >= g_model->ViewportRows()) {
-        return -1;
-    }
-    const int index = row_index + g_model->FirstVisibleRow();
-    return index >= 0 && index < static_cast<int>(g_model->Rows().size()) ? index : -1;
+    const int index = g_model->FirstVisibleRow() + slot;
+    return index < static_cast<int>(g_model->Rows().size()) ? index : -1;
 }
 
 // NR-046: pinned row count of the current view, 0 when there is no pinned
@@ -858,9 +826,10 @@ void SyncAccessibility(HWND window) {
     // the band actually paints when the panel is clamped below 488 DIP.
     RECT client_rect{};
     GetClientRect(window, &client_rect);
-    const float footer_top_dip = nimblerun::layout::FooterTopDip(
+    const float client_height_dip =
         static_cast<float>(std::max(0L, client_rect.bottom - client_rect.top)) /
-        layout.scale);
+        layout.scale;
+    const float footer_top_dip = nimblerun::layout::FooterTopDip(client_height_dip);
     const float footer_bottom_dip = footer_top_dip +
         (nimblerun::layout::kPanelHeightDip - nimblerun::layout::kFooterTopDip);
     snapshot.footer_bounds = screen_rect(RECT{0, static_cast<LONG>(
@@ -874,23 +843,16 @@ void SyncAccessibility(HWND window) {
         if (index < 0 || index >= static_cast<int>(g_model->Rows().size())) {
             break;
         }
-        RECT bounds{};
-        if (columns > 1) {
-            const int row = slot / columns;
-            const int col = slot % columns;
-            bounds = RECT{
-                static_cast<LONG>(std::lround((nimblerun::layout::kGridLeftDip +
-                                               col * nimblerun::layout::kCellWidthDip) * layout.scale)),
-                static_cast<LONG>(std::lround((nimblerun::layout::kListTopDip +
-                                               row * nimblerun::layout::kCellHeightDip) * layout.scale)),
-                static_cast<LONG>(std::lround((nimblerun::layout::kGridLeftDip +
-                                               (col + 1) * nimblerun::layout::kCellWidthDip) * layout.scale)),
-                static_cast<LONG>(std::lround((nimblerun::layout::kListTopDip +
-                                               (row + 1) * nimblerun::layout::kCellHeightDip) * layout.scale))};
-        } else {
-            const int top = layout.list_top + slot * layout.row_height;
-            bounds = RECT{layout.list_left, top, layout.list_right, top + layout.row_height};
-        }
+        // NR-133: the reported bounds come from the same SlotRect the renderer
+        // paints, scaled to physical px -- one slot geometry for hit-test,
+        // paint and accessibility instead of a second copy.
+        const nimblerun::layout::SlotRectDip slot_rect =
+            nimblerun::layout::SlotRect(slot, columns, client_height_dip);
+        const RECT bounds = {
+            static_cast<LONG>(std::lround(slot_rect.left * layout.scale)),
+            static_cast<LONG>(std::lround(slot_rect.top * layout.scale)),
+            static_cast<LONG>(std::lround(slot_rect.right * layout.scale)),
+            static_cast<LONG>(std::lround(slot_rect.bottom * layout.scale))};
         nimblerun::PanelAccessibilityElement element;
         element.role = nimblerun::PanelAccessibilityElement::Role::AppRow;
         element.name = g_model->AccessibleNameFor(static_cast<std::size_t>(index));
@@ -1993,6 +1955,10 @@ void Render(HWND window) {
 
     if (g_model) {
         const auto& rows = g_model->Rows();
+        // NR-133: the render target's DIP height is the client height that
+        // drives the clamped FooterTopDip (NR-120) and, via SlotRect, the slot
+        // geometry below.
+        const D2D1_SIZE_F target_size = g_render_target->GetSize();
         if (g_model->Columns() > 1) {
             // NR-029: empty-query icon grid (design-spec §4.2/§4.9). Reuses the
             // model viewport state: visible cells are
@@ -2009,18 +1975,13 @@ void Render(HWND window) {
                 const int slot = i - first;
                 const int row = (!preview.empty() && i < pinned)
                     ? preview[static_cast<std::size_t>(i)] : i;
-                const int row_index = slot / columns;
-                const int col_index = slot % columns;
-                const float cell_left =
-                    nimblerun::layout::kGridLeftDip +
-                    col_index * nimblerun::layout::kCellWidthDip;
-                const float cell_top =
-                    nimblerun::layout::kListTopDip +
-                    row_index * nimblerun::layout::kCellHeightDip;
+                // NR-133: cell geometry is the shared SlotRect -- the single
+                // definition of "where the Nth visible cell is".
+                const nimblerun::layout::SlotRectDip cell_dip =
+                    nimblerun::layout::SlotRect(slot, columns, target_size.height);
                 const auto cell = D2D1::RectF(
-                    cell_left, cell_top,
-                    cell_left + nimblerun::layout::kCellWidthDip,
-                    cell_top + nimblerun::layout::kCellHeightDip);
+                    cell_dip.left, cell_dip.top,
+                    cell_dip.right, cell_dip.bottom);
                 const float border_width = std::max(1.0f, dpi_x / nimblerun::layout::kDpi96);
                 if (row == -1) {
                     // NR-046: the drop target -- a dashed rounded outline only,
@@ -2062,8 +2023,8 @@ void Render(HWND window) {
                 // half; fallback tile + first letter until the real icon loads
                 // (NR-012), same no-reflow rule as the list rows.
                 const float icon_left =
-                    cell_left + (nimblerun::layout::kCellWidthDip - nimblerun::layout::kIconSizeDip) / 2.0f;
-                const float icon_top = cell_top + 12.0f;
+                    cell.left + (nimblerun::layout::kCellWidthDip - nimblerun::layout::kIconSizeDip) / 2.0f;
+                const float icon_top = cell.top + 12.0f;
                 const auto tile = D2D1::RectF(
                     icon_left, icon_top,
                     icon_left + nimblerun::layout::kIconSizeDip,
@@ -2078,7 +2039,7 @@ void Render(HWND window) {
                 // SetTrimming setup), so name length never changes cell
                 // geometry (design-spec §4.2).
                 const auto name_rect = D2D1::RectF(
-                    cell_left + 4.0f, cell_top + 56.0f,
+                    cell.left + 4.0f, cell.top + 56.0f,
                     cell.right - 4.0f, cell.bottom - 8.0f);
                 g_render_target->DrawText(
                     rows[row].display_name.c_str(),
@@ -2096,9 +2057,9 @@ void Render(HWND window) {
                         DrawKeyBox(
                             key_label,
                             D2D1::RectF(box_right - nimblerun::layout::kRowKeyBoxWidthDip,
-                                        cell_top + 4.0f,
+                                        cell.top + 4.0f,
                                         box_right,
-                                        cell_top + 4.0f + nimblerun::layout::kFooterKeyBoxHeightDip));
+                                        cell.top + 4.0f + nimblerun::layout::kFooterKeyBoxHeightDip));
                     }
                 }
 
@@ -2155,13 +2116,10 @@ void Render(HWND window) {
                 // NR-020: fixed single-column list geometry. D2D coordinates are
                 // DIPs; the render target scales them to the monitor's DPI
                 // (design-spec §4.9).
-                const float row_top =
-                    nimblerun::layout::kListTopDip +
-                    static_cast<float>(i - first) * nimblerun::layout::kRowHeightDip;
+                const nimblerun::layout::SlotRectDip row =
+                    nimblerun::layout::SlotRect(i - first, 1, target_size.height);
                 const auto row_rect = D2D1::RectF(
-                    nimblerun::layout::kListLeftDip, row_top,
-                    nimblerun::layout::kListRightDip,
-                    row_top + nimblerun::layout::kRowHeightDip);
+                    row.left, row.top, row.right, row.bottom);
                 const bool selected =
                     g_model->HasSelection() &&
                     g_model->SelectionIndex() == static_cast<std::size_t>(i);
@@ -2188,9 +2146,8 @@ void Render(HWND window) {
                 if (g_pins && g_pins->IsPinned(rows[i].stable_id)) {
                     constexpr float kPinStripeWidthDip = 3.0f;
                     g_render_target->FillRectangle(
-                        D2D1::RectF(row_rect.left, row_rect.top,
-                                    row_rect.left + kPinStripeWidthDip,
-                                    row_rect.bottom),
+                        D2D1::RectF(row.left, row.top,
+                                    row.left + kPinStripeWidthDip, row.bottom),
                         g_selected_border_brush);
                 }
                 // NR-012: fixed tile inside the row, vertically centered. The decoded
@@ -2200,7 +2157,7 @@ void Render(HWND window) {
                 const float tile_left =
                     nimblerun::layout::kListLeftDip + nimblerun::layout::kTileInsetDip;
                 const float tile_top =
-                    row_top + (nimblerun::layout::kRowHeightDip - nimblerun::layout::kTileSizeDip) / 2.0f;
+                    row.top + (row.bottom - row.top - nimblerun::layout::kTileSizeDip) / 2.0f;
                 const auto tile = D2D1::RectF(
                     tile_left, tile_top,
                     tile_left + nimblerun::layout::kTileSizeDip,
@@ -2218,12 +2175,12 @@ void Render(HWND window) {
                 // shows a digit (design-spec §4.9). Single-line + ellipsis below.
                 const float text_right =
                     nimblerun::layout::kListRightDip - nimblerun::layout::kRowHintReserveDip;
-                const float row_mid = row_top + nimblerun::layout::kRowHeightDip / 2.0f;
+                const float row_mid = (row.top + row.bottom) / 2.0f;
                 g_render_target->DrawText(
                     rows[i].display_name.c_str(),
                     static_cast<UINT32>(rows[i].display_name.size()),
                     g_text_format,
-                    D2D1::RectF(text_left, row_top, text_right, row_mid),
+                    D2D1::RectF(text_left, row.top, text_right, row_mid),
                     g_text_brush);
                 const std::wstring& subtitle =
                     nimblerun::IsDisplayablePath(rows[i].source_path)
@@ -2233,8 +2190,7 @@ void Render(HWND window) {
                     subtitle.c_str(),
                     static_cast<UINT32>(subtitle.size()),
                     g_small_format,
-                    D2D1::RectF(text_left, row_mid, text_right,
-                                row_top + nimblerun::layout::kRowHeightDip),
+                    D2D1::RectF(text_left, row_mid, text_right, row.bottom),
                     g_dim_brush);
                 // NR-024: per-row quick-select digit (design-spec §4.7/§4.9). The
                 // slot is the row's position in the viewport; rows beyond the
@@ -2758,24 +2714,14 @@ void OpenKeyboardItemMenu(HWND window) {
     if (rel < 0) {
         rel = 0;
     }
-    int left = 0;
-    int top = 0;
-    if (g_model->Columns() > 1) {
-        const int columns = g_model->Columns();
-        const int cell_width = static_cast<int>(std::lround(
-            nimblerun::layout::kCellWidthDip * layout.scale));
-        const int cell_height = static_cast<int>(std::lround(
-            nimblerun::layout::kCellHeightDip * layout.scale));
-        const int grid_left = static_cast<int>(std::lround(
-            nimblerun::layout::kGridLeftDip * layout.scale));
-        left = grid_left + (rel % columns) * cell_width;
-        top = layout.list_top + (rel / columns) * cell_height;
-    } else {
-        left = layout.list_left;
-        top = layout.list_top + rel * layout.row_height;
-    }
     RECT client{};
     GetClientRect(window, &client);
+    const float client_height_dip =
+        static_cast<float>(std::max(0L, client.bottom - client.top)) / layout.scale;
+    const nimblerun::layout::SlotRectDip slot = nimblerun::layout::SlotRect(
+        rel, g_model->Columns(), client_height_dip);
+    int left = static_cast<int>(std::lround(slot.left * layout.scale));
+    int top = static_cast<int>(std::lround(slot.top * layout.scale));
     if (left < client.left) {
         left = client.left;
     }

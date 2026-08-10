@@ -115,5 +115,29 @@ float FooterTopDip(float client_height_dip);
 // >= 1. Pure value; no HWND dependency.
 int ViewportRowsForHeightDip(float client_height_dip, int columns);
 
+// NR-133: a slot rect in DIPs. Slot = 0-based index within the visible area;
+// columns == 1 is the single-column list, >1 the grid.
+struct SlotRectDip {
+    float left, top, right, bottom;
+};
+
+// NR-133: the rect of the slot-th visible cell (grid, columns > 1) or row
+// (list, columns == 1) in DIPs, the reverse of SlotAtPointDip. The forward
+// geometry is fixed (cells/rows advance from kGridLeftDip / kListTopDip), so
+// `client_height_dip` exists only to mirror the inverse's footer bound; it is
+// not read. Pure value; no HWND dependency.
+SlotRectDip SlotRect(int slot, int columns, float client_height_dip);
+
+// NR-133: the 0-based slot index of the visible cell/row containing the DIP
+// point, or -1 on a miss. The footer band bound (NR-064/NR-120) uses the same
+// clamped FooterTopDip as SlotRect's inverse and the renderer, and
+// `viewport_rows` carries the model's actually-painted row count (NR-082), so
+// footer and past-viewport points both miss. The inverse of SlotRect: any
+// point inside a slot's rect maps back to that slot. This is the single
+// definition of the slot hit-test geometry, previously four copies in the
+// host. Pure value; no HWND dependency.
+int SlotAtPointDip(float x, float y, int columns, int viewport_rows,
+                   float client_height_dip);
+
 }  // namespace layout
 }  // namespace nimblerun
