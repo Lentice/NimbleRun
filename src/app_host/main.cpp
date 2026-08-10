@@ -35,6 +35,7 @@
 #include "ui/panel_layout.h"
 #include "ui/panel_accessibility.h"
 #include "ui/panel_palette.h"
+#include "ui/pin_drag_state.h"
 #include "ui/quick_select.h"
 #include "win/handoff_registry.h"
 #include "usage/usage_store.h"
@@ -351,15 +352,9 @@ int g_grid_hover_index = -1;
 // so leave-tracking is re-armed only after the leave actually fires.
 bool g_tracking_mouse_leave = false;
 
-// NR-046: pinned-cell drag-reorder state. Window-layer visual state like
-// g_grid_hover_index, never model state: it is reset when the panel hides and
-// when capture is lost, so there is nothing stale to reconcile.
-int g_drag_row = -1;      // pressed pinned row index; -1 = no press captured
-int g_drag_gap = -1;      // pinned row index the dragged item would take;
-                          // -1 = cursor is outside the pinned region (= cancel)
-bool g_dragging = false;  // true once the press passed the system drag threshold
-POINT g_drag_origin{};    // client coords of the press, for the threshold test
-POINT g_drag_cursor{};    // latest client coords, for the ghost icon
+// NR-136: pure pinned-cell drag-reorder state; the host supplies hit testing
+// and system drag thresholds at the message boundary.
+nimblerun::PinDragState g_pin_drag_state;
 
 // NR-066: sub-notch wheel-delta carry for WM_MOUSEWHEEL. Precision touchpads
 // and high-resolution wheels report deltas of 30-60 per message, which divided
@@ -667,31 +662,6 @@ int PinnedRowCount() {
     }
     const int recent_start = g_model->RecentStartIndex();
     return recent_start > 0 ? recent_start : 0;
-}
-
-// NR-046: paint order of the pinned region during a drag: the dragged row is
-// lifted out and a gap (-1) is left where it would land, so the pinned region
-// reflows and the recent region never moves -- the permutation is closed over
-// the pinned region, so the total cell count is unchanged. Empty vector when no
-// drag preview applies.
-std::vector<int> DragPreviewOrder() {
-    if (!(g_dragging && g_drag_row >= 0 && g_drag_gap >= 0)) {
-        return {};
-    }
-    const int pinned = PinnedRowCount();
-    // A catalog swap landing mid-drag can shrink the pinned region below the
-    // pressed row; stay empty then rather than erase/insert out of range. The
-    // ghost paint below guards its own row access the same way.
-    if (g_drag_row >= pinned || g_drag_gap >= pinned) {
-        return {};
-    }
-    std::vector<int> order(static_cast<std::size_t>(pinned));
-    for (std::size_t i = 0; i < order.size(); ++i) {
-        order[i] = static_cast<int>(i);
-    }
-    order.erase(order.begin() + g_drag_row);
-    order.insert(order.begin() + g_drag_gap, -1);
-    return order;
 }
 
 void SyncAccessibility(HWND window);
@@ -1422,7 +1392,8 @@ void Render(HWND window) {
             const int last = std::min(first + visible, static_cast<int>(rows.size()));
             // NR-046: take the drag permutation once, before the loop. Each slot
             // paints the row it maps to; the gap (-1) is the drop target.
-            const std::vector<int> preview = DragPreviewOrder();
+            const std::vector<int> preview =
+                g_pin_drag_state.PreviewOrder(PinnedRowCount());
             const int pinned = PinnedRowCount();
             for (int i = first; i < last; ++i) {
                 const int slot = i - first;
@@ -1454,7 +1425,8 @@ void Render(HWND window) {
                 // NR-046: while a drag is in progress the hover fill is frozen
                 // (the hover index is cleared when the drag starts and is not
                 // recomputed during it), so the reflow is not fighting a hover.
-                const bool hovered = !g_dragging && g_grid_hover_index == row;
+                const bool hovered = !g_pin_drag_state.Dragging() &&
+                    g_grid_hover_index == row;
                 if (selected) {
                     g_render_target->FillRectangle(cell, g_selected_brush);
                 } else if (hovered) {
@@ -1540,15 +1512,17 @@ void Render(HWND window) {
             // follows the cursor; the icon request was already issued by the
             // cell paint. The row guard covers a catalog swap landing mid-drag.
             // NR-059: not a DrawIconOrFallback call site (dim square only on miss -- no initial, no re-request; the cell paint already asked).
-            if (g_dragging && g_drag_row >= 0 &&
-                static_cast<std::size_t>(g_drag_row) < rows.size()) {
+            const int drag_row = g_pin_drag_state.PressedRow();
+            if (g_pin_drag_state.Dragging() && drag_row >= 0 &&
+                static_cast<std::size_t>(drag_row) < rows.size()) {
                 const float scale = dpi_x / nimblerun::layout::kDpi96;
+                const nimblerun::PointPx cursor = g_pin_drag_state.Cursor();
                 const auto ghost_rect = D2D1::RectF(
-                    g_drag_cursor.x / scale - nimblerun::layout::kIconSizeDip / 2.0f,
-                    g_drag_cursor.y / scale - nimblerun::layout::kIconSizeDip / 2.0f,
-                    g_drag_cursor.x / scale + nimblerun::layout::kIconSizeDip / 2.0f,
-                    g_drag_cursor.y / scale + nimblerun::layout::kIconSizeDip / 2.0f);
-                const nimblerun::IconKey key = IconKeyFor(rows[g_drag_row], grid_icon_needed_px);
+                    cursor.x / scale - nimblerun::layout::kIconSizeDip / 2.0f,
+                    cursor.y / scale - nimblerun::layout::kIconSizeDip / 2.0f,
+                    cursor.x / scale + nimblerun::layout::kIconSizeDip / 2.0f,
+                    cursor.y / scale + nimblerun::layout::kIconSizeDip / 2.0f);
+                const nimblerun::IconKey key = IconKeyFor(rows[drag_row], grid_icon_needed_px);
                 const std::wstring encoded = key.Encode();
                 if (const nimblerun::IconBitmap* icon = g_icon_cache ? g_icon_cache->Peek(encoded) : nullptr) {
                     DrawDecodedIcon(*icon, ghost_rect, dpi_x, dpi_y, 0.6f);
@@ -1878,9 +1852,7 @@ void ShowPanel(HWND window) {
     // NR-046: same rule for the pinned-cell drag state; reset it for this show
     // so a drag that never got its mouse-up cannot leave a stale placeholder or
     // ghost behind (WM_CAPTURECHANGED covers the panel hiding mid-drag).
-    g_drag_row = -1;
-    g_drag_gap = -1;
-    g_dragging = false;
+    g_pin_drag_state.Cancel();
     // NR-109: setup failures have no IconResult token to reach the normal
     // completion message; clear them before allowing this show to retry.
     ClearDroppedIconRequests();
@@ -2565,24 +2537,26 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
         // NR-046: a pinned-cell drag replaces the hover arm entirely -- the
         // ghost follows the cursor, the gap tracks the pinned region, and
         // nothing recomputes the hover fill until the gesture ends.
-        if (g_drag_row >= 0) {
+        if (g_pin_drag_state.Active()) {
             const int x = GET_X_LPARAM(l_param);
             const int y = GET_Y_LPARAM(l_param);
-            if (!g_dragging) {
+            const bool was_dragging = g_pin_drag_state.Dragging();
+            const nimblerun::PointPx point{x, y};
+            const int hit_cell = was_dragging ? CellAtPoint(window, x, y) : -1;
+            g_pin_drag_state.OnMove(
+                point, hit_cell, PinnedRowCount(),
+                GetSystemMetrics(SM_CXDRAG), GetSystemMetrics(SM_CYDRAG));
+            if (!was_dragging && g_pin_drag_state.Dragging()) {
                 // Promote to a real drag once the press passes the system drag
                 // threshold; the hover index is cleared so the pressed cell's
                 // fill disappears with the reflow.
-                if (std::abs(x - g_drag_origin.x) >= GetSystemMetrics(SM_CXDRAG) ||
-                    std::abs(y - g_drag_origin.y) >= GetSystemMetrics(SM_CYDRAG)) {
-                    g_dragging = true;
-                    g_grid_hover_index = -1;
-                }
-            }
-            if (g_dragging) {
-                g_drag_cursor.x = x;
-                g_drag_cursor.y = y;
+                g_grid_hover_index = -1;
                 const int cell = CellAtPoint(window, x, y);
-                g_drag_gap = (cell >= 0 && cell < PinnedRowCount()) ? cell : -1;
+                g_pin_drag_state.OnMove(
+                    point, cell, PinnedRowCount(),
+                    GetSystemMetrics(SM_CXDRAG), GetSystemMetrics(SM_CYDRAG));
+            }
+            if (g_pin_drag_state.Dragging()) {
                 // ponytail: the ghost follows the cursor, so every WM_MOUSEMOVE
                 // during a drag invalidates the whole panel. The repaint rate is
                 // bounded by the mouse message rate -- no timer, no busy loop --
@@ -2642,12 +2616,10 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
             // button is released without dragging. A drag threshold cannot
             // exist otherwise (design-spec §4.8).
             SetCapture(window);
-            g_drag_row = cell;
-            g_drag_gap = cell;
-            g_dragging = false;
-            g_drag_origin.x = GET_X_LPARAM(l_param);
-            g_drag_origin.y = GET_Y_LPARAM(l_param);
-            g_drag_cursor = g_drag_origin;
+            g_pin_drag_state.OnPress(
+                cell,
+                {GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param)},
+                PinnedRowCount());
             return 0;
         }
         // Otherwise (recent cell, or list state): select and launch on press,
@@ -2657,33 +2629,33 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
         return 0;
     }
     case WM_LBUTTONUP:
-        if (g_drag_row >= 0) {
+        if (g_pin_drag_state.Active()) {
             // NR-046: end the press. Copies of the drag state and the paint
             // permutation are taken BEFORE ReleaseCapture: the
-            // WM_CAPTURECHANGED it triggers synchronously clears the globals,
+            // WM_CAPTURECHANGED it triggers synchronously clears the state,
             // so the arms below work from the copies and no arm can leave the
-            // state half-set.
-            const int row = g_drag_row;
-            const int gap = g_drag_gap;
-            const bool dragging = g_dragging;
-            const std::vector<int> preview = DragPreviewOrder();
+            // drag half-set.
+            const int row = g_pin_drag_state.PressedRow();
+            const bool dragging = g_pin_drag_state.Dragging();
+            const std::optional<std::vector<int>> reorder =
+                g_pin_drag_state.OnRelease(PinnedRowCount());
             ReleaseCapture();
-            g_drag_row = -1;
-            g_drag_gap = -1;
-            g_dragging = false;
             if (!dragging) {
                 // The press was a click (below the drag threshold): the launch
                 // WM_LBUTTONDOWN deferred for the pinned region.
-                g_model->SelectRow(static_cast<std::size_t>(row));
-                ActivateRow(static_cast<std::size_t>(row), window);
-            } else if (gap >= 0 && gap != row) {
+                if (row >= 0 && row < static_cast<int>(g_model->Rows().size())) {
+                    g_model->SelectRow(static_cast<std::size_t>(row));
+                    ActivateRow(static_cast<std::size_t>(row), window);
+                }
+            } else if (reorder &&
+                       row >= 0 && row < static_cast<int>(g_model->Rows().size())) {
                 // Commit: rebuild the new pin order from the permutation, with
                 // the gap replaced by the dragged row's own id, and persist it
                 // through the store. A failed Save leaves the file untouched
                 // and the view is simply not refreshed (NR-018's pattern).
                 std::vector<std::wstring> order;
-                order.reserve(preview.size());
-                for (const int entry : preview) {
+                order.reserve(reorder->size());
+                for (const int entry : *reorder) {
                     order.push_back(g_model->Rows()[static_cast<std::size_t>(
                         entry == -1 ? row : entry)].stable_id);
                 }
@@ -2703,10 +2675,8 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
         // NR-046: capture lost (Alt+Tab, the panel hiding under the drag,
         // anything taking capture) ends the drag. This is the single escape
         // hatch; no WM_ACTIVATE or Esc bookkeeping is added.
-        if (g_drag_row >= 0) {
-            g_drag_row = -1;
-            g_drag_gap = -1;
-            g_dragging = false;
+        if (g_pin_drag_state.Active()) {
+            g_pin_drag_state.Cancel();
             InvalidateRect(window, nullptr, FALSE);
         }
         return 0;

@@ -233,6 +233,7 @@ add_library(nimblerun_ui STATIC
     src/ui/panel_layout.cpp
     src/ui/panel_accessibility.cpp
     src/ui/panel_palette.cpp
+    src/ui/pin_drag_state.cpp
 )
 
 target_include_directories(nimblerun_ui
