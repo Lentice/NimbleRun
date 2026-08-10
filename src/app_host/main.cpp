@@ -313,6 +313,9 @@ HANDLE OpenTestShowSemaphore() {
 nimblerun::DiagnosticLog* g_diag = nullptr;
 
 std::unique_ptr<nimblerun::RebuildPipeline> g_rebuild_pipeline;
+// NR-146: set when Shutdown(kJoinTimeoutMs) detached the workers on timeout;
+// teardown then must not destroy the pipeline (see wWinMain).
+bool g_rebuild_shutdown_timed_out = false;
 
 std::int64_t MonotonicMs() {
     return static_cast<std::int64_t>(GetTickCount64());
@@ -1789,7 +1792,9 @@ void ShowPanel(HWND window) {
     MONITORINFO monitor_info{};
     monitor_info.cbSize = sizeof(monitor_info);
     const HMONITOR monitor = MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST);
-    GetMonitorInfoW(monitor, &monitor_info);
+    // NR-146: a failed query leaves rcWork zeroed; skip the show rather than
+    // position the panel against a 0x0 work area.
+    if (!GetMonitorInfoW(monitor, &monitor_info)) return;
 
     // NR-015: size the panel in DIPs scaled to the cursor monitor's DPI, then
     // clamp it to the work area. Width/height stay 640x488 DIPs at any DPI, so
@@ -2798,7 +2803,10 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
         // §9.4); on timeout Shutdown detaches it and we continue --
         // the process is exiting, so the OS reclaims the thread, and the
         // registry clear below frees every in-flight payload exactly once.
-        if (g_rebuild_pipeline) g_rebuild_pipeline->Shutdown(nimblerun::RebuildPipeline::kJoinTimeoutMs);
+        if (g_rebuild_pipeline) {
+            g_rebuild_shutdown_timed_out =
+                !g_rebuild_pipeline->Shutdown(nimblerun::RebuildPipeline::kJoinTimeoutMs);
+        }
         // NR-049: a thread can post its result microseconds before we join it,
         // so drain the queue and delete the payloads. Mirrors the existing
         // kIconReadyMessage drain directly above; without it every shutdown
@@ -3205,7 +3213,16 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         provider->Release();
     }
     g_test_show_semaphore = nullptr;
-    g_rebuild_pipeline.reset();
+    if (g_rebuild_shutdown_timed_out) {
+        // NR-146: Shutdown timed out and detached the workers (rebuild_pipeline.cpp
+        // timeout branch, NR-123), which may still be running on this object's
+        // members. Deliberately leak it instead of destroying: the process is
+        // exiting, the OS reclaims the memory, and the detached workers keep a
+        // live `this` for as long as they run.
+        g_rebuild_pipeline.release();
+    } else {
+        g_rebuild_pipeline.reset();
+    }
     com.reset();
     return static_cast<int>(message.wParam);
 }

@@ -99,3 +99,22 @@ rg -n "g_rebuild_pipeline\.(reset|release)" src/app_host/main.cpp
 ```
 
 完成後在文件底部補齊本 item 的 Handoff 交接備註。
+
+## Handoff（2026-08-10）
+
+- 實作內容（3 檔，28+ / 5- 行）：
+  - `src/app_host/main.cpp:1795-1798`：`ShowPanel` 在 `GetMonitorInfoW` 後加
+    `if (!GetMonitorInfoW(monitor, &monitor_info)) return;`（失敗不顯示面板）。
+  - `src/app_host/rebuild_pipeline.h:78-84` 與 `rebuild_pipeline.cpp:242,270`：
+    `Shutdown` 改回傳 `bool finished`（true = 正常 join；false = 逾時 detach）。
+    `~RebuildPipeline` 與 `Start` 的 INFINITE 呼叫永不 detach，忽略回傳值，語意不變。
+  - `src/app_host/main.cpp:315-318`：新增 `g_rebuild_shutdown_timed_out` 旗標；
+    `:2807-2811` WM_DESTROY 分支記錄 `Shutdown` 回傳值；
+    `:3219-3227` teardown 逾時分支 `g_rebuild_pipeline.release()`（deliberate leak，
+    附 NR-123/NR-146 註解），正常分支維持 `reset()`。
+- 決策覆核：item 決策 3 傾向「一行 release()、不做 API 擴充」，但 scope 第 2 項與
+  acceptance 第 1 項要求「逾時分支 release、正常分支 reset」；主 Agent 指示採方案 (a)
+  （`Shutdown` 回傳 `bool finished`，最小改動）。正常關閉路徑行為與先前完全一致。
+- 驗證：Release Ninja llvm-mingw 建置零新增 warning（`main.cpp:1389` 的
+  `target_size` unused warning 為既有，stash 對照確認）；CTest 31/31 全綠（數量不變）。
+- 測試：未新增（兩處皆一行防護，item non-goals 明訂）。

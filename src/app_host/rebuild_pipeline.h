@@ -75,7 +75,12 @@ public:
     LRESULT OnDeliveryFailureMessage(WPARAM w_param, LPARAM l_param);
     void OnDebounceTimer();
     void DrainPending();
-    void Shutdown(DWORD timeout_ms = INFINITE);
+    // NR-146: returns true when the workers joined cleanly, false when the
+    // bounded wait timed out and the workers were detached. A false return
+    // means the caller must keep the object alive (detached workers still
+    // touch members); the destructor and Start() call with INFINITE, which
+    // never detaches, and ignore the result.
+    bool Shutdown(DWORD timeout_ms = INFINITE);
 
     HANDLE FailureEvent() const { return failure_event_; }
     void SetCacheWritesDisabled(bool disabled) { cache_writes_disabled_ = disabled; }

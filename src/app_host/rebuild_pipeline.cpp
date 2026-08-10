@@ -239,7 +239,7 @@ void RebuildPipeline::DrainPending() {
     if (on_repaint_) on_repaint_();
 }
 
-void RebuildPipeline::Shutdown(DWORD timeout_ms) {
+bool RebuildPipeline::Shutdown(DWORD timeout_ms) {
     cancel_.store(true);
     bool finished = true;
     if (timeout_ms != INFINITE) {
@@ -267,6 +267,7 @@ void RebuildPipeline::Shutdown(DWORD timeout_ms) {
         failures_.clear();
         if (failure_event_) ResetEvent(failure_event_);
     }
+    return finished;
 }
 
 } // namespace nimblerun
