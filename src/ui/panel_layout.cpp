@@ -42,5 +42,26 @@ WindowSize ClampWindowSize(float dpi, int work_width, int work_height) {
     return out;
 }
 
+// NR-120: the footer band keeps its (kPanelHeightDip - kFooterTopDip) height
+// and hugs the client bottom, so a clamped client moves the band up instead of
+// clipping the path bar + key hints (design-spec §4.2/§4.9). Full height (488
+// DIP) lands exactly on kFooterTopDip; the kListTopDip floor keeps the band out
+// of the search box even on an absurdly small client.
+float FooterTopDip(float client_height_dip) {
+    const float band_height = kPanelHeightDip - kFooterTopDip;
+    return std::max(kListTopDip, std::min(kFooterTopDip, client_height_dip - band_height));
+}
+
+// NR-120: rows end at the footer band's top edge, never the client bottom, so
+// ViewportRows() shrinks when the panel is clamped below kPanelHeightDip and
+// the footer stays visible. The row height follows the layout state and is
+// unchanged (48 DIP list rows / 96 DIP grid cells).
+int ViewportRowsForHeightDip(float client_height_dip, int columns) {
+    const float row_height = columns > 1 ? kCellHeightDip : kRowHeightDip;
+    const float result_height =
+        std::max(0.0f, FooterTopDip(client_height_dip) - kListTopDip);
+    return std::max(1, static_cast<int>(result_height / row_height));
+}
+
 }  // namespace layout
 }  // namespace nimblerun

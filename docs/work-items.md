@@ -156,9 +156,9 @@
 | NR-117 | Message loop 必須正確處理 GetMessageW error，不得 dispatch 未定義 MSG | 3 | `done` | NR-115 | [NR-117](work-items/NR-117-message-loop-getmessage-error.md) |
 | NR-118 | Watcher/debounce 的部分 rebuild 不得取代冷啟動的完整 rebuild | 3 | `done` | NR-065, NR-081, NR-116 | [NR-118](work-items/NR-118-watcher-supersede-full-rebuild.md) |
 | NR-119 | 設定對話框重入覆寫 g_dialog → null deref crash | 4 | `done` | NR-013, NR-089 | [NR-119](work-items/NR-119-settings-dialog-reentrancy-crash.md) |
-| NR-120 | 高度 clamp 在高 DPI 小螢幕裁掉 footer；§4.9 的 70% 上限未實作 | 3 | `ready` | NR-015, NR-082, NR-103 | [NR-120](work-items/NR-120-panel-height-clamp-footer.md) |
-| NR-121 | catalog.cache 無行數上限＋dedup O(n²) 在 UI 執行緒 | 2 | `ready` | NR-011, NR-057, NR-073, NR-079, NR-113 | [NR-121](work-items/NR-121-catalog-cache-row-cap-dedup-index.md) |
-| NR-122 | favorites/usage 無行數上限：load O(n²)＋Reconcile O(pins×catalog)＋ReadAllBytes 無上限 | 1 | `ready` | NR-057, NR-072, NR-080, NR-096 | [NR-122](work-items/NR-122-store-row-caps-and-hash-loads.md) |
+| NR-120 | 高度 clamp 在高 DPI 小螢幕裁掉 footer；§4.9 的 70% 上限未實作 | 3 | `done` | NR-015, NR-082, NR-103 | [NR-120](work-items/NR-120-panel-height-clamp-footer.md) |
+| NR-121 | catalog.cache 無行數上限＋dedup O(n²) 在 UI 執行緒 | 2 | `done` | NR-011, NR-057, NR-073, NR-079, NR-113 | [NR-121](work-items/NR-121-catalog-cache-row-cap-dedup-index.md) |
+| NR-122 | favorites/usage 無行數上限：load O(n²)＋Reconcile O(pins×catalog)＋ReadAllBytes 無上限 | 1 | `done` | NR-057, NR-072, NR-080, NR-096 | [NR-122](work-items/NR-122-store-row-caps-and-hash-loads.md) |
 | NR-123 | Rebuild thread join 無界：hung Shell call 卡死關閉（§9.4） | 3 | `ready` | NR-049, NR-077, NR-098 | [NR-123](work-items/NR-123-rebuild-join-bounded-wait.md) |
 | NR-124 | §11 診斷缺口：損壞捷徑／缺失資料夾靜默略過、dedup 歧義計數丟棄 | 3 | `ready` | NR-054, NR-063, NR-090, NR-091, NR-092 | [NR-124](work-items/NR-124-catalog-diagnostic-gaps.md) |
 | NR-125 | design-spec §4.1／FR-002 回寫 NR-088 的 Win 鍵決策 | 4 | `done` | NR-086, NR-088, NR-094 | [NR-125](work-items/NR-125-spec-winkey-sync.md) |

@@ -783,12 +783,15 @@ void UpdateViewportRows(HWND window) {
     GetClientRect(window, &client);
     const nimblerun::layout::LayoutPx layout =
         nimblerun::layout::LayoutForDpi(GetDpiForWindow(window));
-    const int list_height =
-        std::max(0, static_cast<int>(client.bottom - client.top) - layout.list_top);
-    const int row_height_px = g_model->Columns() > 1
-        ? static_cast<int>(std::lround(nimblerun::layout::kCellHeightDip * layout.scale))
-        : layout.row_height;
-    g_model->SetViewportRows(std::max(1, list_height / row_height_px));
+    // NR-120: the row area ends at the footer band's top edge, never the client
+    // bottom, so ViewportRows() shrinks when ClampWindowSize shortens the panel
+    // below 488 DIP and the path bar + key hints stay visible (design-spec
+    // §4.2/§4.9). Pure DIP geometry, matching the D2D renderer's coordinate
+    // space; a full-height client yields the same 8 list / 4 grid rows.
+    const float client_height_dip =
+        static_cast<float>(std::max(0L, client.bottom - client.top)) / layout.scale;
+    g_model->SetViewportRows(nimblerun::layout::ViewportRowsForHeightDip(
+        client_height_dip, g_model->Columns()));
     SyncAccessibility(window);
 }
 
@@ -836,10 +839,20 @@ void SyncAccessibility(HWND window) {
                                   layout.search_right, layout.search_bottom});
     }
     snapshot.search_bounds = search;
+    // NR-120: the footer band is pinned to the client bottom (same rule the
+    // renderer and UpdateViewportRows use), so the reported bounds match where
+    // the band actually paints when the panel is clamped below 488 DIP.
+    RECT client_rect{};
+    GetClientRect(window, &client_rect);
+    const float footer_top_dip = nimblerun::layout::FooterTopDip(
+        static_cast<float>(std::max(0L, client_rect.bottom - client_rect.top)) /
+        layout.scale);
+    const float footer_bottom_dip = footer_top_dip +
+        (nimblerun::layout::kPanelHeightDip - nimblerun::layout::kFooterTopDip);
     snapshot.footer_bounds = screen_rect(RECT{0, static_cast<LONG>(
-        std::lround(nimblerun::layout::kFooterTopDip * layout.scale)),
+        std::lround(footer_top_dip * layout.scale)),
         window_rect.right - window_rect.left,
-        static_cast<LONG>(std::lround(nimblerun::layout::kPanelHeightDip * layout.scale))});
+        static_cast<LONG>(std::lround(footer_bottom_dip * layout.scale))});
 
     snapshot.rows.reserve(static_cast<std::size_t>(std::max(0, visible)));
     for (int slot = 0; slot < visible; ++slot) {
@@ -2187,15 +2200,20 @@ void Render(HWND window) {
     // right-aligned "Launch" group + "Scroll"/PgUp/PgDn group. Only key hints
     // live here; no status, version or update text. NR-024 adds the Launch
     // group whose box text depends on the current viewport row count.
-    const float footer_top = nimblerun::layout::kFooterTopDip;
+    // NR-120: the band hugs the client bottom (FooterTopDip), so the path bar +
+    // key hints stay visible when the panel is clamped below 488 DIP; a
+    // full-height client keeps it exactly on kFooterTopDip as before.
+    const D2D1_SIZE_F target_size = g_render_target->GetSize();
+    const float footer_top = nimblerun::layout::FooterTopDip(target_size.height);
     g_render_target->DrawLine(
         D2D1::Point2F(0.0f, footer_top),
         D2D1::Point2F(nimblerun::layout::kPanelWidthDip, footer_top),
         g_dim_brush,
         nimblerun::layout::kFooterDividerWidthDip);
 
-    const float footer_mid =
-        (footer_top + nimblerun::layout::kPanelHeightDip) / 2.0f;
+    const float footer_band_height =
+        nimblerun::layout::kPanelHeightDip - nimblerun::layout::kFooterTopDip;
+    const float footer_mid = footer_top + footer_band_height / 2.0f;
     const float box_top =
         footer_mid - nimblerun::layout::kFooterKeyBoxHeightDip / 2.0f;
     const float box_bottom = box_top + nimblerun::layout::kFooterKeyBoxHeightDip;

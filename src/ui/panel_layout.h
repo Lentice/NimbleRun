@@ -97,5 +97,23 @@ struct WindowSize {
 // on each edge (design-spec §4.9).
 WindowSize ClampWindowSize(float dpi, int work_width, int work_height);
 
+// NR-120: the footer band (divider at kFooterTopDip .. panel bottom) keeps its
+// height and hugs the client's bottom edge, so the path bar + key hints
+// (design-spec §4.2/§4.9) stay visible even when ClampWindowSize shortens the
+// panel below kPanelHeightDip (small screen + high DPI). `client_height_dip`
+// is the client rect height in DIPs; returns the DIP y of the footer band's
+// top edge, which is also the bottom edge of the row area. A full-height
+// 488 DIP client lands exactly on kFooterTopDip; a shorter client moves the
+// band up instead of clipping it. Pure value; no HWND dependency.
+float FooterTopDip(float client_height_dip);
+
+// NR-120: the row count the renderer paints for a client of the given DIP
+// height, so the footer band always stays visible: rows end at the footer
+// band's top edge (FooterTopDip), never the client bottom. `columns` is 1 for
+// the list state and kGridColumns for the grid state; the row height follows
+// the state (48 DIP list rows / 96 DIP grid cells), unchanged. Clamped to
+// >= 1. Pure value; no HWND dependency.
+int ViewportRowsForHeightDip(float client_height_dip, int columns);
+
 }  // namespace layout
 }  // namespace nimblerun

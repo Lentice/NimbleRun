@@ -22,7 +22,9 @@ using nimblerun::PanelAccessibilityProvider;
 using nimblerun::PanelAccessibilitySnapshot;
 using nimblerun::Theme;
 using nimblerun::layout::ClampWindowSize;
+using nimblerun::layout::FooterTopDip;
 using nimblerun::layout::LayoutForDpi;
+using nimblerun::layout::ViewportRowsForHeightDip;
 using nimblerun::layout::kCellHeightDip;
 using nimblerun::layout::kCellWidthDip;
 using nimblerun::layout::kFooterTopDip;
@@ -31,6 +33,8 @@ using nimblerun::layout::kGridLeftDip;
 using nimblerun::layout::kListLeftDip;
 using nimblerun::layout::kListRightDip;
 using nimblerun::layout::kListTopDip;
+using nimblerun::layout::kPanelHeightDip;
+using nimblerun::layout::kRowHeightDip;
 using nimblerun::layout::kRowHintReserveDip;
 using nimblerun::layout::kRowKeyBoxWidthDip;
 using nimblerun::layout::kRowKeyGapDip;
@@ -491,6 +495,86 @@ void TestGridGeometryFits() {
            "result area holds exactly 4 grid rows");
 }
 
+// NR-120: the footer band keeps its height and hugs the client bottom, so the
+// path bar + key hints stay visible even when ClampWindowSize shortens the
+// panel below 488 DIP. A full-height client keeps the band exactly on
+// kFooterTopDip.
+void TestFooterBandAlwaysVisible() {
+    const float band = kPanelHeightDip - kFooterTopDip;
+    Expect(FooterTopDip(kPanelHeightDip) == kFooterTopDip,
+           "full-height client keeps the footer band on kFooterTopDip");
+    // Clamped clients (200%@768 -> 348 DIP, 150%@1366x768 -> 464 DIP, etc.):
+    // band top + band height never exceeds the client and never overlaps the
+    // search box.
+    const float clamped[] = {348.0f, 344.0f, 464.0f, 458.67f, 312.0f, 240.0f};
+    for (const float client : clamped) {
+        Expect(FooterTopDip(client) + band <= client + 0.001f,
+               "footer band stays inside a clamped client");
+        Expect(FooterTopDip(client) >= kListTopDip,
+               "footer band never overlaps the search box");
+    }
+    Expect(FooterTopDip(348.0f) == 316.0f, "200%@768 work area band top is 316");
+    Expect(FooterTopDip(464.0f) == 432.0f, "150%@1366x768 band top is 432");
+}
+
+// NR-120: ViewportRowsForHeightDip shrinks the visible row count so the footer
+// fits; grid/list both covered; the full-height count is unchanged (8 list /
+// 4 grid rows).
+void TestViewportRowsShrinkForFooter() {
+    Expect(ViewportRowsForHeightDip(kPanelHeightDip, 1) == 8, "full list rows");
+    Expect(ViewportRowsForHeightDip(kPanelHeightDip, kGridColumns) == 4,
+           "full grid rows");
+    // 200% @ 1366x768 (work area 728px -> clamped client 348 DIP).
+    Expect(ViewportRowsForHeightDip(348.0f, 1) == 5, "clamped list rows (200%)");
+    Expect(ViewportRowsForHeightDip(348.0f, kGridColumns) == 2,
+           "clamped grid rows (200%)");
+    // 150% @ 1366x768 (work area 728px -> clamped client 464 DIP).
+    Expect(ViewportRowsForHeightDip(464.0f, 1) == 7, "clamped list rows (150%)");
+    Expect(ViewportRowsForHeightDip(464.0f, kGridColumns) == 3,
+           "clamped grid rows (150%)");
+    // The last painted row never crosses the footer band's top edge.
+    const float last_list_bottom =
+        kListTopDip + ViewportRowsForHeightDip(348.0f, 1) * kRowHeightDip;
+    Expect(last_list_bottom <= FooterTopDip(348.0f),
+           "last list row stays above the footer band");
+    const float last_grid_bottom =
+        kListTopDip +
+        ViewportRowsForHeightDip(348.0f, kGridColumns) * kCellHeightDip;
+    Expect(last_grid_bottom <= FooterTopDip(348.0f),
+           "last grid row stays above the footer band");
+}
+
+// NR-120: for every measured DPI x work-area combo the clamped panel leaves
+// the footer band fully inside the client and visible rows shrink instead of
+// letting rows run past the band.
+void TestClampedPanelKeepsFooter() {
+    struct Combo {
+        float dpi;
+        int work_height;
+    };
+    const Combo combos[] = {
+        {96.0f, 728}, {96.0f, 1040}, {96.0f, 1400},
+        {120.0f, 728}, {120.0f, 1040}, {120.0f, 1400},
+        {144.0f, 728}, {144.0f, 1040}, {144.0f, 1400},
+        {192.0f, 720}, {192.0f, 728}, {192.0f, 1040}, {192.0f, 1400},
+    };
+    const float band = kPanelHeightDip - kFooterTopDip;
+    for (const Combo& combo : combos) {
+        const float scale = combo.dpi / 96.0f;
+        const auto size = ClampWindowSize(combo.dpi, 1366, combo.work_height);
+        // WS_POPUP client rect equals the window size; DIP height = px / scale.
+        const float client_dip = static_cast<float>(size.height) / scale;
+        const float footer_top = FooterTopDip(client_dip);
+        Expect(footer_top + band <= client_dip + 0.001f,
+               "footer band inside the clamped client");
+        const float last_list_bottom =
+            kListTopDip + ViewportRowsForHeightDip(client_dip, 1) * kRowHeightDip;
+        Expect(last_list_bottom <= footer_top,
+               "list rows stop at the footer band in every combo");
+    }
+}
+
+
 // NR-029: grid hover needs a visible fill in every theme. Light/dark use the
 // card-level fill; high contrast collapses card to the window background, so
 // the palette resolves hover to the system highlight there (the selection
@@ -534,6 +618,9 @@ int wmain() {
     TestQuickSelectDigitsUnique();
     TestRowHintReserveWidth();
     TestGridGeometryFits();
+    TestFooterBandAlwaysVisible();
+    TestViewportRowsShrinkForFooter();
+    TestClampedPanelKeepsFooter();
     TestGridHoverFillVisible();
     std::printf("NR-015/NR-024/NR-029/NR-111 accessibility check PASSED\n");
     return 0;
