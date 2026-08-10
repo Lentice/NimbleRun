@@ -8,8 +8,6 @@
 #include <shlobj.h>
 
 #include <algorithm>
-#include <cstdint>
-#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -21,19 +19,6 @@ namespace {
 
 constexpr std::wstring_view kFileName = L"settings.ini";
 constexpr int kSchemaVersion = 1;
-
-bool ParseInt(std::wstring_view text, int& out) {
-    // NR-144: the previous copy hand-rolled a wide-string-to-long parse with
-    // errno. ParseInt64 rejects ERANGE outright; the int-range guard keeps a
-    // value wider than int from narrowing into `out`.
-    std::int64_t parsed = 0;
-    if (!ParseInt64(text, parsed) || parsed > std::numeric_limits<int>::max() ||
-        parsed < std::numeric_limits<int>::min()) {
-        return false;
-    }
-    out = static_cast<int>(parsed);
-    return true;
-}
 
 std::optional<bool> ParseBool(std::wstring_view text) {
     const std::wstring value = ToLower(Trim(text));

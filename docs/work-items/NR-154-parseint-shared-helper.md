@@ -72,3 +72,25 @@ rg -n "numeric_limits<int>|INT_MAX" src/settings/settings_store.cpp src/app_host
 ```
 
 完成後在文件底部補齊本 item 的 Handoff 交接備註。
+
+## Handoff 交接備註（2026-08-10，Agent：opencode）
+
+- 完成內容與決策：`src/storage/atomic_text_file.h` 在 `ParseInt64`（`:222-235`）後新增
+  共用 `ParseInt`（`:237-246`，`ParseInt64` + `INT_MIN/INT_MAX` 守門，逐行沿用兩份舊拷貝
+  的形狀，含 `<limits>` include）。`settings_store.cpp` 的匿名 namespace 本地 `ParseInt`
+  （舊 `:25-36`）整段刪除，唯一的呼叫點 `Load()` 的 `ParseInt(value, count)`（`settings_store.cpp:190`）
+  不加任何修改直接解析到共用版；`<cstdint>`／`<limits>` 兩個 include 一併移除（grep 確認
+  檔內已無其他使用）。`settings_dialog.cpp` 的 `ParseCountText`（`:308-317`）保留為薄包裝：
+  轉發 `ParseInt`，失敗回 `-1` 的語意不變（呼叫端 `SettingsDialogProc` 的
+  `SetRecentCount(ParseCountText(buffer))` 只吃 -1 哨兵，故包裝留著比內聯小）；`<cstdint>`／
+  `<limits>` 同樣移除。兩檔原本就 include `atomic_text_file.h`，include 不需新增。
+- 行為零變更：三份解析邏輯逐行等價（dialog 回 -1、store 回 bool 的差異只在外層包裝）。
+- 驗證證據（Release Ninja llvm-mingw）：
+  - configure + build 40/40 物件零新增警告（唯一 warning 為 pre-existing 的
+    `main.cpp:1395` unused `target_size`，與本 item 無關）。
+  - 全量 ctest：31/31 passed（與改動前數量相同）；`ctest -R "settings"`：2/2 passed
+    （`nimblerun_settings_test`、`nimblerun_settings_ui_test`）。
+  - grep：`rg "numeric_limits<int>|INT_MAX"` 於兩檔零命中，守門只剩 `atomic_text_file.h` 一份。
+- 未做：未新增測試目標、未新增斷言（既有 settings 測試即回歸網，無未覆蓋邊緣）。
+- Commit：`NR-154: share the ParseInt int-range guard`。
+

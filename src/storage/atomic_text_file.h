@@ -5,6 +5,7 @@
 #include <cerrno>
 #include <cstdint>
 #include <cstdlib>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -231,6 +232,18 @@ inline bool ParseInt64(std::wstring_view text, std::int64_t& out) {
         return false;
     }
     out = parsed;
+    return true;
+}
+
+// NR-154: int-range guard on top of ParseInt64. A hand-edited store value may
+// be wider than int; the guard rejects it instead of narrowing into `out`.
+inline bool ParseInt(std::wstring_view text, int& out) {
+    std::int64_t parsed = 0;
+    if (!ParseInt64(text, parsed) || parsed > std::numeric_limits<int>::max() ||
+        parsed < std::numeric_limits<int>::min()) {
+        return false;
+    }
+    out = static_cast<int>(parsed);
     return true;
 }
 
