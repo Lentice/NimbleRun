@@ -85,7 +85,7 @@ MVP 必須證明以下三件事：
 - 通知區圖示及基本選單。
 - 常用 App 圖示網格。
 - 釘選／取消釘選 App。
-- 依啟動次數與最近使用時間排列未釘選常用 App。
+- 依最近使用時間排列未釘選常用 App。
 - 輸入時即時過濾 Catalog 中的可啟動 App。
 - 滑鼠、鍵盤與觸控板操作。
 - 啟動 Win32、捷徑與 Microsoft Store／封裝 App。
@@ -750,7 +750,7 @@ flowchart TD
 - `settings.ini` 保存 `catalog_roots`（多個本機絕對路徑及各自的 recursive flag）與 `catalog_extensions`（受支援副檔名清單）；每個值都要經過格式與安全邊界驗證。
 - `favorites.txt`：版本化 UTF-8 TSV（schema=2）。第一行為 `schema=2`；其後每行三欄、以 tab 分隔：`<escaped stable_id>`、`<last_seen_utc epoch 秒>`、`<escaped display_name>`，行序即 pin 順序。欄位值一律經 escaping（反斜線跳脫 `\`、`=`、`\n`、`\r`、`\t`），確保值內的 tab／換行不會破壞欄位或列結構。display_name 欄（NR-062）讓 catalog 中已消失的 pin 仍能依名稱顯示；schema=1（兩欄）舊檔仍可讀取，下次存檔時升級為 schema=2。讀取容許同一 schema 的尾端額外欄位（NR-087）。
 - `usage.tsv`：版本化 UTF-8 TSV（schema=1）；欄位為 stable ID、lifetime total launch count、最後啟動 UTC，以 tab 分隔；同一 stable ID 重複時最後一行取勝（Save 以 stable ID 升冪寫出，重複存檔位元組一致）。
-- `catalog.cache`：可選的版本化二進位 cache，只用於加速，不是真實來源；讀取錯誤可直接刪除並重建。
+- `catalog.cache`：可選的版本化 UTF-8 文字 TSV cache，只用於加速，不是真實來源；讀取錯誤可直接刪除並重建。
 - `icons.cache`：版本化二進位 pack 檔，保存曾顯示過項目的 decoded 圖示（編碼為 PNG）。只用於加速，不是真實來源。採固定大小的雙份檔頭與固定容量索引區，payload 以 append 方式寫入；**每筆索引項與每筆 payload 各自帶 CRC32**，單筆毀損只丟棄該筆，不丟棄整檔。檔頭 magic／版本不符或雙份檔頭皆不可讀時整檔刪除重建。compaction 走 `.tmp` ＋ replace。
 
 不得因為資料量小就引入 SQLite。所有持久資料寫入應先寫 `.tmp`，flush 成功後以 replace 方式提交。此規則針對使用者資料（設定、pins、使用紀錄）。可完全重建的快取（`catalog.cache`、`icons.cache`）允許以 append 方式就地追加，但 compaction 與整檔重寫仍須走 `.tmp` ＋ replace。

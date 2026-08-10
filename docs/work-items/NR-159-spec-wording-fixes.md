@@ -68,3 +68,30 @@ rg -n "最近使用時間|版本化二進位" docs/design-spec.md
 ```
 
 完成後在文件底部補齊本 item 的 Handoff 交接備註。
+
+## Handoff
+
+實作者需記錄兩處改寫後全文、grep 結果、與 §4.2／碼的對應關係。
+
+### 交接區（2026-08-11，實作完成）
+
+本 item 為純文件改動，只改了 `docs/design-spec.md` 兩行與本交接區、tracker（NR-159 行
+`ready` → `done`）。
+
+**§3.1（`docs/design-spec.md:88`）改後全文：**
+
+> - 依最近使用時間排列未釘選常用 App。
+
+（刪「啟動次數與」；與 §4.2 binding「依最後一次啟動時間排序，不使用 usage_score」
+及 `usage_store.cpp:203-206` 一致。）
+
+**§10.2（`docs/design-spec.md:753`）改後全文：**
+
+> - `catalog.cache`：可選的版本化 UTF-8 文字 TSV cache，只用於加速，不是真實來源；讀取錯誤可直接刪除並重建。
+
+（格式形容詞改為「版本化 UTF-8 文字 TSV cache」，對應 `catalog_cache.cpp` 的
+`kSchemaVersion=2` 7 欄 escaping TSV；「只用於加速…重建」維持不動。`icons.cache`
+（`:754`）與 §4.2（`:142-144`）未動。）
+
+**grep 驗證：** `rg "啟動次數與最近使用時間"` 在 `docs/design-spec.md` 零命中；
+`rg "版本化二進位"` 在 §10.2 只剩 icons.cache 行（`:754`）。

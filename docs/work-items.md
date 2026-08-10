@@ -195,7 +195,7 @@
 | NR-156 | main.cpp 生命週期 sequel：g_diag 懸空指標＋設定套用後舊 watch 索引錯位 | 2 | `done` | — | [NR-156](work-items/NR-156-main-lifecycle-sequel.md) |
 | NR-157 | main.cpp UI chrome 重複：tray balloon×2、面板空白選單樣板×2 | 3 | `done` | — | [NR-157](work-items/NR-157-main-ui-chrome-dedup.md) |
 | NR-158 | dedup 同名桶內仍 O(n²)：20k 同名行 cache 使 UI 執行緒停頓 | 2 | `done` | — | [NR-158](work-items/NR-158-dedup-same-name-bucket-bound.md) |
-| NR-159 | design-spec 措辭修正兩處：§3.1 排序描述、§10.2 cache 格式 | 0 | `ready` | — | [NR-159](work-items/NR-159-spec-wording-fixes.md) |
+| NR-159 | design-spec 措辭修正兩處：§3.1 排序描述、§10.2 cache 格式 | 0 | `done` | — | [NR-159](work-items/NR-159-spec-wording-fixes.md) |
 
 ## Dependency lanes
 
