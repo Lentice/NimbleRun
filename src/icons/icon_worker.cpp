@@ -169,11 +169,6 @@ void IconWorker::CancelPrewarm() {
     });
 }
 
-std::size_t IconWorker::QueueDepth() const {
-    std::lock_guard<std::mutex> lock(mutex_);
-    return queue_.size();
-}
-
 void IconWorker::Run() {
     // The worker owns Shell COM on its own thread; it never depends on the UI
     // thread's initialization.

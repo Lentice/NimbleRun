@@ -440,16 +440,9 @@ void TestQueueCapDropsPrewarmWhenFull() {
         worker.Post({Entry(L"p" + std::to_wstring(i)),
                      Key(L"p" + std::to_wstring(i)), false});
     }
-    Expect(worker.QueueDepth() == IconWorker::kMaxQueuedTasks - 1,
-           "the prewarm backlog is one below the cap");
 
     worker.Post({Entry(L"fill"), Key(L"fill"), false});
-    Expect(worker.QueueDepth() == IconWorker::kMaxQueuedTasks,
-           "the next prewarm fills the queue to exactly the cap");
-
     worker.Post({Entry(L"drop"), Key(L"drop"), false});
-    Expect(worker.QueueDepth() == IconWorker::kMaxQueuedTasks,
-           "an over-cap prewarm is dropped, the depth does not grow");
 
     SetEvent(provider.gate);
     std::vector<std::unique_ptr<IconResult>> results;
@@ -458,9 +451,21 @@ void TestQueueCapDropsPrewarmWhenFull() {
            "the in-flight visible and every capped prewarm report a result");
     Expect(results[0]->encoded_key == L"visible|48",
            "the visible request's result is never lost (fallback recovery)");
+    // NR-145: QueueDepth is gone; the bound is proven behaviorally. The exact
+    // result set is the in-flight visible, the 63 prewarms that fit, and the
+    // fill that took the last cap slot -- never the over-cap "drop".
+    std::set<std::wstring> got;
     for (const auto& result : results) {
+        got.insert(result->encoded_key);
         Expect(!result->bitmap.Empty(), "every capped request carries a bitmap");
     }
+    std::set<std::wstring> want{L"visible|48", L"fill|48"};
+    for (int i = 0; i < static_cast<int>(IconWorker::kMaxQueuedTasks) - 1; ++i) {
+        want.insert(L"p" + std::to_wstring(i) + L"|48");
+    }
+    Expect(got == want, "the over-cap prewarm is dropped, its key never reports");
+    Expect(!AnyResultIn(window, results, 150),
+           "no result arrives for the dropped over-cap prewarm");
 
     CloseHandle(provider.gate);
     worker.Stop();
@@ -487,12 +492,8 @@ void TestVisibleEvictsPrewarmWhenFull() {
         worker.Post({Entry(L"p" + std::to_wstring(i)),
                      Key(L"p" + std::to_wstring(i)), false});
     }
-    Expect(worker.QueueDepth() == IconWorker::kMaxQueuedTasks,
-           "the prewarm backlog fills the queue to the cap");
 
     worker.Post({Entry(L"vis"), Key(L"vis"), true});
-    Expect(worker.QueueDepth() == IconWorker::kMaxQueuedTasks,
-           "a visible request evicts a prewarm from the back, depth stays capped");
 
     SetEvent(provider.gate);
     std::vector<std::unique_ptr<IconResult>> results;
@@ -502,6 +503,20 @@ void TestVisibleEvictsPrewarmWhenFull() {
     Expect(results[1]->encoded_key == L"vis|48",
            "the visible request jumped ahead of the queued prewarms and reported");
     Expect(!results[1]->bitmap.Empty(), "the visible request carries a bitmap");
+    // NR-145: QueueDepth is gone; the cap is proven behaviorally. The exact
+    // result set is the gated prewarm, the visible request, and every posted
+    // prewarm except the one the visible request evicted from the back.
+    std::set<std::wstring> got;
+    for (const auto& result : results) {
+        got.insert(result->encoded_key);
+    }
+    std::set<std::wstring> want{L"a|48", L"vis|48"};
+    for (int i = 0; i < static_cast<int>(IconWorker::kMaxQueuedTasks) - 1; ++i) {
+        want.insert(L"p" + std::to_wstring(i) + L"|48");
+    }
+    Expect(got == want, "the visible request evicted exactly one prewarm from the back");
+    Expect(!AnyResultIn(window, results, 150),
+           "no result arrives for the evicted prewarm");
 
     CloseHandle(provider.gate);
     worker.Stop();
@@ -515,7 +530,10 @@ void TestFlushCoalesces() {
     const HWND window = CreateMessageWindow();
     FakeProvider provider;
     provider.gate = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-    IconWorker worker(window, kReadyMessage, provider);
+    // NR-145: QueueDepth is gone; coalescing is proven by the store's flush
+    // counter -- three flush signals must reach IconStore::Flush exactly once.
+    ThrowingStore store(IconStorePaths{});
+    IconWorker worker(window, kReadyMessage, provider, &store);
     worker.Start();
 
     worker.Post({Entry(L"a"), Key(L"a"), false});
@@ -526,15 +544,18 @@ void TestFlushCoalesces() {
     Expect(provider.entered.load(), "worker is blocked on the gated request");
 
     worker.PostFlush({L"a"}, 1);
-    Expect(worker.QueueDepth() == 1, "the first flush task is queued");
     worker.PostFlush({L"b"}, 2);
-    Expect(worker.QueueDepth() == 1, "a second flush replaces, never stacks");
     worker.PostFlush({L"c"}, 3);
-    Expect(worker.QueueDepth() == 1, "a third flush still leaves exactly one");
 
     SetEvent(provider.gate);
     std::vector<std::unique_ptr<IconResult>> results;
     Expect(PumpResults(window, results, 1), "the gated load still reports a result");
+    const DWORD flush_deadline = GetTickCount() + 5000;
+    while (store.flush_calls == 0 && GetTickCount() < flush_deadline) {
+        Sleep(1);
+    }
+    Expect(store.flush_calls == 1,
+           "a flood of flush signals coalesces into a single Flush call");
 
     CloseHandle(provider.gate);
     worker.Stop();
@@ -558,18 +579,24 @@ void TestCancelPrewarmDropsQueuedPrewarm() {
     Expect(provider.entered.load(), "worker is blocked on the gated prewarm request");
     worker.Post({Entry(L"b"), Key(L"b"), false});
     worker.Post({Entry(L"c"), Key(L"c"), false});
-    Expect(worker.QueueDepth() == 2, "two prewarm requests are queued");
 
     worker.CancelPrewarm();
-    Expect(worker.QueueDepth() == 0, "CancelPrewarm drops every queued prewarm");
-
     worker.Post({Entry(L"vis"), Key(L"vis"), true});
-    Expect(worker.QueueDepth() == 1, "a visible request survives CancelPrewarm");
 
     SetEvent(provider.gate);
     std::vector<std::unique_ptr<IconResult>> results;
     Expect(PumpResults(window, results, 2), "the gated prewarm and visible report");
     Expect(results[1]->encoded_key == L"vis|48", "the visible result arrives");
+    // NR-145: QueueDepth is gone; the drop is proven behaviorally -- only the
+    // gated prewarm and the visible request report, never the cancelled ones.
+    std::set<std::wstring> got;
+    for (const auto& result : results) {
+        got.insert(result->encoded_key);
+    }
+    Expect(got == std::set<std::wstring>({L"a|48", L"vis|48"}),
+           "CancelPrewarm dropped every queued prewarm");
+    Expect(!AnyResultIn(window, results, 150),
+           "no result arrives for a cancelled prewarm");
 
     CloseHandle(provider.gate);
     worker.Stop();

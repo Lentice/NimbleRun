@@ -66,8 +66,7 @@ int ViewportRowsForHeightDip(float client_height_dip, int columns) {
 // NR-133: the forward slot geometry, exactly the arithmetic the renderer used
 // (grid: kGridLeftDip + col*kCellWidthDip, kListTopDip + row*kCellHeightDip;
 // list: kListLeftDip/kListRightDip, kListTopDip + slot*kRowHeightDip).
-SlotRectDip SlotRect(int slot, int columns, float client_height_dip) {
-    (void)client_height_dip;  // NR-133: mirrors SlotAtPointDip's footer bound
+SlotRectDip SlotRect(int slot, int columns) {
     SlotRectDip rect{};
     if (columns <= 1) {
         rect.left = kListLeftDip;

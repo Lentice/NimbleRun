@@ -44,6 +44,12 @@ enum class RebuildReason { Explicit, FullRescan, Change };
 
 class RebuildPipeline {
 public:
+    // NR-145: join timeout for Shutdown(), so a worker stuck in an
+    // uninterruptible Shell call never hangs shutdown (design-spec §9.4).
+    // Promoted from private so the call site can reference it instead of
+    // hardcoding the same value.
+    static constexpr DWORD kJoinTimeoutMs = 5000;
+
     using PostToUi = std::function<bool(UINT, WPARAM, LPARAM)>;
     using EnumerateSource = std::function<RebuildEnumeration(
         CatalogSource, const Settings&, std::atomic<bool>*)>;
@@ -82,7 +88,6 @@ public:
 private:
     static constexpr std::int64_t kFullRescanMinIntervalMs = 1000;
     static constexpr std::int64_t kFullRescanNever = -1;
-    static constexpr DWORD kJoinTimeoutMs = 5000;
     static constexpr UINT kRebuildDoneMessage = WM_APP + 8;
     static constexpr UINT kRebuildDeliveryFailedMessage = WM_APP + 10;
 

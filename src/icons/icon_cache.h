@@ -90,7 +90,6 @@ public:
     void SetMaxItems(std::size_t max_items);
 
     std::size_t Size() const { return order_.size(); }
-    void Clear();
 
 private:
     std::size_t max_items_;

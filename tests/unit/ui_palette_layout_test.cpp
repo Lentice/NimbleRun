@@ -583,7 +583,7 @@ void TestSlotGeometryRoundTrips() {
             for (const float height : heights) {
                 const int rows = ViewportRowsForHeightDip(height, column_count);
                 for (int slot = 0; slot < rows * column_count; ++slot) {
-                    const auto rect = SlotRect(slot, column_count, height);
+                    const auto rect = SlotRect(slot, column_count);
                     const float center_x_px =
                         (rect.left + rect.right) * scale / 2.0f;
                     const float center_y_px =

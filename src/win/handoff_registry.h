@@ -52,18 +52,6 @@ public:
         return map_.empty();
     }
 
-    template <typename Pred>
-    void EraseIf(Pred pred) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        for (auto it = map_.begin(); it != map_.end();) {
-            if (pred(*it->second)) {
-                it = map_.erase(it);
-            } else {
-                ++it;
-            }
-        }
-    }
-
 private:
     mutable std::mutex mutex_;
     std::unordered_map<std::uintptr_t, std::unique_ptr<T>> map_;

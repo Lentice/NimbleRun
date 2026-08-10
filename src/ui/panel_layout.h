@@ -123,10 +123,11 @@ struct SlotRectDip {
 
 // NR-133: the rect of the slot-th visible cell (grid, columns > 1) or row
 // (list, columns == 1) in DIPs, the reverse of SlotAtPointDip. The forward
-// geometry is fixed (cells/rows advance from kGridLeftDip / kListTopDip), so
-// `client_height_dip` exists only to mirror the inverse's footer bound; it is
-// not read. Pure value; no HWND dependency.
-SlotRectDip SlotRect(int slot, int columns, float client_height_dip);
+// geometry is fixed (cells/rows advance from kGridLeftDip / kListTopDip).
+// NR-145: the former `client_height_dip` parameter was never read and is gone;
+// the footer bound belongs to the inverse, which genuinely checks it.
+// Pure value; no HWND dependency.
+SlotRectDip SlotRect(int slot, int columns);
 
 // NR-133: the 0-based slot index of the visible cell/row containing the DIP
 // point, or -1 on a miss. The footer band bound (NR-064/NR-120) uses the same

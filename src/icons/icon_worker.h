@@ -120,9 +120,6 @@ public:
     // stale prewarm from an earlier hide cycle. Visible Load tasks and the
     // Flush task survive. No-op when the queue holds none.
     void CancelPrewarm();
-    // NR-099: current queue depth under the mutex. Boundedness diagnostic for
-    // design-spec §9.2 ("queue 有上限並可取消過期請求") and worker tests.
-    std::size_t QueueDepth() const;
 
 private:
     void Run();  // CoInitializeEx(COINIT_APARTMENTTHREADED) ... CoUninitialize
@@ -135,8 +132,7 @@ private:
     IconProvider& provider_;
     IconStore* store_ = nullptr;
     std::thread thread_;
-    // mutable for the const QueueDepth() boundedness probe.
-    mutable std::mutex mutex_;
+    std::mutex mutex_;
     std::condition_variable cv_;
     std::deque<IconTask> queue_;
     bool stop_ = false;

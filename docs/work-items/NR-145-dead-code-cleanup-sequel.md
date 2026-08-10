@@ -86,3 +86,47 @@ rg -n "client_height_dip" src
 ```
 
 完成後在文件底部補齊本 item 的 Handoff 交接備註。
+
+## Handoff（2026-08-10，NR-145 done）
+
+- **SlotRect**：`panel_layout.h:129` 簽名改 `SlotRect(int slot, int columns)`，
+  header 註解補 NR-145 說明；`panel_layout.cpp:69` 刪 `(void)client_height_dip;`。
+  5 個呼叫端全改：`main.cpp:758, 1407, 1549, 2148`＋
+  `tests/unit/ui_palette_layout_test.cpp:586`。`OpenKeyboardItemMenu`（`main.cpp:2147`）
+  的 `client_height_dip` local 因此變 unused，一併刪除（否則新增 warning）。
+  `SlotAtPointDip`／`FooterTopDip` 未動。
+- **QueueDepth**：`icon_worker.h:125` 宣告＋`icon_worker.cpp:172-175` 定義刪除；
+  `mutex_` 的 `mutable` 與其註解一併還原（唯一 const 使用者就是 QueueDepth）。
+  測試改用行為斷言（見下），未把測試幫手塞回 prod class。
+- **IconCache::Clear**：`icon_cache.h:93`／`icon_cache.cpp:57-60` 刪除。
+  實證：`icon_cache_test.cpp` 從未呼叫它（每案例都是新實例），連測試都不需要改。
+- **EraseIf**：`handoff_registry.h:55-65` 刪除，零呼叫者（含測試）；`Erase`／`Clear`
+  保留（`rebuild_pipeline.cpp:264`、`main.cpp:2817` 是 `HandoffRegistry::Clear`，非本
+  item 範圍）。
+- **kJoinTimeoutMs**：偏差——item 正文寫「常數已是 public static」是錯的，實際在
+  `rebuild_pipeline.h` 的 **private** section（:85）。移到 public（:51，含 NR-145
+  註解），`main.cpp:2802` 改
+  `Shutdown(nimblerun::RebuildPipeline::kJoinTimeoutMs)`。
+- **QueueDepth 探針的行為替代**（item 交給實作 agent 決定，此為記錄）：
+  - `TestQueueCapDropsPrewarmWhenFull`／`TestVisibleEvictsPrewarmWhenFull`：
+    QueueDepth 三連斷言改為「結果集合精確等於期望 key set」＋
+    `!AnyResultIn(150ms)` 無額外結果。cap-63 bug 會讓 pump 收不滿 65 個結果
+    （timeout 失敗）、cap-65 bug 會多出第 66 個結果（AnyResultIn 失敗）；
+    drop/evict 的 key 永不報到（key set 失敗）。原測試兩處
+    `PumpResults(kMaxQueuedTasks + 1)` 計數斷言保留。
+  - `TestFlushCoalesces`：改用 `ThrowingStore`（測試檔內既有 helper，`flush_calls`
+    計數）——三次 `PostFlush` 後 worker 只會呼叫一次 `IconStore::Flush`
+    （poll 到 `flush_calls >= 1` 後斷言 `== 1`；`Stop` 的最終 flush 因
+    `pending_puts_` 已被 flush 歸零而不會多算）。未改 `ThrowingStore`。
+  - `TestCancelPrewarmDropsQueuedPrewarm`：深度斷言改為結果集合
+    `{a|48, vis|48}`＋無額外結果；被取消的 b、c 永不報到。
+- **驗證**：Release Ninja llvm-mingw 建置零新 warning；`ctest` 31/31 全綠
+  （測試總數維持 31，未增刪測試目標）；聚焦
+  `ctest -R "icon_worker|icons_cache|dpi_theme"` 3/3。
+- **偏差**：item Agent check 的 `rg "client_height_dip" src → 零命中` 無法達成——
+  該名字仍合法存在於 `FooterTopDip`／`ViewportRowsForHeightDip`／`SlotAtPointDip`
+  簽名與其呼叫端（`main.cpp:647, 686, 739`），而 item 明令不得動
+  `SlotAtPointDip`。驗證改為：`SlotRect` 簽名與所有呼叫端零殘留
+  （`rg "SlotRect\(" src` 只剩 2 參數呼叫）、`QueueDepth|EraseIf` 零命中、
+  `kJoinTimeoutMs` 僅宣告＋call site 兩處、`.Clear()` 僅 2 個合法
+  `HandoffRegistry::Clear`。

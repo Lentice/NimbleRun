@@ -54,9 +54,4 @@ void IconCache::SetMaxItems(std::size_t max_items) {
     }
 }
 
-void IconCache::Clear() {
-    order_.clear();
-    map_.clear();
-}
-
 } // namespace nimblerun

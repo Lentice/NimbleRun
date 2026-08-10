@@ -755,7 +755,7 @@ void SyncAccessibility(HWND window) {
         // paints, scaled to physical px -- one slot geometry for hit-test,
         // paint and accessibility instead of a second copy.
         const nimblerun::layout::SlotRectDip slot_rect =
-            nimblerun::layout::SlotRect(slot, columns, client_height_dip);
+            nimblerun::layout::SlotRect(slot, columns);
         const RECT bounds = {
             static_cast<LONG>(std::lround(slot_rect.left * layout.scale)),
             static_cast<LONG>(std::lround(slot_rect.top * layout.scale)),
@@ -1404,7 +1404,7 @@ void Render(HWND window) {
                 // NR-133: cell geometry is the shared SlotRect -- the single
                 // definition of "where the Nth visible cell is".
                 const nimblerun::layout::SlotRectDip cell_dip =
-                    nimblerun::layout::SlotRect(slot, columns, target_size.height);
+                    nimblerun::layout::SlotRect(slot, columns);
                 const auto cell = D2D1::RectF(
                     cell_dip.left, cell_dip.top,
                     cell_dip.right, cell_dip.bottom);
@@ -1546,7 +1546,7 @@ void Render(HWND window) {
                 // DIPs; the render target scales them to the monitor's DPI
                 // (design-spec §4.9).
                 const nimblerun::layout::SlotRectDip row =
-                    nimblerun::layout::SlotRect(i - first, 1, target_size.height);
+                    nimblerun::layout::SlotRect(i - first, 1);
                 const auto row_rect = D2D1::RectF(
                     row.left, row.top, row.right, row.bottom);
                 const bool selected =
@@ -2144,9 +2144,8 @@ void OpenKeyboardItemMenu(HWND window) {
     }
     RECT client{};
     GetClientRect(window, &client);
-    const float client_height_dip = ClientHeightDip(window, layout.scale);
     const nimblerun::layout::SlotRectDip slot = nimblerun::layout::SlotRect(
-        rel, g_model->Columns(), client_height_dip);
+        rel, g_model->Columns());
     int left = static_cast<int>(std::lround(slot.left * layout.scale));
     int top = static_cast<int>(std::lround(slot.top * layout.scale));
     if (left < client.left) {
@@ -2799,7 +2798,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
         // §9.4); on timeout Shutdown detaches it and we continue --
         // the process is exiting, so the OS reclaims the thread, and the
         // registry clear below frees every in-flight payload exactly once.
-        if (g_rebuild_pipeline) g_rebuild_pipeline->Shutdown(5000);
+        if (g_rebuild_pipeline) g_rebuild_pipeline->Shutdown(nimblerun::RebuildPipeline::kJoinTimeoutMs);
         // NR-049: a thread can post its result microseconds before we join it,
         // so drain the queue and delete the payloads. Mirrors the existing
         // kIconReadyMessage drain directly above; without it every shutdown
