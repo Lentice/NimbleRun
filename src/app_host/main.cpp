@@ -34,6 +34,7 @@
 #include "ui/panel_accessibility.h"
 #include "ui/panel_palette.h"
 #include "ui/quick_select.h"
+#include "win/handoff_registry.h"
 #include "usage/usage_store.h"
 
 #include <d2d1.h>
@@ -345,11 +346,9 @@ struct RebuildResult {
     nimblerun::GenerationDiagnostics diagnostics;
 };
 
-// NR-077: rebuild results are registered in the shared handoff registry
-// (nimblerun::g_handoff_mutex) by the StartRebuild workers before posting;
-// the UI thread moves them out on kRebuildDoneMessage and WM_DESTROY clears
-// whatever is still in flight. Tokens are object addresses.
-std::unordered_map<std::uintptr_t, std::unique_ptr<RebuildResult>> g_rebuild_handoffs;
+// NR-077: rebuild results use their own registry and mutex; icon results have
+// a separate instance so the two unrelated delivery paths do not serialize.
+nimblerun::HandoffRegistry<RebuildResult> g_rebuild_handoffs;
 
 // NR-100: rebuild sources whose result could not be delivered (PostMessageW
 // failed). The worker records "(generation, source)" before the UI thread
@@ -1543,17 +1542,9 @@ void QueueRebuildSourceFailure(HWND window, std::uint64_t generation,
 // completes the source as a setup failure.
 void DiscardPendingRebuildCompletion(std::uint64_t generation,
                                      nimblerun::CatalogSource source) {
-    {
-        std::lock_guard<std::mutex> lock(nimblerun::g_handoff_mutex);
-        for (auto it = g_rebuild_handoffs.begin(); it != g_rebuild_handoffs.end();) {
-            if (it->second && it->second->generation == generation &&
-                it->second->source == source) {
-                it = g_rebuild_handoffs.erase(it);
-            } else {
-                ++it;
-            }
-        }
-    }
+    g_rebuild_handoffs.EraseIf([generation, source](const RebuildResult& result) {
+        return result.generation == generation && result.source == source;
+    });
     {
         std::lock_guard<std::mutex> lock(g_delivery_failure_mutex);
         g_rebuild_delivery_failures.erase(
@@ -1747,17 +1738,8 @@ void StartRebuild(HWND window, std::vector<nimblerun::CatalogSource> sources) {
             // queue (PostMessageW fails) erases the token, which deletes the
             // object -- NR-063's leak guard.
             std::unique_ptr<RebuildResult> owned(result);
-            bool registered = false;
-            {
-                std::lock_guard<std::mutex> lock(nimblerun::g_handoff_mutex);
-                try {
-                    const auto [it, inserted] = g_rebuild_handoffs.emplace(
-                        reinterpret_cast<std::uintptr_t>(result), std::move(owned));
-                    registered = inserted;
-                } catch (...) {
-                }
-            }
-            if (!registered) {
+            const std::uintptr_t token = g_rebuild_handoffs.Register(std::move(owned));
+            if (token == 0) {
                 // NR-106: no registry token exists, so the owned guard releases
                 // the result while the same UI-owned source failure is queued.
                 if (g_diag) {
@@ -1768,11 +1750,10 @@ void StartRebuild(HWND window, std::vector<nimblerun::CatalogSource> sources) {
             }
             if (!PostMessageW(window, kRebuildDoneMessage,
                               static_cast<WPARAM>(generation),
-                              reinterpret_cast<LPARAM>(result))) {
+                              static_cast<LPARAM>(token))) {
                 // NR-063's leak guard: the result never reaches the UI thread,
                 // so erase the token, which deletes the payload.
-                std::lock_guard<std::mutex> lock(nimblerun::g_handoff_mutex);
-                g_rebuild_handoffs.erase(reinterpret_cast<std::uintptr_t>(result));
+                g_rebuild_handoffs.Erase(token);
                 // NR-100: the UI thread must still complete this source for the
                 // generation (ApplySourceFailure keeps its old entries). Record
                 // it under its own mutex and send a payload-free wake-up.
@@ -3007,17 +2988,11 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
         // snapshot only when the whole generation has reported, so applying the
         // result here can never show a partial catalog.
         std::unique_ptr<RebuildResult> result;
-        {
-            // NR-077: lParam is an untrusted token, not a pointer. Move the
-            // registered payload out; an unknown token (a same-integrity
-            // process posting WM_APP+8) is ignored, never dereferenced.
-            std::lock_guard<std::mutex> lock(nimblerun::g_handoff_mutex);
-            const auto it = g_rebuild_handoffs.find(static_cast<std::uintptr_t>(l_param));
-            if (it == g_rebuild_handoffs.end()) {
-                return 0;  // NR-077: not one of our handoffs
-            }
-            result = std::move(it->second);
-            g_rebuild_handoffs.erase(it);
+        // lParam is an untrusted token; Take validates it and returns nullptr
+        // for messages not registered by this process.
+        result = g_rebuild_handoffs.Take(static_cast<std::uintptr_t>(l_param));
+        if (!result) {
+            return 0;
         }
         // NR-063: result_applied names what the boolean actually is -- this
         // source's outcome was accepted for the current generation -- not "the
@@ -3143,17 +3118,9 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
         // still reports (empty bitmap) so the pending set is cleared and the
         // key is never re-requested this panel session.
         std::unique_ptr<nimblerun::IconResult> result;
-        {
-            // NR-077: lParam is an untrusted token, not a pointer. Move the
-            // registered payload out; an unknown token (a same-integrity
-            // process posting WM_APP+9) is ignored, never dereferenced.
-            std::lock_guard<std::mutex> lock(nimblerun::g_handoff_mutex);
-            const auto it = nimblerun::g_icon_handoffs.find(static_cast<std::uintptr_t>(l_param));
-            if (it == nimblerun::g_icon_handoffs.end()) {
-                return 0;  // NR-077: not one of our handoffs
-            }
-            result = std::move(it->second);
-            nimblerun::g_icon_handoffs.erase(it);
+        result = nimblerun::g_icon_handoffs.Take(static_cast<std::uintptr_t>(l_param));
+        if (!result) {
+            return 0;
         }
         g_pending_icon_keys.erase(result->encoded_key);
         if (!result->bitmap.Empty() && g_icon_cache) {
@@ -3509,11 +3476,8 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
         // NR-077: everything still in flight (registered but not yet handled)
         // is released here, in the same UI thread that registered ownership
         // semantics; workers are all joined above so nothing can insert after.
-        {
-            std::lock_guard<std::mutex> lock(nimblerun::g_handoff_mutex);
-            nimblerun::g_icon_handoffs.clear();
-            g_rebuild_handoffs.clear();
-        }
+        nimblerun::g_icon_handoffs.Clear();
+        g_rebuild_handoffs.Clear();
         if (g_search_font) {
             DeleteObject(g_search_font);
             g_search_font = nullptr;

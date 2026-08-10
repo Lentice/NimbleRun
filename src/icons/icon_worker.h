@@ -3,6 +3,7 @@
 #include <windows.h>
 
 #include "icons/icon_cache.h"
+#include "win/handoff_registry.h"
 
 #include <condition_variable>
 #include <cstdint>
@@ -11,7 +12,6 @@
 #include <mutex>
 #include <string>
 #include <thread>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -53,15 +53,15 @@ struct IconResult {
 // tokens it cannot find. Senders register under the mutex before posting and
 // erase on a failed post; the UI thread moves the object out and erases on
 // receipt; WM_DESTROY clears whatever is still in flight.
-inline std::mutex g_handoff_mutex;
-inline std::unordered_map<std::uintptr_t, std::unique_ptr<IconResult>> g_icon_handoffs;
+inline HandoffRegistry<IconResult> g_icon_handoffs;
 // A result that cannot be allocated, registered, or posted has no token for
 // the normal completion path. The worker records its visible key here; the UI
 // drains it on the next event or ShowPanel and clears the pending request.
+inline std::mutex g_icon_dropped_keys_mutex;
 inline std::vector<std::wstring> g_icon_dropped_keys;
 
 inline std::vector<std::wstring> TakeIconDroppedKeys() {
-    std::lock_guard<std::mutex> lock(g_handoff_mutex);
+    std::lock_guard<std::mutex> lock(g_icon_dropped_keys_mutex);
     std::vector<std::wstring> keys = std::move(g_icon_dropped_keys);
     g_icon_dropped_keys.clear();
     return keys;

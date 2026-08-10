@@ -26,6 +26,7 @@ set(NIMBLERUN_TESTS
     "nimblerun_png_codec_test|unit/png_codec_test.cpp|nimblerun_icons"
     # NR-032. Named nimblerun_icon_worker_test so `ctest -R icons` matches.
     "nimblerun_icon_worker_test|unit/icon_worker_test.cpp|nimblerun_icons"
+    "nimblerun_handoff_registry_test|unit/handoff_registry_test.cpp|nimblerun_icons"
     "nimblerun_dpi_theme_accessibility_test|unit/ui_palette_layout_test.cpp|nimblerun_ui nimblerun_panel_model"
     "nimblerun_settings_ui_test|unit/settings_editor_test.cpp|nimblerun_settings nimblerun_usage"
     "nimblerun_startup_option_test|unit/startup_option_test.cpp|nimblerun_settings"

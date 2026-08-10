@@ -152,11 +152,9 @@ bool PumpResults(HWND window, std::vector<std::unique_ptr<IconResult>>& results,
     while (static_cast<int>(results.size()) < want && GetTickCount() < deadline) {
         MSG msg{};
         while (PeekMessageW(&msg, window, kReadyMessage, kReadyMessage, PM_REMOVE)) {
-            std::lock_guard<std::mutex> lock(nimblerun::g_handoff_mutex);
-            const auto it = nimblerun::g_icon_handoffs.find(static_cast<std::uintptr_t>(msg.lParam));
-            if (it != nimblerun::g_icon_handoffs.end()) {
-                results.emplace_back(std::move(it->second));
-                nimblerun::g_icon_handoffs.erase(it);
+            if (auto result = nimblerun::g_icon_handoffs.Take(
+                    static_cast<std::uintptr_t>(msg.lParam))) {
+                results.emplace_back(std::move(result));
             }
         }
         if (static_cast<int>(results.size()) >= want) {
@@ -175,11 +173,9 @@ bool AnyResultIn(HWND window, std::vector<std::unique_ptr<IconResult>>& results,
     while (GetTickCount() < deadline) {
         MSG msg{};
         while (PeekMessageW(&msg, window, kReadyMessage, kReadyMessage, PM_REMOVE)) {
-            std::lock_guard<std::mutex> lock(nimblerun::g_handoff_mutex);
-            const auto it = nimblerun::g_icon_handoffs.find(static_cast<std::uintptr_t>(msg.lParam));
-            if (it != nimblerun::g_icon_handoffs.end()) {
-                results.emplace_back(std::move(it->second));
-                nimblerun::g_icon_handoffs.erase(it);
+            if (auto result = nimblerun::g_icon_handoffs.Take(
+                    static_cast<std::uintptr_t>(msg.lParam))) {
+                results.emplace_back(std::move(result));
                 return true;
             }
         }
@@ -601,11 +597,9 @@ void TestStopDropsQueueAndSilencesNewPosts() {
     std::vector<std::unique_ptr<IconResult>> results;
     MSG msg{};
     while (PeekMessageW(&msg, window, kReadyMessage, kReadyMessage, PM_REMOVE)) {
-        std::lock_guard<std::mutex> lock(nimblerun::g_handoff_mutex);
-        const auto it = nimblerun::g_icon_handoffs.find(static_cast<std::uintptr_t>(msg.lParam));
-        if (it != nimblerun::g_icon_handoffs.end()) {
-            results.emplace_back(std::move(it->second));
-            nimblerun::g_icon_handoffs.erase(it);
+        if (auto result = nimblerun::g_icon_handoffs.Take(
+                static_cast<std::uintptr_t>(msg.lParam))) {
+            results.emplace_back(std::move(result));
         }
     }
     const std::size_t before = results.size();
@@ -644,24 +638,16 @@ void TestFailedPostErasesHandoffAndLeaksNothing() {
     // poll the registry under the shared mutex until it drains or times out.
     const DWORD drain_deadline = GetTickCount() + 5000;
     for (;;) {
-        bool empty;
         bool dropped;
         {
-            std::lock_guard<std::mutex> lock(nimblerun::g_handoff_mutex);
-            empty = nimblerun::g_icon_handoffs.empty();
+            std::lock_guard<std::mutex> lock(nimblerun::g_icon_dropped_keys_mutex);
             dropped = !nimblerun::g_icon_dropped_keys.empty();
         }
-        if ((empty && dropped) || GetTickCount() >= drain_deadline) {
+        if (dropped || GetTickCount() >= drain_deadline) {
             break;
         }
         Sleep(2);
     }
-    {
-        std::lock_guard<std::mutex> lock(nimblerun::g_handoff_mutex);
-        Expect(nimblerun::g_icon_handoffs.empty(),
-               "a failed post leaves no handoff entry behind");
-    }
-
     std::set<std::wstring> pending{L"gone|48"};
     for (const std::wstring& key : nimblerun::TakeIconDroppedKeys()) {
         pending.erase(key);

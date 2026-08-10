@@ -44,7 +44,7 @@ void RememberDroppedRequest(const IconRequest& request, std::wstring encoded,
             encoded = request.key.Encode();
         }
         {
-            std::lock_guard<std::mutex> lock(g_handoff_mutex);
+            std::lock_guard<std::mutex> lock(g_icon_dropped_keys_mutex);
             g_icon_dropped_keys.push_back(std::move(encoded));
         }
         // Reuse the normal result message as an event-driven drain signal. If
@@ -304,16 +304,8 @@ void IconWorker::Run() {
         // message queue (PostMessageW fails) erases the token, which deletes
         // the object -- the old "window gone" leak guard.
         std::unique_ptr<IconResult> owned(result);
-        bool registered = false;
-        {
-            std::lock_guard<std::mutex> lock(g_handoff_mutex);
-            try {
-                const auto [it, inserted] = g_icon_handoffs.emplace(
-                    reinterpret_cast<std::uintptr_t>(result), std::move(owned));
-                registered = inserted;
-            } catch (...) {
-            }
-        }
+        const std::uintptr_t token = g_icon_handoffs.Register(std::move(owned));
+        const bool registered = token != 0;
         if (!registered) {
             // NR-097/109: a bad_alloc during registry insertion must not
             // terminate the process or leak the object. The owned guard still
@@ -324,11 +316,10 @@ void IconWorker::Run() {
             continue;
         }
         if (!PostMessageW(target_, result_message_, 0,
-                          reinterpret_cast<LPARAM>(result))) {
+                          static_cast<LPARAM>(token))) {
             RememberDroppedRequest(request, std::move(result->encoded_key), store_,
                                    target_, result_message_);
-            std::lock_guard<std::mutex> lock(g_handoff_mutex);
-            g_icon_handoffs.erase(reinterpret_cast<std::uintptr_t>(result));
+            g_icon_handoffs.Erase(token);
         }
 
         // NR-036 timing 2: when the request queue drains and there is buffered
