@@ -207,7 +207,7 @@ int PanelModel::RowForVisibleSlot(int slot) const {
     return row < static_cast<int>(rows_.size()) ? row : -1;
 }
 
-std::vector<std::wstring> PanelModel::EmptyStatePrewarmIds(std::size_t max_items) const {
+std::vector<AppEntry> PanelModel::EmptyStatePrewarmEntries(std::size_t max_items) const {
     // Prewarming only applies to the state the next panel show starts in
     // (empty query, NR-037); a non-empty query is a defensive no-op, and
     // max_items == 0 means "prewarm nothing".
@@ -220,16 +220,16 @@ std::vector<std::wstring> PanelModel::EmptyStatePrewarmIds(std::size_t max_items
     // page size (design-spec §4.3, 24 cells): §FR-009 forbids predecoding the
     // whole catalog, so the caller passes that one-page bound.
     const std::size_t count = std::min(max_items, rows_.size());
-    std::vector<std::wstring> ids;
-    ids.reserve(count);
+    std::vector<AppEntry> entries;
+    entries.reserve(count);
     for (std::size_t i = 0; i < count; ++i) {
         // NR-062: a missing-pin placeholder has no icon to prewarm (non-goal:
         // no icon caching/prewarm for placeholder tiles).
         if (!IsMissingPin(rows_[i])) {
-            ids.push_back(rows_[i].stable_id);
+            entries.push_back(rows_[i]);
         }
     }
-    return ids;
+    return entries;
 }
 
 void PanelModel::SelectRow(std::size_t index) {

@@ -280,6 +280,25 @@ target_link_libraries(nimblerun_panel_model
         nimblerun_search
 )
 
+add_library(nimblerun_icon_request_session STATIC
+    src/app_host/icon_request_session.cpp
+)
+
+target_include_directories(nimblerun_icon_request_session
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+target_compile_definitions(nimblerun_icon_request_session
+    PRIVATE
+        UNICODE
+        _UNICODE
+        WIN32_LEAN_AND_MEAN
+        NOMINMAX
+        WINVER=0x0A00
+        _WIN32_WINNT=0x0A00
+)
+
 add_library(nimblerun_snapshot_assembler STATIC
     src/app_host/snapshot_assembler.cpp
 )
@@ -359,6 +378,7 @@ target_link_libraries(NimbleRun
         nimblerun_diagnostics
         nimblerun_snapshot_assembler
         nimblerun_rebuild_pipeline
+        nimblerun_icon_request_session
         nimblerun_hotkey
         d2d1
         dwrite
@@ -390,6 +410,7 @@ if(MSVC OR CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
     target_compile_options(nimblerun_usage PRIVATE /W4 /permissive- /EHsc)
     target_compile_options(nimblerun_pins PRIVATE /W4 /permissive- /EHsc)
     target_compile_options(nimblerun_panel_model PRIVATE /W4 /permissive- /EHsc)
+    target_compile_options(nimblerun_icon_request_session PRIVATE /W4 /permissive- /EHsc)
     target_compile_options(nimblerun_snapshot_assembler PRIVATE /W4 /permissive- /EHsc)
     target_compile_options(nimblerun_diagnostics PRIVATE /W4 /permissive- /EHsc)
     target_compile_options(nimblerun_icons PRIVATE /W4 /permissive- /EHsc)
@@ -406,6 +427,7 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     target_compile_options(nimblerun_usage PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(nimblerun_pins PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(nimblerun_panel_model PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(nimblerun_icon_request_session PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(nimblerun_snapshot_assembler PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(nimblerun_diagnostics PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(nimblerun_icons PRIVATE -Wall -Wextra -Wpedantic)

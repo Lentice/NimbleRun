@@ -5,6 +5,7 @@
 #include <dwmapi.h>
 
 #include "app_host/catalog_watcher.h"
+#include "app_host/icon_request_session.h"
 #include "app_host/rebuild_pipeline.h"
 #include "app_host/hotkey.h"
 #include "app_host/message_loop.h"
@@ -50,7 +51,6 @@
 #include <iterator>
 #include <memory>
 #include <mutex>
-#include <set>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -239,14 +239,9 @@ nimblerun::IconCache* g_icon_cache = nullptr;
 // NR-032: one background thread owns Shell COM; the UI thread only posts
 // requests and receives decoded bitmaps through kIconReadyMessage.
 nimblerun::IconWorker* g_icon_worker = nullptr;
-// Encoded keys with a request already in flight; a Render() miss on one of
-// these does not re-post. UI-thread owned, never cleared on show (those
-// requests are still flying).
-std::set<std::wstring> g_pending_icon_keys;
-// Encoded keys already handed to the provider this panel session, so a failed
-// icon is not re-requested on every paint. Cleared on each show so a
-// transient failure is retried the next time the panel opens.
-std::set<std::wstring> g_requested_icon_keys;
+// UI-thread-owned icon request state. Pending requests survive a show because
+// they are still in flight; failed keys are reset by OnShow().
+nimblerun::IconRequestSession g_icon_request_session;
 
 HWND g_search_edit = nullptr;
 WNDPROC g_search_original_proc = nullptr;
@@ -899,12 +894,12 @@ void StartRebuild(HWND window, std::vector<nimblerun::CatalogSource> sources);
 // thing keeping this compatible with §FR-009 "Catalog 不預解碼所有圖示";
 // raising it predecodes more than the next shown page.
 void PrewarmEmptyStatePage(HWND window) {
-    if (!g_model || !g_icon_worker || !g_icon_cache || !g_refresh) {
+    if (!g_model || !g_icon_worker || !g_icon_cache) {
         return;
     }
-    const std::vector<std::wstring> ids =
-        g_model->EmptyStatePrewarmIds(nimblerun::kIconCacheWorkingSetItems);
-    if (ids.empty()) {
+    const std::vector<nimblerun::AppEntry> entries =
+        g_model->EmptyStatePrewarmEntries(nimblerun::kIconCacheWorkingSetItems);
+    if (entries.empty()) {
         return;
     }
     // Grid variant for the current monitor DPI: the next panel show always
@@ -915,37 +910,23 @@ void PrewarmEmptyStatePage(HWND window) {
         nimblerun::layout::LayoutForDpi(GetDpiForWindow(window));
     const int needed_px = static_cast<int>(std::lround(
         nimblerun::layout::kIconSizeDip * layout.scale));
-    for (const std::wstring& id : ids) {
-        // Resolve through the current catalog snapshot; a pin for an app
-        // absent from the catalog is skipped (design-spec §FR-011).
-        const nimblerun::AppEntry* entry = nullptr;
-        for (const nimblerun::AppEntry& candidate : g_refresh->Snapshot()) {
-            if (candidate.stable_id == id) {
-                entry = &candidate;
-                break;
-            }
-        }
-        if (!entry) {
-            continue;
-        }
-        const nimblerun::IconKey key{entry->stable_id,
+    for (const nimblerun::AppEntry& entry : entries) {
+        const nimblerun::IconKey key{entry.stable_id,
                                      nimblerun::IconVariantForPixels(needed_px)};
         const std::wstring encoded = key.Encode();
-        // Skip keys already cached, in flight, or failed this panel session so
-        // repeated hide/show cycles never re-post the same 24 keys.
-        if (g_icon_cache->Peek(encoded) != nullptr ||
-            g_pending_icon_keys.count(encoded) != 0 ||
-            g_requested_icon_keys.count(encoded) != 0) {
+        // Prewarm is low-priority queue work; only visible requests enter the
+        // session's pending set because the worker reports dropped visible
+        // keys through TakeIconDroppedKeys().
+        if (!g_icon_request_session.ShouldRequest(
+                encoded, g_icon_cache->Peek(encoded) != nullptr)) {
             continue;
         }
-        g_icon_worker->Post({*entry, key, /*visible=*/false});
+        g_icon_worker->Post({entry, key, /*visible=*/false});
     }
 }
 
 void ClearDroppedIconRequests() {
-    for (const std::wstring& key : nimblerun::TakeIconDroppedKeys()) {
-        g_pending_icon_keys.erase(key);
-    }
+    g_icon_request_session.DrainDropped(nimblerun::TakeIconDroppedKeys());
 }
 
 // Defined below, next to the panel-refresh path it is also part of; launch and
@@ -1091,17 +1072,14 @@ nimblerun::IconKey IconKeyFor(const nimblerun::AppEntry& entry, int needed_px) {
 // and the work stays off the UI thread; the cache hit path never posts.
 void RequestVisibleIcon(const nimblerun::AppEntry& entry, const nimblerun::IconKey& key,
                         const std::wstring& encoded) {
-    if (!g_icon_worker || g_pending_icon_keys.count(encoded) != 0 ||
-        g_requested_icon_keys.count(encoded) != 0) {
+    if (!g_icon_worker || !g_icon_request_session.ShouldRequest(encoded, false)) {
         return;
     }
     try {
-        g_pending_icon_keys.insert(encoded);
-        if (!g_icon_worker->Post({entry, key, /*visible=*/true, encoded})) {
-            g_pending_icon_keys.erase(encoded);
+        if (g_icon_worker->Post({entry, key, /*visible=*/true, encoded})) {
+            g_icon_request_session.BeginRequest(encoded);
         }
     } catch (...) {
-        g_pending_icon_keys.erase(encoded);
     }
 }
 
@@ -1907,9 +1885,10 @@ void ShowPanel(HWND window) {
     // completion message; clear them before allowing this show to retry.
     ClearDroppedIconRequests();
     // NR-012/NR-032: allow a retry of transient icon failures on this open.
-    // The pending set is deliberately NOT cleared: those requests are still in
-    // flight and their results keep landing in the LRU (that is the prewarm).
-    g_requested_icon_keys.clear();
+    // IconRequestSession::OnShow() deliberately leaves pending requests alone:
+    // those requests are still in flight and their results keep landing in the
+    // LRU (that is the prewarm).
+    g_icon_request_session.OnShow();
     // NR-011: AppsFolder is on-demand — when the panel is shown and the last
     // successful enumeration is older than 10 minutes, rebuild it in the
     // background; no polling and never a blocking scan on this path. NR-028:
@@ -2510,7 +2489,8 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
         if (!result) {
             return 0;
         }
-        g_pending_icon_keys.erase(result->encoded_key);
+        g_icon_request_session.OnResult(result->encoded_key,
+                                        !result->bitmap.Empty());
         if (!result->bitmap.Empty() && g_icon_cache) {
             // Late results still land in the LRU even when the panel is hidden
             // or the query changed (that is the prewarm effect); only a visible
@@ -2519,10 +2499,6 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
             if (IsWindowVisible(window)) {
                 InvalidateRect(window, nullptr, FALSE);
             }
-        } else if (result->bitmap.Empty()) {
-            // NR-012: remember the failure so the fallback stays and the Shell
-            // is not re-queried every frame, until the next ShowPanel.
-            g_requested_icon_keys.insert(result->encoded_key);
         }
         return 0;
     }

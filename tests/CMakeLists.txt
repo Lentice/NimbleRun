@@ -27,6 +27,7 @@ set(NIMBLERUN_TESTS
     # NR-032. Named nimblerun_icon_worker_test so `ctest -R icons` matches.
     "nimblerun_icon_worker_test|unit/icon_worker_test.cpp|nimblerun_icons"
     "nimblerun_handoff_registry_test|unit/handoff_registry_test.cpp|nimblerun_icons"
+    "nimblerun_icon_request_session_test|unit/icon_request_session_test.cpp|nimblerun_icon_request_session"
     "nimblerun_dpi_theme_accessibility_test|unit/ui_palette_layout_test.cpp|nimblerun_ui nimblerun_panel_model"
     "nimblerun_settings_ui_test|unit/settings_editor_test.cpp|nimblerun_settings nimblerun_usage"
     "nimblerun_startup_option_test|unit/startup_option_test.cpp|nimblerun_settings"
@@ -44,7 +45,7 @@ set(NIMBLERUN_TESTS
 # The exception block below must stay in its original registration position so
 # ctest test numbers do not shift; the loop is split around it.
 list(SUBLIST NIMBLERUN_TESTS 0 10 NIMBLERUN_TESTS_HEAD)
-list(SUBLIST NIMBLERUN_TESTS 10 15 NIMBLERUN_TESTS_TAIL)
+list(SUBLIST NIMBLERUN_TESTS 10 16 NIMBLERUN_TESTS_TAIL)
 
 foreach(entry IN LISTS NIMBLERUN_TESTS_HEAD)
     string(REPLACE "|" ";" parts "${entry}")

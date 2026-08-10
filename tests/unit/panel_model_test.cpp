@@ -659,10 +659,10 @@ void TestGridRowForVisibleSlot() {
 }
 
 // NR-037: the empty-query page prewarm is a pure const query over rows_.
-// It returns the stable IDs of the first page (pinned first, then recent)
-// capped at the caller's page-size bound, and never mutates model state.
+// It returns copies of the first page (pinned first, then recent) capped at
+// the caller's page-size bound, and never mutates model state.
 
-void TestEmptyStatePrewarmIdsPinsThenRecent() {
+void TestEmptyStatePrewarmEntriesPinsThenRecent() {
     const std::vector<AppEntry> catalog = CatalogOf(8);
     std::vector<AppEntry> recent;
     for (int i = 3; i < 8; ++i) {
@@ -670,17 +670,18 @@ void TestEmptyStatePrewarmIdsPinsThenRecent() {
     }
     PanelModel model(&catalog, std::move(recent));
     model.SetPins(Pins({L"id0", L"id1", L"id2"}));
-    const std::vector<std::wstring> ids = model.EmptyStatePrewarmIds(24);
-    Expect(ids.size() == 8, "3 pins + 5 recent prewarm 8 ids");
-    Expect(ids.size() == model.Rows().size(), "prewarm count matches the row count");
-    for (std::size_t i = 0; i < ids.size(); ++i) {
-        Expect(ids[i] == model.Rows()[i].stable_id,
-               "prewarm ids match rows_ order (pins first)");
+    const std::vector<AppEntry> entries = model.EmptyStatePrewarmEntries(24);
+    Expect(entries.size() == 8, "3 pins + 5 recent prewarm 8 entries");
+    Expect(entries.size() == model.Rows().size(), "prewarm count matches the row count");
+    for (std::size_t i = 0; i < entries.size(); ++i) {
+        Expect(entries[i].stable_id == model.Rows()[i].stable_id,
+               "prewarm entries match rows_ order (pins first)");
     }
-    Expect(ids[0] == L"id0" && ids[2] == L"id2", "pins lead in pin order");
+    Expect(entries[0].stable_id == L"id0" && entries[2].stable_id == L"id2",
+           "pins lead in pin order");
 }
 
-void TestEmptyStatePrewarmIdsCapsAtOnePage() {
+void TestEmptyStatePrewarmEntriesCapsAtOnePage() {
     const std::vector<AppEntry> catalog = CatalogOf(40);
     std::vector<nimblerun::PinRecord> pins;
     for (int i = 0; i < 40; ++i) {
@@ -688,33 +689,33 @@ void TestEmptyStatePrewarmIdsCapsAtOnePage() {
     }
     PanelModel model(&catalog, {});
     model.SetPins(pins);
-    const std::vector<std::wstring> ids = model.EmptyStatePrewarmIds(24);
-    Expect(ids.size() == 24, "40 pinned items cap at exactly one page of 24");
-    Expect(ids.front() == L"id0" && ids.back() == L"id23",
+    const std::vector<AppEntry> entries = model.EmptyStatePrewarmEntries(24);
+    Expect(entries.size() == 24, "40 pinned items cap at exactly one page of 24");
+    Expect(entries.front().stable_id == L"id0" && entries.back().stable_id == L"id23",
            "the first page is the first 24 pins in pin order");
 }
 
-void TestEmptyStatePrewarmIdsZeroMax() {
+void TestEmptyStatePrewarmEntriesZeroMax() {
     const std::vector<AppEntry> catalog = CatalogOf(5);
     PanelModel model(&catalog, catalog);
-    Expect(model.EmptyStatePrewarmIds(0).empty(), "max_items 0 returns empty");
+    Expect(model.EmptyStatePrewarmEntries(0).empty(), "max_items 0 returns empty");
 }
 
-void TestEmptyStatePrewarmIdsNonEmptyQuery() {
+void TestEmptyStatePrewarmEntriesNonEmptyQuery() {
     const std::vector<AppEntry> catalog = CatalogOf(10);
     PanelModel model(&catalog, catalog);
     model.SetQuery(L"App");
     Expect(!model.Rows().empty(), "query has rows");
-    Expect(model.EmptyStatePrewarmIds(24).empty(), "non-empty query returns empty");
+    Expect(model.EmptyStatePrewarmEntries(24).empty(), "non-empty query returns empty");
 }
 
-void TestEmptyStatePrewarmIdsEmptyCatalog() {
+void TestEmptyStatePrewarmEntriesEmptyCatalog() {
     const std::vector<AppEntry> catalog;
     PanelModel model(&catalog, {});
-    Expect(model.EmptyStatePrewarmIds(24).empty(), "empty catalog returns empty");
+    Expect(model.EmptyStatePrewarmEntries(24).empty(), "empty catalog returns empty");
 }
 
-void TestEmptyStatePrewarmIdsIsConst() {
+void TestEmptyStatePrewarmEntriesIsConst() {
     const std::vector<AppEntry> catalog = CatalogOf(10);
     PanelModel model(&catalog, catalog);
     model.SetPins(Pins({L"id0", L"id1"}));
@@ -723,8 +724,8 @@ void TestEmptyStatePrewarmIdsIsConst() {
     const int first_before = model.FirstVisibleRow();
     const std::size_t rows_before = model.Rows().size();
     const PanelModel& const_model = model;
-    (void)const_model.EmptyStatePrewarmIds(24);
-    (void)const_model.EmptyStatePrewarmIds(5);
+    (void)const_model.EmptyStatePrewarmEntries(24);
+    (void)const_model.EmptyStatePrewarmEntries(5);
     Expect(model.SelectionIndex() == selection_before,
            "prewarm query leaves the selection untouched");
     Expect(model.FirstVisibleRow() == first_before,
@@ -735,24 +736,35 @@ void TestEmptyStatePrewarmIdsIsConst() {
 // NR-062 overrode the old "absent pin is hidden" behavior: an absent pin now
 // shows as a placeholder row in Rows() (see TestMissingPinBecomesPlaceholder
 // below), but it still has no icon to prewarm (non-goal: no icon caching or
-// prewarm for placeholder tiles), so it must stay out of the prewarm id list.
-void TestEmptyStatePrewarmIdsAbsentPinSkipped() {
+// prewarm for placeholder tiles), so it must stay out of the prewarm entries.
+void TestEmptyStatePrewarmEntriesAbsentPinSkipped() {
     const std::vector<AppEntry> catalog = CatalogOf(12);
     PanelModel model(&catalog, catalog);
     model.SetPins(Pins({L"id0", L"ghost", L"id1"}));
-    const std::vector<std::wstring> ids = model.EmptyStatePrewarmIds(24);
-    Expect(ids.size() == 12, "the placeholder row is excluded from the prewarm ids");
-    for (const std::wstring& id : ids) {
-        Expect(id != L"ghost", "an absent pin's id is never prewarmed");
+    const std::vector<AppEntry> entries = model.EmptyStatePrewarmEntries(24);
+    Expect(entries.size() == 12, "the placeholder row is excluded from the prewarm entries");
+    for (const AppEntry& prewarm_entry : entries) {
+        Expect(prewarm_entry.stable_id != L"ghost", "an absent pin's id is never prewarmed");
         bool found = false;
-        for (const AppEntry& entry : catalog) {
-            if (entry.stable_id == id) {
+        for (const AppEntry& catalog_entry : catalog) {
+            if (catalog_entry.stable_id == prewarm_entry.stable_id) {
                 found = true;
                 break;
             }
         }
-        Expect(found, "every prewarm id exists in the catalog snapshot");
+        Expect(found, "every prewarm entry exists in the catalog snapshot");
     }
+}
+
+void TestEmptyStatePrewarmEntriesKeepOrderAndFilterMissingPin() {
+    const std::vector<AppEntry> catalog = CatalogOf(3);
+    PanelModel model(&catalog, {catalog[2]});
+    model.SetPins(Pins({L"id1", L"ghost"}));
+
+    const std::vector<AppEntry> entries = model.EmptyStatePrewarmEntries(24);
+    Expect(entries.size() == 2, "prewarm keeps real rows and skips the placeholder");
+    Expect(entries[0].stable_id == L"id1" && entries[1].stable_id == L"id2",
+           "prewarm preserves pinned-then-recent order");
 }
 
 // NR-040: RecentStartIndex() marks where the recent region begins in the
@@ -1059,13 +1071,14 @@ int wmain() {
     TestGridFewerThanPageNoScroll();
     TestGridQueryTransitionResetsViewport();
     TestGridRowForVisibleSlot();
-    TestEmptyStatePrewarmIdsPinsThenRecent();
-    TestEmptyStatePrewarmIdsCapsAtOnePage();
-    TestEmptyStatePrewarmIdsZeroMax();
-    TestEmptyStatePrewarmIdsNonEmptyQuery();
-    TestEmptyStatePrewarmIdsEmptyCatalog();
-    TestEmptyStatePrewarmIdsIsConst();
-    TestEmptyStatePrewarmIdsAbsentPinSkipped();
+    TestEmptyStatePrewarmEntriesPinsThenRecent();
+    TestEmptyStatePrewarmEntriesCapsAtOnePage();
+    TestEmptyStatePrewarmEntriesZeroMax();
+    TestEmptyStatePrewarmEntriesNonEmptyQuery();
+    TestEmptyStatePrewarmEntriesEmptyCatalog();
+    TestEmptyStatePrewarmEntriesIsConst();
+    TestEmptyStatePrewarmEntriesAbsentPinSkipped();
+    TestEmptyStatePrewarmEntriesKeepOrderAndFilterMissingPin();
     TestRecentStartIndexPinsThenRecent();
     TestRecentStartIndexAllPinned();
     TestRecentStartIndexFiltered();
