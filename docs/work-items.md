@@ -185,6 +185,17 @@
 | NR-146 | ShowPanel GetMonitorInfoW 未檢查＋shutdown 逾時 detach 後 pipeline 不得銷毀 | 3 | `done` | — | [NR-146](work-items/NR-146-lifecycle-robustness-guards.md) |
 | NR-147 | watcher Change 路徑補限流（NR-130 只蓋 FullRescan 的半邊） | 2 | `done` | — | [NR-147](work-items/NR-147-watcher-change-throttle.md) |
 | NR-148 | 「開啟檔案位置／內容」與啟動共用 launch_verified 守門 | 2 | `done` | — | [NR-148](work-items/NR-148-shell-actions-launch-verified-gate.md) |
+| NR-149 | WM_DPICHANGED 的 lParam 未驗證：同 user 程序 SendMessageW 任意指標即 AV 殺死常駐 process | 3 | `ready` | — | [NR-149](work-items/NR-149-wm-dpi-changed-lparam-validation.md) |
+| NR-150 | HwndRenderTarget DPI 從未同步：混合 DPI 螢幕內容裁切且 hit-test 與 paint 分歧 | 3 | `ready` | NR-149 | [NR-150](work-items/NR-150-render-target-dpi-sync.md) |
+| NR-151 | NR-139 殘餘：偽造 inline delivery-failure 使 generation 提前完成，過時快照寫進 catalog.cache | 3 | `ready` | — | [NR-151](work-items/NR-151-delivery-failure-token-auth.md) |
+| NR-152 | settings 寫入端與讀取端不對稱：UI 可寫出自己讀不回來的檔（整包設定重置陷阱）＋spec 補條文 | 1 | `ready` | — | [NR-152](work-items/NR-152-settings-write-side-symmetry.md) |
+| NR-153 | NR-147 留下的死分支（Change 兩臂相同）與未用常數 kRebuildStartMinIntervalMs | 2 | `ready` | — | [NR-153](work-items/NR-153-nr147-dead-branch-cleanup.md) |
+| NR-154 | ParseInt 收斂只做一半：settings_store 與 settings_dialog 仍兩份拷貝 | 1 | `ready` | — | [NR-154](work-items/NR-154-parseint-shared-helper.md) |
+| NR-155 | catalog_refresh sequel：SourceEntries 死碼＋防偽守門抽共用 helper | 3 | `ready` | — | [NR-155](work-items/NR-155-catalog-refresh-cleanup-sequel.md) |
+| NR-156 | main.cpp 生命週期 sequel：g_diag 懸空指標＋設定套用後舊 watch 索引錯位 | 2 | `ready` | — | [NR-156](work-items/NR-156-main-lifecycle-sequel.md) |
+| NR-157 | main.cpp UI chrome 重複：tray balloon×2、面板空白選單樣板×2 | 3 | `ready` | — | [NR-157](work-items/NR-157-main-ui-chrome-dedup.md) |
+| NR-158 | dedup 同名桶內仍 O(n²)：20k 同名行 cache 使 UI 執行緒停頓 | 2 | `ready` | — | [NR-158](work-items/NR-158-dedup-same-name-bucket-bound.md) |
+| NR-159 | design-spec 措辭修正兩處：§3.1 排序描述、§10.2 cache 格式 | 0 | `ready` | — | [NR-159](work-items/NR-159-spec-wording-fixes.md) |
 
 ## Dependency lanes
 
@@ -459,10 +470,6 @@ NR-132／NR-134 已落地，`PanelHost` 候選已於 2026-08-10 重新評估並*
   超 16 MB 後每次啟動隔離重建、`SearchApps` 每按鍵數十 ms。§FR-003 的「有界」約束的是
   執行緒與 cache，列舉本身是 soft-bound。決策：若要硬上限，在列舉時 per-source 設限並
   記入 diagnostic；否則把 soft-bound 寫進 spec。
-- **design-spec 措辭兩處碼對 spec 錯**：§3.1「啟動次數與最近使用時間排列」vs §4.2
-  （binding）「僅依最近使用時間，不使用 usage_score」；§10.2「版本化二進位 cache」vs
-  實際是 schema=2 文字 TSV（可除錯、可重建）。兩處都是改 spec 一行，與 NR-125/126 同型，
-  下次文件同步批次一起做。
 - **applied-settings 三份部分鏡像**（`main.cpp` ShowPanel 只複製 `recent_count`、
   對話框套用、`wWinMain` 各寫一份）：「catalog 來源欄位只能經由 rebuild 改變」這條規則
   目前只活在註解裡。原本掛在 `PanelHost` 候選底下；`PanelHost` 否決後這條**獨立留存**為候選
@@ -502,8 +509,82 @@ NR-148（守門一致）── 獨立一行
 NR-142 的 grep check 依賴 NR-139 完成後的 `.at(`→`.find(` 狀態，建議排在 139 之後。
 其餘彼此互不相干，可依序執行（本批次採一個 subagent 一個 item 的依序模式）。
 
+## 稽核修補 lane 13（NR-149～NR-159，2026-08-10 第十四次稽核第 2 輪產出）
+
+NR-139～NR-148 完成後重跑同四軸稽核（ponytail／正確性／spec／安全），主 Agent 對全部
+IMPORTANT 與跨軸交叉發現重讀原始碼驗證後收斂成 11 個 item。**排序依「先 crash、再
+正確性、再 DoS/資料面、再整理」**：NR-149（偽造 WM_DPICHANGED 指標 AV，與 NR-139
+同類）→ NR-150（DPI 同步，依賴 NR-149 同 handler）→ NR-151（NR-139 殘餘的內容效果）
+→ NR-152（設定寫入端陷阱）→ NR-153（NR-147 死分支）→ NR-154（ParseInt ×2）→
+NR-155／NR-156／NR-157（同檔清理批次）→ NR-158（dedup 桶內 O(n²)）→ NR-159（spec
+措辭，最後做，純文件）。
+
+```
+NR-149（crash，最先）── 無依賴
+NR-150（DPI 同步）── 依賴 NR-149（同一 WM_DPICHANGED handler）
+NR-151（失敗 token 化）── 無依賴；動 rebuild_pipeline.cpp
+NR-152（寫入端守門）── 無依賴
+NR-153（NR-147 殘渣）── 無依賴；與 NR-151 同檔不同函式，建議 151 後
+NR-154（ParseInt 共用）── 無依賴
+NR-155（catalog_refresh 清理）── 無依賴；與 NR-151 都動 catalog_refresh 週邊但不同檔
+NR-156（main.cpp 生命週期）── 無依賴；與 NR-157 同檔不同區
+NR-157（main.cpp UI chrome）── 無依賴
+NR-158（dedup 桶內上限）── 無依賴
+NR-159（spec 措辭）── 純文件，最後做
+```
+
 ## 計畫決策紀錄
 
+- 2026-08-10（NR-149～NR-159 ready，第十四次稽核第 2 輪產出）：NR-139～NR-148 全部
+  `done` 後重跑四軸稽核。主 Agent 對兩個 IMPORTANT（安全軸的 WM_DPICHANGED lParam
+  越界、正確性軸的 render target DPI 未同步）親自重讀原始碼驗證後採納，其餘收斂
+  成 9 個較小 item。逐項決策與「為什麼不那樣做」：**NR-149（IMPORTANT）**——
+  `WM_DPICHANGED` 分支直接 `reinterpret_cast<const RECT*>(l_param)` 解參考
+  （`main.cpp:2770-2775`）；該訊息以 `SendMessageW` 送出、lParam 跨處理序原樣傳遞，
+  任何同 user 程序（公開 class 名 `FindWindowW`）`SendMessageW(hwnd, WM_DPICHANGED, 0,
+  (LPARAM)0x1)` 即 AV 殺死常駐 tray process——NR-139 只蓋了 WM_APP 訊息，這是同家族
+  的系統訊息漏網。修法：**完全不使用 lParam**（`IsBadReadPtr` 無法防 races/ownership，
+  正確的 lazy 解是根本不解參考不可信指標），suggested rect 由
+  `GetDpiForWindow`＋`MonitorFromWindow`＋`GetMonitorInfoW`＋`ClampWindowSize` 重算
+  （與 `ShowPanel`/NR-146 同一套邏輯）。**NR-150（IMPORTANT）**——`CreateHwndRenderTarget`
+  未指定 DPI（繼承 factory 建立當下主螢幕 DPI），`WM_DPICHANGED` 只 reposition 不碰
+  target，全 repo 零 `SetDpi`：混合 DPI 螢幕內容裁切/縮放錯誤，且 hit-test 用
+  `GetDpiForWindow`（正確）而 paint 用過時 DPI → 點擊可能啟動看不見的列（NR-064
+  bug 類別沿 DPI 軸重現）。修法：建立後與 `WM_DPICHANGED` 各 `SetDpi(GetDpiForWindow(...))`
+  一次，**不重建 target**（重建引入 flicker，`SetDpi` 是 HwndRenderTarget 的標準機制）。**
+  NR-151（MEDIUM）**——NR-139 修掉 crash 後，偽造 inline delivery-failure 標記
+  **active** source 的內容效果仍在：generation 提前完成 → 過時 snapshot 寫進
+  `catalog.cache`（磁碟，留到下次完整 rebuild）且 reconcile 以缺源快照為據跑過一次；
+  記憶體自癒但 `completed_generation_` 守門使 cache 寫入不再觸發。修法：
+  `QueueFailure` 優先 `handoffs_.Register(RebuildResult{failed=true,...})` 並 post
+  token（與 `OnResultMessage` 同型），double-OOM 時保留既有 inline 為最後手段
+  （NR-100 的「generation 不卡住」契約）。**NR-152（IMPORTANT，spec 軸）**——NR-140
+  只蓋了讀取端：`AddRoot`（`settings_editor.cpp:388`）無上限，使用者經 UI 合法加入
+  第 33 個資料夾 → 下次啟動整檔 Corrupt → **全部設定**重置成預設＋`.corrupt`——正是
+  NR-058/NR-080 明文要消除的「設定自己不見了」以新方式重現。修法：`AddRoot` 達上限
+  回 false＋常數公開到 header＋spec §FR-013 補條文（與 recent_count 8~40 的先例對齊）。
+  **NR-153（MEDIUM）**——NR-147 自己引入的死碼：Change 分支 if/else 兩臂逐字相同
+  （`AcceptRebuildStart` 的結果不影響任何行為，真守門在 `OnDebounceTimer`），
+  `kRebuildStartMinIntervalMs` 宣告後零引用、`AcceptRebuildStart` 硬寫 1000/-1。
+  刪死分支、常數化。**NR-154（MEDIUM）**——NR-144 只把第二份拷貝對齊第一份：
+  `settings_store.cpp:31-42` 與 `settings_dialog.cpp:310-321` 仍是兩份相同的
+  「`ParseInt64`+int 守門」。抽共用 `ParseInt` 進 `atomic_text_file.h`。**NR-155/156/157
+  （LOW）**——同檔清理批次：`SourceEntries` 零呼叫者死碼＋NR-139 防偽守門兩份拷貝
+  （catalog_refresh.cpp）；`g_diag` 指向 stack local、逾時 release 後 detached worker
+  可能解參考已銷毀 log＋設定套用後舊 watch 索引錯位（main.cpp 生命週期）；
+  tray balloon 填表×2＋面板空白選單樣板×2 與未集中字串（main.cpp UI chrome）。
+  **NR-158（LOW）**——NR-121 的分桶只解決不同名碰撞：20k 行同名 cache 在單桶內
+  仍是 ~2 億次 pair 比較，冷啟動 UI 執行緒停頓 0.5-2 秒；同名桶設 5000 上限走既有
+  歧義路徑（歧義計數語意不變），順便修 `dedup.cpp:98` 註解的數字謊言（宣稱 5k、
+  實際 20k）。**NR-159（LOW）**——兩個「碼對 spec 錯」的措辭殘餘（§3.1 排序描述、
+  §10.2 cache 格式）改一行字面。**刻意不開 item**：UI 執行緒 handler 的
+  bad_alloc 可終止 process（既有、廣義 OOM、thin-handler 設計；與 NR-076/097 的
+  worker 例外邊界不同類）；handoff token 盲猜竊取結果（ASLR 下不可行，deferred）；
+  `HandoffRegistry::Empty`／`PanelModel::HasCatalogIndex` test-only（audit 判斷可留）；
+  §FR-008 的限流半句（選修，不開）。第 2 輪稽核同時確認：round-1 十個修補在
+  安全/正確性角度全部落地正確（NR-140 的 Trim-後計數無法以空白/大小寫繞過、
+  NR-141 的行數計數涵蓋 header 且無巨量分配構造、NR-147 的限流無旁路、
+  NR-148 的守門覆蓋全部啟動路徑）。
 - 2026-08-10（NR-139～NR-148 ready，第十四次全 repo 稽核產出）：backlog 清空後對整個
   repo 派四個平行唯讀 subagent 分軸審計（ponytail 過度設計／正確性穩健性／spec 符合度／
   安全不受信輸入；正確性軸第一次回傳空、resume 重跑後交出完整報告）。主 Agent 對
