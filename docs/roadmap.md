@@ -1,6 +1,6 @@
 # Development Roadmap
 
-## Phase 0 — Performance probe (current)
+## Phase 0 — Performance probe
 
 - Minimal Win32 popup and message loop.
 - `Alt+Space` global hotkey.
@@ -39,7 +39,7 @@ Done means a portable ZIP build can search and launch at least 20 real Win32 app
 - Settings and startup behavior.
 - Atomic persistence and migration.
 
-## Phase 5 — Release gate
+## Phase 5 — Release gate (current)
 
 - Performance harness.
 - 72-hour soak test.

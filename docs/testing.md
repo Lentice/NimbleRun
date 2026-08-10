@@ -17,7 +17,7 @@ ctest --test-dir build --output-on-failure
 ## Manual smoke test
 
 1. Press `Alt+Space`. Expected: the panel appears centered in the work area of the monitor under the cursor.
-2. Leave the search box empty. Expected: the pinned / recent grid is shown (a filled grid once the NR-053 empty-state fill lands).
+2. Leave the search box empty. Expected: the pinned / recent grid is shown, containing only pins and recents; if there are neither, the panel shows a one-line hint instead of filling the grid with other apps.
 3. Type a query. Expected: the view switches to a search list; `Enter` launches the selected item and the panel hides.
 4. Press `Esc`. Expected: the search box clears; a second `Esc` hides the panel.
 5. Right-click an item and choose Pin. Expected: the item is pinned; a restart keeps it pinned, and Unpin works the same way.

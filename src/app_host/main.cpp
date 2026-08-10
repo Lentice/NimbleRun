@@ -2401,7 +2401,7 @@ void ShowPanel(HWND window) {
     GetMonitorInfoW(monitor, &monitor_info);
 
     // NR-015: size the panel in DIPs scaled to the cursor monitor's DPI, then
-    // clamp it to the work area. Width/height stay 640x432 DIPs at any DPI, so
+    // clamp it to the work area. Width/height stay 640x488 DIPs at any DPI, so
     // the same layout math gives predictable bounds at 100/150/200%.
     const RECT work_area = monitor_info.rcWork;
     // NR-103: park the (still hidden) window on the cursor monitor first so a

@@ -208,15 +208,19 @@ MVP 不覆寫其他程式的系統快捷鍵，但含 Win 鍵的組合不在此�
 MVP 採容易驗證的衰減模型：
 
 ```text
-usage_score = launch_count_30d + 3 × launch_count_7d + recency_bonus
+usage_score = lifetime launch count（clamp 至 1,000,000）＋ recency_bonus
 ```
 
-`recency_bonus`：
+`recency_bonus`（依最後啟動時間）：
 
 - 24 小時內：8
 - 7 天內：4
 - 30 天內：1
 - 超過 30 天：0
+
+計數項取 lifetime total（`usage.tsv` 的 `total_launches` 欄，clamp 至 1,000,000 以免損壞值溢位翻轉排序比較）；`recency_bonus` 由最後啟動時間換算。
+
+> **schema 限制**：`usage.tsv`（schema=1，§10.2）只有 lifetime total 與最後啟動時間兩欄資料，無法計算 7d／30d 視窗計數；因此公式以 lifetime total 取代 30 天計數、省略 7 天計數項。本項為刻意省略；若日後需要 per-window counter，屬 schema 升版決策，需另行評估。
 
 這是初始啟發式，不宣稱為最佳模型。統計只記錄 NimbleRun 自己發起且回報成功的啟動，不監控使用者從其他位置開啟 App 的行為。
 
@@ -744,8 +748,8 @@ flowchart TD
 
 - `settings.ini`：少量 key/value，使用 Win32 profile API 或受測試的自有 reader/writer。
 - `settings.ini` 保存 `catalog_roots`（多個本機絕對路徑及各自的 recursive flag）與 `catalog_extensions`（受支援副檔名清單）；每個值都要經過格式與安全邊界驗證。
-- `favorites.txt`：UTF-8，每行一個經 escaping 的 stable ID，行序即 pin 順序。
-- `usage.tsv`：版本化 UTF-8 TSV；欄位為 stable ID、總啟動數、7／30 日 buckets 或必要時間資料、最後啟動 UTC。
+- `favorites.txt`：版本化 UTF-8 TSV（schema=2）。第一行為 `schema=2`；其後每行三欄、以 tab 分隔：`<escaped stable_id>`、`<last_seen_utc epoch 秒>`、`<escaped display_name>`，行序即 pin 順序。欄位值一律經 escaping（反斜線跳脫 `\`、`=`、`\n`、`\r`、`\t`），確保值內的 tab／換行不會破壞欄位或列結構。display_name 欄（NR-062）讓 catalog 中已消失的 pin 仍能依名稱顯示；schema=1（兩欄）舊檔仍可讀取，下次存檔時升級為 schema=2。讀取容許同一 schema 的尾端額外欄位（NR-087）。
+- `usage.tsv`：版本化 UTF-8 TSV（schema=1）；欄位為 stable ID、lifetime total launch count、最後啟動 UTC，以 tab 分隔；同一 stable ID 重複時最後一行取勝（Save 以 stable ID 升冪寫出，重複存檔位元組一致）。
 - `catalog.cache`：可選的版本化二進位 cache，只用於加速，不是真實來源；讀取錯誤可直接刪除並重建。
 - `icons.cache`：版本化二進位 pack 檔，保存曾顯示過項目的 decoded 圖示（編碼為 PNG）。只用於加速，不是真實來源。採固定大小的雙份檔頭與固定容量索引區，payload 以 append 方式寫入；**每筆索引項與每筆 payload 各自帶 CRC32**，單筆毀損只丟棄該筆，不丟棄整檔。檔頭 magic／版本不符或雙份檔頭皆不可讀時整檔刪除重建。compaction 走 `.tmp` ＋ replace。
 
