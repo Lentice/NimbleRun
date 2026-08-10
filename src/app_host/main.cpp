@@ -2058,13 +2058,16 @@ void ShowItemMenu(HWND window, int cell, POINT screen_pos) {
     // empty on a placeholder, so IsPathIdentity below would already be
     // false, but an explicit early exit does not depend on that coincidence.
     if (!nimblerun::PanelModel::IsMissingPin(entry)) {
-        // NR-040: only offered for rows actually showing in the recent region;
-        // on a pinned row (which sits before RecentStartIndex) the command
-        // would silently change nothing.
-        const int recent_start = g_model->RecentStartIndex();
-        const bool in_recent = recent_start >= 0 && cell >= recent_start
-                               && cell < g_model->RecentEndIndex();
-        if (in_recent) {
+        // NR-040: only offered for rows the command would actually change; on
+        // a pinned row (which sits before RecentStartIndex) it would silently
+        // change nothing. NR-143: search rows (RecentStartIndex() == -1) get
+        // it too, but only when the row is not pinned and a usage record
+        // exists -- the same no-silent-no-op rule applied to search results.
+        const bool has_usage =
+            g_usage ? g_usage->HasRecord(entry.stable_id) : false;
+        if (nimblerun::ShouldOfferRemoveFromRecent(
+                g_model->RecentStartIndex(), g_model->RecentEndIndex(),
+                cell, pinned, has_usage)) {
             AppendMenuW(menu, MF_STRING, kCmdForgetRecent,
                         context_menu_strings::kRemoveFromRecent);
         }

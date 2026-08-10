@@ -179,6 +179,24 @@ private:
     int recent_start_ = -1;
     // End of the usage-backed recent rows (see RecentEndIndex()).
     int recent_end_ = -1;
-};
+}; // class PanelModel
+
+// NR-143: whether "Remove from recent" is worth offering for the row at
+// `cell` (design-spec §4.8). Rows inside the recent region
+// (recent_start >= 0 and the cell between recent_start and recent_end)
+// qualify regardless of pin or usage state; search results (recent_start
+// == -1) qualify only when the row is not pinned and a usage record exists.
+// The search-side rules keep NR-040's "never offer a silently-no-op command":
+// a pinned search row keeps its pinned slot when the record is removed, and
+// Forget() on a row with no record changes nothing. All other rows (pinned
+// rows, empty-query grid rows outside the region) get false. Pure: the
+// caller resolves pinned from PinStore and has_usage from UsageStore.
+inline bool ShouldOfferRemoveFromRecent(int recent_start, int recent_end, int cell,
+                                        bool pinned, bool has_usage) {
+    if (recent_start >= 0) {
+        return cell >= recent_start && cell < recent_end;
+    }
+    return !pinned && has_usage;
+}
 
 } // namespace nimblerun

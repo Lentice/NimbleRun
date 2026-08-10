@@ -179,7 +179,7 @@
 | NR-140 | settings.ini 行數上限＋catalog_root 上限＋hotkey 長度上限（watcher 執行緒爆炸面） | 1 | `done` | — | [NR-140](work-items/NR-140-settings-ini-row-caps.md) |
 | NR-141 | SplitLines 在 materialize 前行數守門（16 MB 檔 → 400-500 MB 暫態配置） | 1 | `done` | — | [NR-141](work-items/NR-141-splitlines-line-cap-before-alloc.md) |
 | NR-142 | catalog_refresh 判定收斂：HasDueRebuild≡DueSources、兩個 Apply 的 event-clear≡ | 3 | `done` | — | [NR-142](work-items/NR-142-catalog-refresh-duplicate-predicates.md) |
-| NR-143 | §4.8 搜尋結果列缺「自常用清單移除」（RecentStartIndex 搜尋態 -1） | 3 | `ready` | — | [NR-143](work-items/NR-143-search-row-remove-from-recent.md) |
+| NR-143 | §4.8 搜尋結果列缺「自常用清單移除」（RecentStartIndex 搜尋態 -1） | 3 | `done` | — | [NR-143](work-items/NR-143-search-row-remove-from-recent.md) |
 | NR-144 | settings_store helper 收斂：IsLocalAbsolutePath≡IsDisplayablePath、ParseInt→ParseInt64 | 1 | `ready` | — | [NR-144](work-items/NR-144-settings-helper-convergence.md) |
 | NR-145 | 死碼 sequel：SlotRect 死參數、QueueDepth／Clear／EraseIf／kJoinTimeoutMs | 3 | `ready` | — | [NR-145](work-items/NR-145-dead-code-cleanup-sequel.md) |
 | NR-146 | ShowPanel GetMonitorInfoW 未檢查＋shutdown 逾時 detach 後 pipeline 不得銷毀 | 3 | `ready` | — | [NR-146](work-items/NR-146-lifecycle-robustness-guards.md) |

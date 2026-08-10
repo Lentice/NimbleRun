@@ -16,6 +16,7 @@ using nimblerun::AppEntry;
 using nimblerun::AppSource;
 using nimblerun::PanelAction;
 using nimblerun::PanelModel;
+using nimblerun::ShouldOfferRemoveFromRecent;
 
 namespace {
 
@@ -892,6 +893,35 @@ void TestRecentEndIndexExcludesFiller() {
     Expect(model.RecentEndIndex() == -1, "search results have no recent region");
 }
 
+// NR-143: the pure "Remove from recent" offer decision (design-spec §4.8),
+// exercised over region indices, cell, pin and usage-presence inputs.
+void TestShouldOfferRemoveFromRecent() {
+    // Search state (recent_start == -1): unpinned with a usage record -> yes.
+    Expect(ShouldOfferRemoveFromRecent(-1, -1, 0, false, true),
+           "search row with a usage record offers the command");
+    // Pinned search row -> no (NR-040: removing the record changes nothing).
+    Expect(!ShouldOfferRemoveFromRecent(-1, -1, 0, true, true),
+           "pinned search row never offers the command");
+    // No usage record -> no (Forget would no-op).
+    Expect(!ShouldOfferRemoveFromRecent(-1, -1, 3, false, false),
+           "search row without a usage record never offers the command");
+    // In the recent region -> yes regardless of pin state.
+    Expect(ShouldOfferRemoveFromRecent(2, 5, 2, false, true),
+           "first recent-region row offers the command");
+    Expect(ShouldOfferRemoveFromRecent(2, 5, 4, true, true),
+           "pinned recent-region row still offers the command");
+    // Outside the recent region in the empty-query grid -> no.
+    Expect(!ShouldOfferRemoveFromRecent(2, 5, 6, false, true),
+           "grid row past the recent region never offers the command");
+    Expect(!ShouldOfferRemoveFromRecent(2, 5, 0, false, true),
+           "pinned grid row before the recent region never offers the command");
+    // Defensive: recent_start == -1 must not be read as "everything is in the
+    // recent region" by a positional check -- only the search-state rule
+    // applies, even when cell/end look like a plausible region.
+    Expect(!ShouldOfferRemoveFromRecent(-1, 3, 1, false, false),
+           "no recent region means no positional claim");
+}
+
 // NR-071: the pinned region keeps pin order even after the recent-region
 // score sort was removed entirely -- pins are never sorted by anything, and
 // RecentStartIndex() still points at the pinned/recent boundary.
@@ -1084,6 +1114,7 @@ int wmain() {
     TestRecentStartIndexFiltered();
     TestRecentStartIndexNoPins();
     TestRecentEndIndexExcludesFiller();
+    TestShouldOfferRemoveFromRecent();
     TestRecentOrderedByRecency();
     TestRecentIgnoresNameAndScoreTieBreaks();
     TestRecentPreservesInputOrder();

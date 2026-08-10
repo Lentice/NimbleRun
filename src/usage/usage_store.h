@@ -65,6 +65,11 @@ public:
     // job, exactly as it is for RecordLaunch().
     bool Forget(std::wstring_view stable_id);
 
+    // NR-143: true when a record exists for stable_id. Read-only probe the
+    // row menu uses to decide whether "Remove from recent" is worth offering
+    // on a search-result row (design-spec §4.8); never modifies the record.
+    bool HasRecord(std::wstring_view stable_id) const;
+
     // NR-061: drops every record whose stable_id is absent from `catalog`, so
     // an uninstalled app cannot reappear in the recent region with its old
     // score after a reinstall. Mirrors PinStore::Reconcile's contract: the

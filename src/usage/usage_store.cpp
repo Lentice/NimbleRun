@@ -152,6 +152,11 @@ bool UsageStore::Forget(std::wstring_view stable_id) {
     return true;
 }
 
+bool UsageStore::HasRecord(std::wstring_view stable_id) const {
+    return std::find_if(records_.begin(), records_.end(),
+               [&](const UsageRecord& r) { return r.stable_id == stable_id; }) != records_.end();
+}
+
 bool UsageStore::RecordLaunch(std::wstring stable_id, std::int64_t last_launch_utc) {
     if (stable_id.empty()) {
         return false;

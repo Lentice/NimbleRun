@@ -109,3 +109,33 @@ rg -n "ShouldOfferRemoveFromRecent" src/app_host/main.cpp src/app_host/panel_mod
 ```
 
 完成後在文件底部補齊本 item 的 Handoff 交接備註。
+
+## Handoff（2026-08-10，NR-143 done）
+
+- 純函式放在 `src/app_host/panel_model.h:189-200`（namespace scope inline 函式），
+  而非 `usage_store.h`：參數（recent_start／recent_end／cell／pinned）全是
+  PanelModel 的區域語意，且 `tests/unit/panel_model_test.cpp` 已 include 此 header
+  （測試目標 `nimblerun_list_vertical_slice_test` 只鏈 `nimblerun_panel_model`），
+  零新增連結。`main.cpp` 已 include 同 header。
+- 判決 2 的實作事實：`UsageStore` 的實際儲存是 `std::vector<UsageRecord>`
+  （`usage_store.h:87`），不是 map——item 正文寫「map、一行查詢」是假設。
+  `HasRecord` 照既有 `Forget` 的 `std::find_if` 風格實作（`usage_store.cpp:155-158`），
+  語意不變（一行容器查詢、const、不碰 Forget／Reconcile／Load）。
+- 測試落點：純函式 8 案例進 `panel_model_test.cpp`（`TestShouldOfferRemoveFromRecent`，
+  `:897-922`，含防呆案例 `(-1, 3, 1, false, false)`——沒有 `recent_start >= 0` 守門的
+  位置判斷會誤判成「在 recent 區內」）；`TestHasRecord` 進 `recent_usage_test.cpp`
+  （`:404-423`，有紀錄 true／無紀錄 false／空 id false／Forget 後 false／不增紀錄）。
+  未新增測試目標、未改 `tests/CMakeLists.txt`、測試總數維持 31。
+- `ShowItemMenu`（`main.cpp:2060-2074`）：以
+  `nimblerun::ShouldOfferRemoveFromRecent(RecentStartIndex(), RecentEndIndex(), cell,
+  pinned, has_usage)` 取代原 inline `in_recent`；`has_usage = g_usage ? g_usage->
+  HasRecord(entry.stable_id) : false`（g_usage 為 null 時視為 false，與現況一致）。
+  `kCmdForgetRecent` 執行路徑（`:2110-2118` 的 `g_usage->Forget`＋
+  `RefreshPanelSnapshot`）一字未動。NR-040 註解保留並補本 item 引註。
+- 驗證：Release Ninja llvm-mingw 重配置＋建置零新 warning（23/23 targets）；
+  `ctest` 31/31 全綠；聚焦測試 2/2（`ctest -R "recent_usage|vertical_slice"`）。
+- 偏差：item Agent check 的 `ctest -R "usage_store|panel_model"` 找不到任何測試——
+  CTest 名是 `nimblerun_recent_usage_test`（不含 "usage_store"）與
+  `nimblerun_list_vertical_slice_test`（NR-055 例外，執行檔名與 CTest 名不同，
+  不含 "panel_model"）。等價聚焦命令為 `ctest -R "recent_usage|vertical_slice"`。
+- 未完成：無。

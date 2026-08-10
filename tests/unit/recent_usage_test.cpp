@@ -413,6 +413,26 @@ void TestForgetMissing() {
     fs::remove_all(dir);
 }
 
+// NR-143: read-only existence probe used to decide whether "Remove from
+// recent" is offered on a search-result row (design-spec §4.8). Must never
+// modify the store.
+void TestHasRecord() {
+    const std::wstring dir = MakeTempDir("has_record");
+    UsageStore store(dir);
+    store.Load();
+    Expect(!store.HasRecord(L"app1"), "unknown id has no record");
+    Expect(!store.HasRecord(L""), "empty id has no record");
+    store.RecordLaunch(L"app1", 100);
+    store.RecordLaunch(L"app2", 200);
+    Expect(store.HasRecord(L"app1"), "recorded id is found");
+    Expect(store.HasRecord(L"app2"), "second recorded id is found");
+    Expect(store.Records().size() == 2, "HasRecord adds no records");
+    Expect(store.Forget(L"app1"), "forget the recorded id");
+    Expect(!store.HasRecord(L"app1"), "record is gone after Forget");
+    Expect(store.HasRecord(L"app2"), "sibling record untouched by HasRecord");
+    fs::remove_all(dir);
+}
+
 void TestForgetEmpty() {
     const std::wstring dir = MakeTempDir("forget_empty");
     UsageStore store(dir);
@@ -609,6 +629,7 @@ int wmain() {
     TestAtomicWriteFailure();
     TestForgetExisting();
     TestForgetMissing();
+    TestHasRecord();
     TestForgetEmpty();
     TestForgetPersists();
     TestForgetThenRelaunch();
