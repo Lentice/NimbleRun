@@ -175,6 +175,16 @@
 | NR-136 | 釘選拖曳狀態機收斂為 `PinDragState`（六全域／五 handler／四份重置） | 3 | `done` | NR-039, NR-046 | [NR-136](work-items/NR-136-pin-drag-state-module.md) |
 | NR-137 | 兩份逐字相同的遞迴目錄走訪收斂為 `DirectoryWalker`（同一 bug 修過兩次） | 2 | `done` | NR-063, NR-091, NR-092, NR-098, NR-124 | [NR-137](work-items/NR-137-directory-walker-module.md) |
 | NR-138 | Icon 請求狀態收斂為 `IconRequestSession`＋prewarm 直接取 entries | 3 | `done` | NR-012, NR-032, NR-099, NR-109, NR-114 | [NR-138](work-items/NR-138-icon-request-session.md) |
+| NR-139 | 偽造的 `kRebuildDeliveryFailedMessage` 可使常駐 process 當場終止（`.at()` throw） | 3 | `ready` | — | [NR-139](work-items/NR-139-delivery-failure-message-crash.md) |
+| NR-140 | settings.ini 行數上限＋catalog_root 上限＋hotkey 長度上限（watcher 執行緒爆炸面） | 1 | `ready` | — | [NR-140](work-items/NR-140-settings-ini-row-caps.md) |
+| NR-141 | SplitLines 在 materialize 前行數守門（16 MB 檔 → 400-500 MB 暫態配置） | 1 | `ready` | — | [NR-141](work-items/NR-141-splitlines-line-cap-before-alloc.md) |
+| NR-142 | catalog_refresh 判定收斂：HasDueRebuild≡DueSources、兩個 Apply 的 event-clear≡ | 3 | `ready` | — | [NR-142](work-items/NR-142-catalog-refresh-duplicate-predicates.md) |
+| NR-143 | §4.8 搜尋結果列缺「自常用清單移除」（RecentStartIndex 搜尋態 -1） | 3 | `ready` | — | [NR-143](work-items/NR-143-search-row-remove-from-recent.md) |
+| NR-144 | settings_store helper 收斂：IsLocalAbsolutePath≡IsDisplayablePath、ParseInt→ParseInt64 | 1 | `ready` | — | [NR-144](work-items/NR-144-settings-helper-convergence.md) |
+| NR-145 | 死碼 sequel：SlotRect 死參數、QueueDepth／Clear／EraseIf／kJoinTimeoutMs | 3 | `ready` | — | [NR-145](work-items/NR-145-dead-code-cleanup-sequel.md) |
+| NR-146 | ShowPanel GetMonitorInfoW 未檢查＋shutdown 逾時 detach 後 pipeline 不得銷毀 | 3 | `ready` | — | [NR-146](work-items/NR-146-lifecycle-robustness-guards.md) |
+| NR-147 | watcher Change 路徑補限流（NR-130 只蓋 FullRescan 的半邊） | 2 | `ready` | — | [NR-147](work-items/NR-147-watcher-change-throttle.md) |
+| NR-148 | 「開啟檔案位置／內容」與啟動共用 launch_verified 守門 | 2 | `ready` | — | [NR-148](work-items/NR-148-shell-actions-launch-verified-gate.md) |
 
 ## Dependency lanes
 
@@ -439,6 +449,20 @@ NR-132／NR-134 已落地，`PanelHost` 候選已於 2026-08-10 重新評估並*
 
 ### 候選（尚未開 item）
 
+- **catalog.cache 損壞改為刪除而非 `.corrupt` 隔離**：§10.2 明言 cache「讀取錯誤可直接
+  刪除並重建」，icons.cache 正是刪除重建；catalog.cache 目前走 `PreserveCorrupt`
+  （`catalog_cache.cpp:102,146`），`.corrupt` 累積死位元組。但 `.corrupt` 保留的是診斷
+  證據（NR-058 的 balloon 通知能指到它）。產品決策：診斷價值 vs 磁碟衛生。要改就是
+  刪兩個 `PreserveCorrupt` 呼叫。
+- **列舉輸出無上限**：`kMaxCacheRows`（20,000）只蓋 cache 讀取端；列舉端（Start Menu／
+  AppsFolder／UserFolder）對 10 萬+ `.lnk` 的目錄樹不設限，rebuild 花數十秒、cache 寫入
+  超 16 MB 後每次啟動隔離重建、`SearchApps` 每按鍵數十 ms。§FR-003 的「有界」約束的是
+  執行緒與 cache，列舉本身是 soft-bound。決策：若要硬上限，在列舉時 per-source 設限並
+  記入 diagnostic；否則把 soft-bound 寫進 spec。
+- **design-spec 措辭兩處碼對 spec 錯**：§3.1「啟動次數與最近使用時間排列」vs §4.2
+  （binding）「僅依最近使用時間，不使用 usage_score」；§10.2「版本化二進位 cache」vs
+  實際是 schema=2 文字 TSV（可除錯、可重建）。兩處都是改 spec 一行，與 NR-125/126 同型，
+  下次文件同步批次一起做。
 - **applied-settings 三份部分鏡像**（`main.cpp` ShowPanel 只複製 `recent_count`、
   對話框套用、`wWinMain` 各寫一份）：「catalog 來源欄位只能經由 rebuild 改變」這條規則
   目前只活在註解裡。原本掛在 `PanelHost` 候選底下；`PanelHost` 否決後這條**獨立留存**為候選
@@ -452,8 +476,99 @@ NR-132／NR-134 已落地，`PanelHost` 候選已於 2026-08-10 重新評估並*
   是同一類共用狀態覆寫，但**沒有第二次出事的證據**，NR-119 的一行入口守門已經擋住那個 crash。
   列候選不開 item；若日後真的做，讓它搭 NR-135 的 RAII 一起走，不要單開。
 
+## 稽核修補 lane 12（NR-139～NR-148，2026-08-10 第十四次全 repo 稽核產出）
+
+四軸平行唯讀 subagent（ponytail 過度設計／正確性穩健性／spec 符合度／安全不受信輸入），
+主 Agent 對全部 CRITICAL/IMPORTANT 與跨軸交叉發現逐一重讀原始碼驗證後收斂成 10 個 item。
+全部無依賴、皆 `ready`。**執行順序依「先 crash、再 DoS 面、再漂移風險、再使用者可見、
+再整理」**：NR-139（偽造訊息當場終止，最高優先）→ NR-140／NR-141（設定檔與讀取層的
+行數放大）→ NR-142（重複判定漂移風險）→ NR-143（§4.8 使用者可見缺口）→ NR-144（helper
+已漂移一次）→ NR-145（死碼）→ NR-146（生命週期防護）→ NR-147（限流補半邊）→ NR-148
+（守門一致）。
+
+```
+NR-139（crash，最先做）── 無依賴
+NR-140（settings.ini 上限）┐
+NR-141（SplitLines 行數守門）├── 兩者同系列不同層，可依序處理
+NR-142（判定收斂）── 與 NR-139 同檔（catalog_refresh.cpp）不同函式，但建議在 139 後
+NR-143（§4.8 選單缺口）── 獨立
+NR-144（helper 收斂）── 獨立
+NR-145（死碼）── 獨立純刪除
+NR-146（生命週期防護）── 與 NR-145 都動 main.cpp 但不同行
+NR-147（Change 限流）── 獨立
+NR-148（守門一致）── 獨立一行
+```
+
+NR-142 的 grep check 依賴 NR-139 完成後的 `.at(`→`.find(` 狀態，建議排在 139 之後。
+其餘彼此互不相干，可依序執行（本批次採一個 subagent 一個 item 的依序模式）。
+
 ## 計畫決策紀錄
 
+- 2026-08-10（NR-139～NR-148 ready，第十四次全 repo 稽核產出）：backlog 清空後對整個
+  repo 派四個平行唯讀 subagent 分軸審計（ponytail 過度設計／正確性穩健性／spec 符合度／
+  安全不受信輸入；正確性軸第一次回傳空、resume 重跑後交出完整報告）。主 Agent 對
+  CRITICAL/IMPORTANT 與跨軸交叉發現逐一重讀原始碼驗證後收斂成 10 個 item，全部無依賴、
+  皆 `ready`。逐項決策與「為什麼不那樣做」：**NR-139（IMPORTANT）**——
+  `OnDeliveryFailureMessage`（`rebuild_pipeline.cpp:214-226`）只做 `w_param != 0 && l_param
+  <= UserFolder` 的範圍檢查就送進 `ApplySourceFailure`，而兩個 `ApplySource*` 對
+  `generation_event_snapshot_` 用 `.at(source)`（`catalog_refresh.cpp:123`／`:143`）——
+  對「generation 相符但 source 不在 active 集合」的偽造值擲 `std::out_of_range`，WindowProc
+  全程無 try/catch（grep 驗證 `main.cpp` 零 try/catch）→ `std::terminate` 殺死常駐 tray
+  process。generation 自 1 遞增可暴力探測，message 常數全公開。這是 NR-077 明文處理的
+  「同 integrity 偽造訊息當場 crash」向量家族中漏網的第四條。修法：兩個 `ApplySource*`
+  的 `.at()` 改 `.find()` + 非成員回 false（根因修在共用函式，未來呼叫端自動受保護）；
+  選修 `OnDeliveryFailureMessage` 的 active-generation 成員守門。**刻意不把失敗訊息改走
+  token registry**：偽造「active source 失敗」的剩餘窗口（同 generation 內真結果到達後
+  `RebuildMerged` 自癒）是 same-user、窄窗口、自我修復，且 same-user attacker 本就能
+  直接改寫 `usage.tsv`／`favorites.txt`，無新增傷害——記錄在 NR-139 交接區，不另開 item。
+  **NR-140（MEDIUM）**——`settings.ini` 是四個 store 中唯一沒有行數上限的（NR-121/122
+  只蓋了另外三個）；`catalog_root` 每行推一個 root、無去重，`StartWatchers` 每 root 建
+  一個 watch 執行緒（`main.cpp:1267-1301`），10 萬行約 3 MB 的設定檔（遠低於 16 MB 讀取
+  上限）在 tray icon 建立前卡死 UI 執行緒；每次 `Alt+Space` 重新 `Load`（`:1817`）重複
+  支付。修法：33 個 root 或 256 字元 `hotkey` → 整檔 Malformed（NR-080 的「非 Loaded 不
+  洩漏部分狀態」契約，沿用 `:185-191` 的 mid-file corrupt 範本）。**不做 Load 內去重**——
+  重複 root 是使用者犯的錯，靜默去重會隱藏原因。**NR-141（MEDIUM）**——`SplitLines`
+  （`atomic_text_file.h:185-199`）在**任何上限檢查之前**把每行 materialize 成
+  `std::wstring`；16 MB 合法檔（每行一個 `\n`）→ 約 8M 個 wstring、400-500 MB 暫態配置、
+  數秒 UI 卡頓——NR-121/122 的行數上限在分配**之後**才跑，settings.ini 每次開面板
+  重複支付。修法：`ReadVersionedLines` 在 `SplitLines` 前掃一次換行數，超 100 萬行回
+  Malformed（既有列舉值，各呼叫端的 Malformed 處置已存在；合法檔案上界是 20k 資料行，
+  100 萬是 50 倍餘裕）。kMaxLines 是記憶體守門不是資料守門，per-store 上限必須保留。
+  **NR-142（MEDIUM）**——`HasDueRebuild`（`:30-40`）與 `DueSources`（`:42-53`）是同一
+  predicate 的兩份迴圈、`ApplySourceResult`（`:120-125`）與 `ApplySourceFailure`
+  （`:140-145`）是同一 event-clear 的兩份拷貝——NR-091/092 的「重複拷貝各自出過事」模式
+  再現風險。收斂為 `HasDueRebuild = !DueSources().empty()`＋`ClearPendingIfEventUnchanged`。
+  **NR-143（MEDIUM）**——§4.8 明列「搜尋結果與清單列的右鍵選單提供…自常用清單移除」，
+  但 `ShowItemMenu` 的 `in_recent` gate 依賴 `RecentStartIndex()`，而搜尋態回 -1
+  （`panel_model.h:107-110`），搜尋結果列永遠拿不到該命令；NR-040 的理由只涵蓋釘選列。
+  修法：純函式 `ShouldOfferRemoveFromRecent`（recent 區內，或搜尋態＋非釘選＋有 usage
+  紀錄）+ `UsageStore::HasRecord` 唯讀查詢；保留「不提供靜默無效命令」精神。**NR-144
+  （MEDIUM）**——`IsLocalAbsolutePath`（`settings_store.cpp:88-101`）與 `IsDisplayablePath`
+  （`app_filter.cpp:26-35`）是同一 drive-letter 判定兩份拷貝、**已漂移一次**（Trim 差異），
+  NR-127 收斂運動漏網；`ParseInt` 是 `ParseInt64`（`atomic_text_file.h:214`）之後的第四份
+  手寫拷貝（`settings_dialog.cpp:310-321` 已示範收斂形狀）。**NR-145（LOW）**——NR-128
+  續集：`SlotRect` 的 `client_height_dip` 死參數（header 自承「it is not read」、4 prod + 1
+  測試呼叫端白算 client height）、`QueueDepth`／`IconCache::Clear`（test-only）、
+  `EraseIf`（零呼叫者）、`kJoinTimeoutMs`（宣告處即唯一出現處，call site 硬寫 5000）。
+  **NR-146（LOW）**——`GetMonitorInfoW` 失敗時 `rcWork` 未定義（`{}` 初始化下是零）→ 面板
+  依 0×0 work area 定位（不 crash 但錯位），修法失敗即不顯示；加上 NR-123 的 detach 路徑
+  漏洞：逾時 detach 後 `g_rebuild_pipeline.reset()`（`main.cpp:3206`）銷毀物件而 detached
+  worker 仍持 `this`（UAF，窄窗口），修法為逾時後 `release()` 不再 reset。**NR-147
+  （LOW）**——NR-130 的限流只蓋 `FullRescan`（1/s）；`Change` 路徑只靠 500 ms debounce，
+  脈衝式偽造事件（~600 ms 間隔）可維持 ~1.6 次/秒的真實目錄走訪 rebuild，同一把限流器
+  套上、被閘事件不丟（pending 保留、debounce 再檢查放行）。**NR-148（LOW）**——
+  「開啟檔案位置／內容」只 gate `IsPathIdentity`，啟動則 gate `launch_verified`
+  （NR-113）；被改寫的 `catalog.cache` 冷啟動種子列可驅動 Explorer 對未列舉路徑開屬性頁
+  （無執行，守門不一致），一行補上。**刻意不開 item 的候選**：`catalog.cache` 損壞改為
+  刪除而非 `.corrupt` 隔離（§10.2 允許、與 icons.cache 對稱，但 `.corrupt` 保留的是診斷
+  證據；產品決策，列候選）；列舉輸出無上限（§FR-003「有界」約束的是 cache 檔與執行緒，
+  列舉本身 soft-bound，列候選）；`WM_APP` 全家族的同 user 偽造 DoS（NR-139 修完 crash 後
+  剩餘的是「殺死常駐程式／開設定對話框」級別，NR-130 已接受 same-user DoS 結論，不另開）。
+  稽核同時確認**乾淨的一面**：訊息 payload 全家族（NR-077/131）落地正確；Icon 疊層
+  （store/pack/PNG/worker）記憶體安全無洩漏；store 的 NewerSchema write-protect 契約三處
+  一致兌現；`launch_verified` 在啟動邊界正確強制；文件（NR-056/094/125/126 四輪同步後）
+  與碼的漂移只剩兩處措辭級 spec-bug（§3.1 排序描述 vs §4.2、§10.2「二進位」vs 文字 TSV，
+  皆碼對 spec 錯，列入候選未開 item）。
 - 2026-08-10（NR-137～NR-138 ready，架構審查第二輪）：opencode 在第一輪未交付（見下條），
   改以 Herdr pane 起互動式 opencode 重跑同一題，這次交出完整報告（6 個候選）。主 Agent 逐條
   重讀原始碼驗證後採納兩條、併一條進 NR-132、兩條列候選不開 item。**採納 NR-137（IMPORTANT）**

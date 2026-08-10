@@ -1,0 +1,88 @@
+# NR-145 — 死碼與 test-only API 清理 sequel：SlotRect 死參數、QueueDepth／Clear／EraseIf／kJoinTimeoutMs
+
+Phase 3 · Code structure · Depends on: —（NR-128 的續集；全部為刪除，零行為變更）
+
+- Source: `AGENTS.md`（Deletion over addition… Prefer the smallest working change）、
+  NR-128（死碼與 test-only API 移除——漏了五件）
+- Origin: 2026-08-10 第十四次全 repo 稽核（ponytail 軸，LOW）。主 Agent 已 grep 全部呼叫端驗證。
+- Priority: **LOW**——無 bug；`SlotRect` 的死參數是 3am 陷阱（誤以為它參與幾何計算），
+  `EraseIf` 是零呼叫者的純死碼。
+
+## Why
+
+| 項目 | 位置 | 證據 |
+|---|---|---|
+| `SlotRect` 的 `client_height_dip` 死參數 | `src/ui/panel_layout.h:127-129`（自承「it is not read」）、`panel_layout.cpp:69-70`（`(void)client_height_dip;`） | 4 個 prod 呼叫端（`main.cpp:758, 1407, 1549, 2145`）＋測試都要先算 client height 再傳進不讀它的參數 |
+| `IconWorker::QueueDepth()` | `src/icons/icon_worker.h:125`、`icon_worker.cpp:172` | 只有 `icon_worker_test.cpp` 呼叫 |
+| `IconCache::Clear()` | `src/icons/icon_cache.h:93`、`icon_cache.cpp:57` | 只有測試呼叫 |
+| `HandoffRegistry::EraseIf` | `src/win/handoff_registry.h:56` | 全 repo 零呼叫（含測試） |
+| `RebuildPipeline::kJoinTimeoutMs` | `src/app_host/rebuild_pipeline.h:85`（`= 5000`） | 宣告處即唯一出現處；呼叫端 `main.cpp:2799` 硬寫 `Shutdown(5000)` |
+
+`SlotRect` 參數是「為對稱而對稱」（header 註解說它 mirror 反函數的 footer bound）——
+保留理由不存在於負載上，誤以為它參與幾何正是 3am 陷阱（NR-133 的單一幾何來源
+應該沒有這個殘渣）。
+
+## Decisions already made — do not reopen
+
+1. **`SlotRect` 簽名刪掉 `client_height_dip`**：5 個呼叫端（4 prod + 測試）一併刪參數。
+   反函數 `SlotAtPointDip` 的簽名**不動**（它真的讀 footer bound）。
+2. **`QueueDepth`／`Clear` 直接刪除**，測試改用「每案例建新實例」重置狀態
+   （`icon_worker_test`／`icon_cache_test` 若有跨案例依賴共享實例才需要改結構；
+   不得把測試幫手塞回 prod class）。
+3. **`EraseIf` 直接刪除**（零呼叫者，無測試依賴）。
+4. **`kJoinTimeoutMs`**：呼叫端改為 `Shutdown(RebuildPipeline::kJoinTimeoutMs)`（常數已是
+   public static；讓 call site 引用它，刪掉「宣告與使用分家」狀態）。
+5. 行為零變更：CTest 數量不變（不增減測試目標）。
+
+## Binding constraints — quoted, do not go looking for them
+
+`AGENTS.md`：
+
+> Prefer the smallest working change. Reuse existing code before adding helpers or abstractions.
+
+## Files to read and trace first
+
+- `src/ui/panel_layout.{h,cpp}`：`:69-70`、`:127-129`（`SlotRect`）；grep 5 個呼叫端。
+- `src/icons/icon_worker.{h,cpp}`：`:125`、`:172`（`QueueDepth`）；grep 測試呼叫端。
+- `src/icons/icon_cache.{h,cpp}`：`:93`、`:57`（`Clear`）；grep 測試呼叫端。
+- `src/win/handoff_registry.h`：`:56`（`EraseIf`）。
+- `src/app_host/rebuild_pipeline.h:85`、`src/app_host/main.cpp:2799`。
+- `tests/unit/icon_worker_test.cpp`、`tests/unit/icon_cache_test.cpp`、`tests/unit/panel_layout` 相關測試。
+
+## Scope
+
+1. 刪除上表五項（`kJoinTimeoutMs` 為呼叫端改用常數）。
+2. 受影響測試改用新實例或刪掉該斷言（斷言內容若本來就是「queue boundedness」的探針，
+   需確認 queue bound 行為仍有其他斷言覆蓋——`icon_worker_test` 的 bound 測試若只靠
+   `QueueDepth` 斷言，該如何維持覆蓋由實作 agent 判斷並在交接區記錄）。
+3. 驗證：`git diff` 只含上述刪除；CTest 全綠。
+
+## Non-goals
+
+- 不重構 `SlotAtPointDip` 或任何幾何計算。
+- 不清理 `main.cpp` 其他死碼（如有，列回候選）。
+- 不新增測試目標。
+
+## Acceptance
+
+1. grep 驗證：`QueueDepth`、`IconCache::Clear`、`EraseIf`、`kJoinTimeoutMs` 在 src/ 零命中
+   （`kJoinTimeoutMs` 除 call site 引用外零重複）。
+2. `SlotRect` 簽名無 `client_height_dip`。
+3. Release build 零新增 warning；CTest 全綠（數量不變）。
+
+## Agent checks
+
+```powershell
+cmake -S . -B build -G Ninja -D"CMAKE_TOOLCHAIN_FILE=cmake/llvm-mingw.cmake" -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
+
+```powershell
+rg -n "QueueDepth|\.Clear\(\)|EraseIf|kJoinTimeoutMs" src
+# expect: 零命中（.Clear() 需排除其他物件的合法 Clear，逐條人工確認）
+rg -n "client_height_dip" src
+# expect: 零命中
+```
+
+完成後在文件底部補齊本 item 的 Handoff 交接備註。
