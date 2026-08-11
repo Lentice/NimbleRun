@@ -99,3 +99,32 @@ rg -n "std::move\(enumeration" src/app_host/rebuild_pipeline.cpp
 ## Handoff
 
 實作者需記錄改動位置、新增測試與 build／CTest 結果。
+
+## 交接區
+
+- 實作 commit：`<hash1>`（NR-173: move the enumeration result into
+  RebuildResult）；文件 commit：`<hash2>`（NR-173: close the ticket）。
+- 改動檔案：`src/app_host/rebuild_pipeline.cpp`、
+  `tests/unit/rebuild_pipeline_test.cpp`。
+- 改動內容：
+  - `rebuild_pipeline.cpp:121-127`（worker lambda）：`enumeration` 移除
+    `const`；`:123` 的 `result->failed = !enumeration.source_ok;` 維持在 move
+    之前讀取；`:126-127` 改為 `result->entries = std::move(enumeration.entries);`
+    與 `result->diagnostics = std::move(enumeration.diagnostics);`；`:124-125`
+    補一行 NR-173 註解（列舉結果 move 進 RebuildResult，不再持有副本）。
+  - `rebuild_pipeline_test.cpp`：既有 fixture（`Enumerate`）的 entries 只有
+    短字串，依 item Scope 2 加一筆長 display_name 案例——匿名命名空間新增
+    `kLongStartName`（1024 字元 + 後綴），StartMenu 分支的 display_name 改用
+    它；`TestForgedDeliveryFailureIgnored` 的 fresh-snapshot 斷言從
+    `== L"Start"` 改為 `== kLongStartName`（entries 等值斷言，行為不變的
+    證明）。AppsFolder 分支維持 `L"Apps"` 短字串（該 source 在 fixture 中
+    固定 `source_ok=false`，走失敗路徑）。
+- 驗證結果：Release build（LLVM-MinGW + Ninja）零新增 warning；完整 CTest
+  31/31 passed（數量與改動前相同）；`ctest -R "rebuild"` 1/1 passed。
+- Sanity grep 輸出（`rg -n "std::move\(enumeration"`）：
+  ```
+  src/app_host/rebuild_pipeline.cpp:126: result->entries = std::move(enumeration.entries);
+  src/app_host/rebuild_pipeline.cpp:127: result->diagnostics = std::move(enumeration.diagnostics);
+  ```
+  （entries 與 diagnostics 各一處 move，符合 item 預期。）
+- 偏差：無。
