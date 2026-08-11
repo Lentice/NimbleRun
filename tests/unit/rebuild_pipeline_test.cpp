@@ -13,6 +13,10 @@ namespace {
 
 using namespace nimblerun;
 
+// NR-173: long display_name for the fresh StartMenu entry so the moved
+// enumeration allocation is exercised end-to-end through the snapshot.
+const std::wstring kLongStartName = std::wstring(1024, L'L') + L"ong Start";
+
 struct Posted {
     UINT message = 0;
     WPARAM w_param = 0;
@@ -35,7 +39,8 @@ RebuildEnumeration Enumerate(CatalogSource source, const Settings&,
                              std::atomic<bool>*) {
     RebuildEnumeration result;
     AppEntry entry;
-    entry.display_name = source == CatalogSource::AppsFolder ? L"Apps" : L"Start";
+    entry.display_name =
+        source == CatalogSource::AppsFolder ? L"Apps" : kLongStartName;
     entry.stable_id = source == CatalogSource::AppsFolder ? L"apps" : L"start";
     entry.source = source == CatalogSource::AppsFolder ? AppSource::AppsFolder
                                                         : AppSource::UserStartMenu;
@@ -207,7 +212,7 @@ void TestForgedDeliveryFailureIgnored() {
     for (int i = 0; i < 200 && completed == 0; ++i) Sleep(5);
     Expect(completed == 1, "real result completes the generation once");
     Expect(!refresh.IsRebuildInProgress(), "real result finishes the rebuild");
-    Expect(refresh.Snapshot().front().display_name == L"Start",
+    Expect(refresh.Snapshot().front().display_name == kLongStartName,
            "real result publishes the fresh snapshot");
     CloseHandle(gate);
     CloseHandle(release);

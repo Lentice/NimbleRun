@@ -118,11 +118,13 @@ void RebuildPipeline::Start(std::vector<CatalogSource> sources) {
                     result = new RebuildResult;
                     result->generation = generation;
                     result->source = source;
-                    const RebuildEnumeration enumeration =
+                    RebuildEnumeration enumeration =
                         enumerate_source_(source, snapshot, &cancel_);
                     result->failed = !enumeration.source_ok;
-                    result->entries = enumeration.entries;
-                    result->diagnostics = enumeration.diagnostics;
+                    // NR-173: the enumeration result is moved into
+                    // RebuildResult; no copy is retained.
+                    result->entries = std::move(enumeration.entries);
+                    result->diagnostics = std::move(enumeration.diagnostics);
                 } catch (...) {
                     if (!result) {
                         if (on_exception_) on_exception_();
