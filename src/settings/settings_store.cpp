@@ -87,12 +87,23 @@ bool IsAcceptableDriveType(DWORD drive_type) {
 // Trim kept because callers (UserDataDirFromLocalAppData, Load) rely on it.
 // Mapped network drives are rejected via GetDriveTypeW here (FR-005);
 // IsDisplayablePath stays a pure shape check for the per-frame display path.
+// A path that is exactly a volume root (e.g. "C:\") is rejected too
+// (design-spec §19.5: 不掃描整顆磁碟).
 bool IsLocalAbsolutePath(std::wstring_view value) {
     const std::wstring trimmed = Trim(value);
     if (!IsDisplayablePath(trimmed)) {
         return false;
     }
-    return IsAcceptableDriveType(DriveTypeOfRoot(trimmed));
+    if (!IsAcceptableDriveType(DriveTypeOfRoot(trimmed))) {
+        return false;
+    }
+    // A bare volume root would make the recursive scan walk the whole drive
+    // (design-spec §19.5). After the shape check, exactly three characters can
+    // only be "X:\" or "X:/"; "C:\Tools\" is longer and stays acceptable.
+    if (trimmed.size() == 3) {
+        return false;
+    }
+    return true;
 }
 
 Settings DefaultSettings() {

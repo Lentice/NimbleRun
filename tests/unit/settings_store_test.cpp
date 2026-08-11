@@ -23,6 +23,7 @@ namespace fs = std::filesystem;
 
 using nimblerun::DefaultSettings;
 using nimblerun::IsAcceptableDriveType;
+using nimblerun::IsLocalAbsolutePath;
 using nimblerun::ReadVersionedLines;
 using nimblerun::Settings;
 using nimblerun::SettingsLoadResult;
@@ -143,6 +144,17 @@ void TestIsAcceptableDriveType() {
     Expect(IsAcceptableDriveType(DRIVE_NO_ROOT_DIR) == true,
            "DRIVE_NO_ROOT_DIR accepted: missing root is skipped, not rejected (NR-092)");
     Expect(IsAcceptableDriveType(DRIVE_UNKNOWN) == true, "DRIVE_UNKNOWN accepted");
+}
+
+// NR-172: a bare volume root ("X:\" / "X:/") is rejected as a catalog source
+// so the recursive scan can never walk an entire drive (design-spec §19.5).
+// Subfolders, including one with a trailing separator, stay acceptable.
+void TestIsLocalAbsolutePathRejectsVolumeRoot() {
+    Expect(IsLocalAbsolutePath(L"C:\\") == false, "C:\\ rejected: bare volume root");
+    Expect(IsLocalAbsolutePath(L"C:/") == false, "C:/ rejected: forward-slash volume root");
+    Expect(IsLocalAbsolutePath(L"C:\\Tools") == true, "C:\\Tools accepted: subfolder");
+    Expect(IsLocalAbsolutePath(L"C:\\Tools\\") == true,
+           "C:\\Tools\\ accepted: trailing separator is not a volume root");
 }
 
 void TestCatalogRootsValidation(const std::wstring& dir) {
@@ -579,6 +591,7 @@ int wmain() {
     TestValidation(MakeTempDir("validation"));
     TestCatalogRootsRoundTrip(MakeTempDir("catalogroots"));
     TestIsAcceptableDriveType();
+    TestIsLocalAbsolutePathRejectsVolumeRoot();
     TestCatalogRootsValidation(MakeTempDir("catalogvalidation"));
     TestCorrupt(MakeTempDir("corrupt"));
     TestCorruptMidFileUsesDefaults(MakeTempDir("midcorrupt"));
