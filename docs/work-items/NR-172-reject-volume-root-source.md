@@ -98,3 +98,26 @@ rg -n "IsLocalAbsolutePath|volume root" src/settings/settings_store.cpp tests/un
 ## Handoff
 
 實作者需記錄改動位置、新增測試與 build／CTest 結果。
+
+## 交接區
+
+- 實作 commit：`f26d9c9`（NR-172: reject bare volume roots as catalog sources）。
+- 改動檔案：`src/settings/settings_store.cpp`、`tests/unit/settings_store_test.cpp`。
+- 改動內容：`IsLocalAbsolutePath`（settings_store.cpp:90-104）在既有字形檢查
+  （`IsDisplayablePath`）與 drive-type 檢查（`IsAcceptableDriveType`）之後新增
+  volume-root 拒絕——Trim 後恰為三字元即為 `X:\` 或 `X:/`（字形檢查已保證
+  letter+`:`+separator），回傳 false；`C:\Tools\` 等子資料夾照舊接受。函式上方
+  註解補 §19.5「不掃描整顆磁碟」。`AddRoot`（settings_editor.cpp:393）與 Load
+  的 catalog_root 分支（settings_store.cpp:249）共用此函式，自動同時生效，兩處
+  未改。NR-164 的 drive-type 檢查順序維持：字形 → drive type → volume root。
+- 新增測試：`TestIsLocalAbsolutePathRejectsVolumeRoot`（settings_store_test.cpp:152，
+  放在 NR-164 的 `TestIsAcceptableDriveType` 之後，沿用 Expect/wmain 慣例）——
+  `C:\`→false、`C:/`→false、`C:\Tools`→true、`C:\Tools\`→true。既有
+  `TestIsAcceptableDriveType`、AddRoot（settings_editor_test.cpp）與 Load 案例全綠。
+- 驗證結果：Release build（LLVM-MinGW + Ninja）零新增 warning；完整 CTest 31/31
+  passed（數量與改動前相同）；`ctest -R "settings"` 2/2 passed。
+- Sanity grep 輸出：volume-root 拒絕位於 `IsLocalAbsolutePath`（settings_store.cpp:90
+  註解、:100 判準）；測試覆蓋 `C:\`（:153）與 `C:\Tools`（:155）。
+- 偏差：無。實作時將「三字元 + letter + `:` + 分隔符」的四條件判準簡化為
+  `size() == 3`——`IsDisplayablePath` 已保證三字元路徑只能是 `X:` 加分隔符，
+  多餘條件不成立，行為與 item 決策 1 一致。
