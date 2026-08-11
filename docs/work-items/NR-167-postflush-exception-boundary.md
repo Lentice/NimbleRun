@@ -90,3 +90,38 @@ rg -n -A4 "void IconWorker::PostFlush" src/icons/icon_worker.cpp
 ## Handoff
 
 實作者需記錄改動位置與 build／CTest 結果。
+
+### 交接區（2026-08-11，opencode）
+
+**改動檔案**：僅 `src/icons/icon_worker.cpp`（另有本次 docs 交接）。
+
+**改動內容**：`IconWorker::PostFlush`（原 `:147-170`）本體整段包入
+`try { ... } catch (...) { /* NR-167 註解，無任何動作 */ }`，與 `Post()`
+（`:141-143`）同形。catch 內不 log、不 rethrow、無診斷事件；enqueue
+（`queue_.push_back` / `*existing = std::move(task)`）與 `cv_.notify_one()`
+皆在 try 內。簽章、呼叫端（`main.cpp:938` `HidePanel`）、`Post()`、
+queue 型別、NR-099 就地取代邏輯與既有註解均未變動。
+
+**build／CTest**（Release，llvm-mingw + Ninja）：
+
+- `cmake --build build`：成功，零新增 warning（icon_worker.cpp 重編無警示）。
+- `ctest --test-dir build --output-on-failure`：**31/31 全綠**（數量不變）。
+- `ctest --test-dir build -R "icon" --output-on-failure`：**5/5 全綠**
+  （icons_cache / icon_pack_format / icon_store / icon_worker /
+  icon_request_session）。
+
+**Agent check grep 結果**：
+
+```
+147:void IconWorker::PostFlush(std::vector<std::wstring> pinned_ids, std::uint64_t now_utc) {
+148-    try {
+149-        IconTask task;
+150-        task.kind = IconTaskKind::Flush;
+151-        task.pinned_ids = std::move(pinned_ids);
+```
+
+try 包住 enqueue，catch 內靜默 return——符合預期。
+
+**偏差**：無。catch 內加了一行 NR-167 說明註解（repo 慣例：每個 catch
+附 NR 出處註解；僅為文件性文字，無任何執行期動作）。未新增測試：
+item 明令不新增測試 seam（enqueue 失敗不可注入，沿用 NR-076 先例）。

@@ -145,28 +145,34 @@ bool IconWorker::Post(IconRequest request) {
 }
 
 void IconWorker::PostFlush(std::vector<std::wstring> pinned_ids, std::uint64_t now_utc) {
-    IconTask task;
-    task.kind = IconTaskKind::Flush;
-    task.pinned_ids = std::move(pinned_ids);
-    task.now_utc = now_utc;
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (!thread_.joinable()) {
-            return;
+    try {
+        IconTask task;
+        task.kind = IconTaskKind::Flush;
+        task.pinned_ids = std::move(pinned_ids);
+        task.now_utc = now_utc;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (!thread_.joinable()) {
+                return;
+            }
+            // NR-099: a flood of hide cycles keeps at most one flush task. Replace
+            // an existing Flush in place so the latest pins/now always win; only
+            // push when the queue is below the cap (drop when full).
+            const auto existing = std::find_if(
+                queue_.begin(), queue_.end(),
+                [](const IconTask& t) { return t.kind == IconTaskKind::Flush; });
+            if (existing != queue_.end()) {
+                *existing = std::move(task);
+            } else if (queue_.size() < kMaxQueuedTasks) {
+                queue_.push_back(std::move(task));
+            }
         }
-        // NR-099: a flood of hide cycles keeps at most one flush task. Replace
-        // an existing Flush in place so the latest pins/now always win; only
-        // push when the queue is below the cap (drop when full).
-        const auto existing = std::find_if(
-            queue_.begin(), queue_.end(),
-            [](const IconTask& t) { return t.kind == IconTaskKind::Flush; });
-        if (existing != queue_.end()) {
-            *existing = std::move(task);
-        } else if (queue_.size() < kMaxQueuedTasks) {
-            queue_.push_back(std::move(task));
-        }
+        cv_.notify_one();
+    } catch (...) {
+        // NR-167: a bad_alloc during enqueue must not escape through the
+        // UI-thread window proc. Flush is best-effort; the next hide/idle/stop
+        // retries it. No logging: the diagnostic path may throw too.
     }
-    cv_.notify_one();
 }
 
 void IconWorker::CancelPrewarm() {
