@@ -135,4 +135,4 @@ rg -n "unordered_set" src/pins/pin_store.cpp
     對應整檔行數，bucket 數恆 ≥ 唯一元素數，Load 迴圈內實際不可能發生 rehash
     （改 reserve 屬非目標，故未動）。測試仍按 item 規格撰寫並覆蓋 SSO 短 id
     重複案例；型別修正後 rehash 是否發生已不影響正確性。
-  - 提交：`17b397e`（程式碼）、`<docs 提交 hash>`（本文件與 tracker）。
+  - 提交：`17b397e`（程式碼）、`462b10f`（本文件與 tracker）。
