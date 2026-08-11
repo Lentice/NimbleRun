@@ -94,3 +94,27 @@ rg -n -A3 "void WatchLoop" src/app_host/catalog_watcher.cpp
 ## Handoff
 
 實作者需記錄改動位置與 build／CTest 結果。
+
+## 交接區
+
+- 改動檔案：`src/app_host/catalog_watcher.cpp`（1 處，`WatchLoop` 本體）。
+- 改動內容：`WatchLoop`（:55）本體自 `std::vector<BYTE> buffer(kBufferBytes)`
+  （:57）起至 `CloseHandle(completion)`（:166）包進最外層 `try { ... }`；
+  新增 `catch (...)`（:167-171）內僅 return，無 post、無 log、無任何其他
+  動作——該 watcher 執行緒結束，`Stop()` 的 `join()` 正常完成。
+  改動僅為縮排搬移＋例外邊界；`WatchLoop` 正常路徑、`Stop()`、`CancelIoEx`、
+  `PostNotification`、所有簽章、測試均未變動。
+- Build／CTest（Release x64, LLVM-MinGW + Ninja）：設定與 build 成功；
+  全數 31/31 tests passed（數量與先前一致）；`-R "watcher"` 1/1 passed。
+- Warning：本改動零新增 warning（build 唯一 warning 為 `main.cpp:1410`
+  unused variable `target_size`，NR-174 交接區已記錄為改動前即存在）。
+- Sanity grep：
+  ```
+  55:void WatchLoop(std::shared_ptr<CatalogWatcher::Watch> watch) {
+  56-    try {
+  57-        std::vector<BYTE> buffer(kBufferBytes);
+  58-        const HANDLE completion = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+  ```
+  （body 有最外層 try/catch，符合 Acceptance 1。）
+- 提交：`037bb50`（NR-175: bound watcher thread exceptions at the entry）。
+- 偏差：無。
