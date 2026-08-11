@@ -204,7 +204,7 @@
 | NR-165 | RecordLaunch 的 total_launches 對 UINT64_MAX 無號回繞為 0 | 1 | `done` | — | [NR-165](work-items/NR-165-usage-counter-saturate.md) |
 | NR-166 | ReadAllBytes 只回 bool，使 ReadVersionedLines 以 stale GetLastError 誤分類為 Missing | 1 | `done` | — | [NR-166](work-items/NR-166-readallbytes-error-classification.md) |
 | NR-167 | IconWorker::PostFlush 的 queue_.push_back 缺少例外邊界，bad_alloc 穿越 window proc 終止 process | 3 | `done` | — | [NR-167](work-items/NR-167-postflush-exception-boundary.md) |
-| NR-168 | testing.md 的 MVP 驗收清單仍要求「非空搜尋維持 grid」，與 §4.3/§4.7 單欄清單矛盾 | 0 | `ready` | — | [NR-168](work-items/NR-168-testing-md-search-list.md) |
+| NR-168 | testing.md 的 MVP 驗收清單仍要求「非空搜尋維持 grid」，與 §4.3/§4.7 單欄清單矛盾 | 0 | `done` | — | [NR-168](work-items/NR-168-testing-md-search-list.md) |
 
 ## Dependency lanes
 

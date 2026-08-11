@@ -77,4 +77,11 @@ rg -n "grid|list|list" docs/testing.md | Select-Object -First 8
 
 ## Handoff
 
-實作者需記錄修改後的兩行文字與 diff 結果。
+### 交接區（2026-08-11 完成）
+
+修改後的 `docs/testing.md:34-35`（逐字）：
+
+> - [ ] Non-empty search filters only launchable apps and switches to the single-column search list.
+> - [ ] Arrow keys move through the empty-state grid; in the search list they move row by row, and `Enter` launches the selected app in both.
+
+diff 結果：`git diff --name-only` 只含 `docs/testing.md`（1 file changed, 2 insertions(+), 2 deletions(-)）。措辭已人工比對 design-spec §4.3（非空查詢切換單欄清單）與 §4.7（清單逐列移動、`Enter` 啟動選取 App）。
