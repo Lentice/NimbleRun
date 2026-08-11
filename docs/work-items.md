@@ -205,7 +205,7 @@
 | NR-166 | ReadAllBytes 只回 bool，使 ReadVersionedLines 以 stale GetLastError 誤分類為 Missing | 1 | `done` | — | [NR-166](work-items/NR-166-readallbytes-error-classification.md) |
 | NR-167 | IconWorker::PostFlush 的 queue_.push_back 缺少例外邊界，bad_alloc 穿越 window proc 終止 process | 3 | `done` | — | [NR-167](work-items/NR-167-postflush-exception-boundary.md) |
 | NR-168 | testing.md 的 MVP 驗收清單仍要求「非空搜尋維持 grid」，與 §4.3/§4.7 單欄清單矛盾 | 0 | `done` | — | [NR-168](work-items/NR-168-testing-md-search-list.md) |
-| NR-169 | PinStore::Load 的 dedup 集合持有懸空 wstring_view（SSO move 後仍指向區域變數） | 1 | `ready` | — | [NR-169](work-items/NR-169-pin-store-dangling-view.md) |
+| NR-169 | PinStore::Load 的 dedup 集合持有懸空 wstring_view（SSO move 後仍指向區域變數） | 1 | `done` | — | [NR-169](work-items/NR-169-pin-store-dangling-view.md) |
 | NR-170 | RebuildPipeline 的 thread 建立失敗 catch 漏掉 CompleteIfReady，generation 永不完成 | 3 | `ready` | — | [NR-170](work-items/NR-170-rebuild-thread-failure-completion.md) |
 | NR-171 | WM_SIZE 直接採用偽造 lParam 尺寸呼叫 Resize，可要求 65535×65535 render target | 3 | `ready` | — | [NR-171](work-items/NR-171-wm-size-lparam-dimensions.md) |
 

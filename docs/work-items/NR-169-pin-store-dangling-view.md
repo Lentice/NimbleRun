@@ -101,3 +101,38 @@ rg -n "unordered_set" src/pins/pin_store.cpp
 ## Handoff
 
 實作者需記錄改動位置、新增測試與 build／CTest 結果。
+
+## 交接區
+
+- 狀態：完成（2026-08-11）。
+- 改動檔案：
+  - `src/pins/pin_store.cpp`：`:62` 的 `seen` 由
+    `std::unordered_set<std::wstring_view>` 改為
+    `std::unordered_set<std::wstring>`（擁有鍵值）；`:50-54` 註解改寫為「set
+    擁有鍵值、不依賴 move 保留 buffer」。`:95` 的 `seen.insert(pin.stable_id)`
+    逐字保留（型別改變後該呼叫自然變為複製語意）；`continue`、`pins_.reserve`、
+    行數上限、corrupt 路徑均未動。
+  - `tests/unit/pin_store_test.cpp`：新增
+    `TestLoadDedupShortDuplicateWithLongId`（schema=2 手寫檔：`abc` 重複兩次 +
+    64 字元長 id），斷言 Load 成功、重複 pin 只出現一次且保留首位置
+    （last_seen 為首筆的 1000）、長 id 存在、Records 只有 2 筆；已註冊進
+    `wmain`。既有 `TestLoadDedupKeepsFirstPosition` 照常執行。
+  - 驗證 `src/usage/usage_store.cpp`：`:61` 的 dedup index 已是
+    `std::unordered_map<std::wstring, std::size_t>`（擁有鍵值），不受影響，
+    未更動。
+- 測試結果（Release LLVM-MinGW）：
+  - 全量 `ctest --test-dir build --output-on-failure`：31/31 通過
+    （測試套件數量不變；新測試是既有 `nimblerun_pinning_test` 內的函式）。
+  - `ctest --test-dir build -R "pin" --output-on-failure`：2/2 通過
+    （nimblerun_pinning_test、nimblerun_pin_drag_state_test）。
+  - Release build 零新增 warning。
+- Sanity grep：
+  `rg -n "unordered_set" src/pins/pin_store.cpp` 輸出 `:62 std::unordered_set<std::wstring> seen;`
+  （`:231` 是 Reconcile 的 catalog membership set，view 指向 const 參數
+  `catalog`、生命週期安全，非本次範圍）。
+- 偏差與觀察：
+  - Item 建議「長 id 觸發 rehash」強化案例：因 `seen.reserve(reserve_size)`
+    對應整檔行數，bucket 數恆 ≥ 唯一元素數，Load 迴圈內實際不可能發生 rehash
+    （改 reserve 屬非目標，故未動）。測試仍按 item 規格撰寫並覆蓋 SSO 短 id
+    重複案例；型別修正後 rehash 是否發生已不影響正確性。
+  - 提交：`17b397e`（程式碼）、`<docs 提交 hash>`（本文件與 tracker）。
