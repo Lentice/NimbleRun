@@ -2781,8 +2781,24 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
         Render(window);
         return 0;
     case WM_SIZE:
+        // NR-171: lParam's size is untrusted -- any same-integrity process can
+        // forge SendMessageW(hwnd, WM_SIZE, 0, MAKELPARAM(65535, 65535)) and
+        // ask D2D for a ~17 GB surface. Read the real client size instead; a
+        // genuine system WM_SIZE carries exactly the client rect, so the
+        // normal path is unchanged. Resize failure must not crash the tray
+        // process; the existing D2DERR_RECREATE_TARGET path (NR-067) rebuilds
+        // the target on the next render.
         if (g_render_target) {
-            g_render_target->Resize(D2D1::SizeU(LOWORD(l_param), HIWORD(l_param)));
+            RECT client{};
+            if (GetClientRect(window, &client)) {
+                const HRESULT resize_result = g_render_target->Resize(
+                    D2D1::SizeU(static_cast<UINT32>(client.right),
+                                static_cast<UINT32>(client.bottom)));
+                if (FAILED(resize_result) && g_diag) {
+                    g_diag->Write(L"resize", L"error " +
+                        std::to_wstring(static_cast<unsigned long>(resize_result)));
+                }
+            }
         }
         UpdateViewportRows(window);
         RepositionSearchEdit(window);
