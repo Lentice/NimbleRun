@@ -105,3 +105,48 @@ rg -n "CompleteIfReady" src/app_host/rebuild_pipeline.cpp
 ## Handoff
 
 實作者需記錄改動位置、新增測試與 build／CTest 結果。
+
+## 交接區
+
+- 狀態：完成（2026-08-11）。
+- 改動檔案：
+  - `src/app_host/rebuild_pipeline.h`：新增
+    `using ThreadFactory = std::function<std::thread(std::function<void()>)>;`
+    seam（沿用 `PostToUi`／`EnumerateSource` 的具體 `std::function` 型別風格，
+    無模板）；建構子新增第九個參數 `ThreadFactory thread_factory = {}`
+    （預設空即走真實 `std::thread`）；新增成員 `thread_factory_`。
+  - `src/app_host/rebuild_pipeline.cpp`：建構子 init list 將空的
+    `thread_factory` 代換為
+    `[](std::function<void()> fn) { return std::thread(std::move(fn)); }`
+    （預設路徑與改動前逐位元等價）；`Start` 的 worker 建立由
+    `workers_.emplace_back(lambda)` 改為
+    `workers_.push_back(thread_factory_(lambda))`（worker lambda 本體逐字
+    未動）；`:143-146` 的 catch 在 `ApplySourceFailure(generation, source)`
+    後補 `CompleteIfReady(generation)`，與前置 setup failure 路徑同形
+    （原 `:104` 先例：先 failure 再 complete）。
+  - `tests/unit/rebuild_pipeline_test.cpp`：新增
+    `TestThreadCreationFailureCompletes`——預置 AppsFolder 快取列後注入拋
+    `std::bad_alloc` 的 thread factory，單來源 `Explicit` Start 同步走完
+    catch 路徑，斷言 `completed == 1`、`!IsRebuildInProgress()`、快取列保留
+    （沿用 `TestCacheFailureRetention` 的「failed source cache row is
+    retained」斷言形狀）；已註冊進 `wmain`。`#include <new>`。
+- 測試結果（Release LLVM-MinGW）：
+  - 全量 `ctest --test-dir build --output-on-failure`：31/31 通過
+    （測試套件數量不變；新測試是既有 `nimblerun_rebuild_pipeline_test` 內的
+    函式）。
+  - `ctest --test-dir build -R "rebuild" --output-on-failure`：1/1 通過。
+  - 紅綠驗證：暫時移除 catch 內的 `CompleteIfReady` 後
+    `nimblerun_rebuild_pipeline_test` 立即失敗（0/1），證明新測試有咬合力；
+    恢復後全綠。
+- Sanity grep：`rg -n "CompleteIfReady" src/app_host/rebuild_pipeline.cpp`
+  輸出 `:110`（setup failure）、`:152`（thread-catch）、`:203`
+  （`CompleteIfReady` 定義）、`:220`（DrainFailures）、`:244`／`:261`
+  （OnResultMessage／OnDeliveryFailureMessage）。行號較 item 預期
+  （`:104`、`:143-146`）後移，因建構子參數新增所致。
+- 偏差與觀察：
+  - `main.cpp:1410` 有一個 `unused variable 'target_size'` 警告——`main.cpp`
+    本次未動（git diff 0 行），為 HEAD 既有警告，非本 item 引入；未列入
+    Acceptance「零新增 warning」的違反。
+  - `Start` 的迴圈改用 `push_back`（factory 回傳值），語意與原本
+    `emplace_back` 相同。
+  - 提交：`a0de2df`（程式碼）、`<docs-commit>`（本文件與 tracker）。
