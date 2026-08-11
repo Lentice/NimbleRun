@@ -102,8 +102,8 @@ rg -n "std::move\(enumeration" src/app_host/rebuild_pipeline.cpp
 
 ## 交接區
 
-- 實作 commit：`<hash1>`（NR-173: move the enumeration result into
-  RebuildResult）；文件 commit：`<hash2>`（NR-173: close the ticket）。
+- 實作 commit：`ec683a2`（NR-173: move the enumeration result into
+  RebuildResult）；文件 commit：`6cd90d8`（NR-173: close the ticket）。
 - 改動檔案：`src/app_host/rebuild_pipeline.cpp`、
   `tests/unit/rebuild_pipeline_test.cpp`。
 - 改動內容：
