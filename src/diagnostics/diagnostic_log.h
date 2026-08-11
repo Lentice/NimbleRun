@@ -26,7 +26,7 @@ public:
     // Appends one record. Newlines and tabs in `stage`/`detail` are stripped so
     // each record stays on one line. Appends are best-effort: a failure never
     // throws or aborts the caller.
-    void Write(std::wstring_view stage, std::wstring_view detail);
+    void Write(std::wstring_view stage, std::wstring_view detail) noexcept;
 
 private:
     // NR-054: Write is called from the UI thread and the icon worker

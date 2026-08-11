@@ -30,7 +30,12 @@ DiagnosticLog::DiagnosticLog(std::wstring directory, std::wstring name)
     : directory_(std::move(directory)), name_(std::move(name)) {
 }
 
-void DiagnosticLog::Write(std::wstring_view stage, std::wstring_view detail) {
+void DiagnosticLog::Write(std::wstring_view stage, std::wstring_view detail) noexcept {
+    // NR-174: the mutex lock and every allocation below can throw (system_error,
+    // bad_alloc). The contract is never-throws best-effort, so the whole body
+    // sits inside an empty catch-all: a logging failure must never abort the
+    // caller, even when the caller is itself an error path.
+    try {
     // NR-054: the whole body is serialized. Write is called from the UI side
     // and from the icon worker (IconStore::WriteLog), and the check-size /
     // rotate / open-append / write sequence must not interleave -- a rotation
@@ -85,6 +90,9 @@ void DiagnosticLog::Write(std::wstring_view stage, std::wstring_view detail) {
     DWORD written = 0;
     WriteFile(file, utf8.data(), static_cast<DWORD>(utf8.size()), &written, nullptr);
     CloseHandle(file);
+    } catch (...) {
+        return;  // NR-174: never throws; a logging failure must not abort the caller
+    }
 }
 
 } // namespace nimblerun
