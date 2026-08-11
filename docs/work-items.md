@@ -202,6 +202,9 @@
 | NR-163 | 開機自動啟動的 Run 值未加引號：含空格路徑被 Explorer 誤解析 | 3 | `done` | — | [NR-163](work-items/NR-163-run-key-unquoted.md) |
 | NR-164 | 自訂資料夾驗證接受 mapped network drive，違反 FR-005「拒絕網路磁碟」 | 1 | `done` | — | [NR-164](work-items/NR-164-settings-reject-network-drive.md) |
 | NR-165 | RecordLaunch 的 total_launches 對 UINT64_MAX 無號回繞為 0 | 1 | `done` | — | [NR-165](work-items/NR-165-usage-counter-saturate.md) |
+| NR-166 | ReadAllBytes 只回 bool，使 ReadVersionedLines 以 stale GetLastError 誤分類為 Missing | 1 | `ready` | — | [NR-166](work-items/NR-166-readallbytes-error-classification.md) |
+| NR-167 | IconWorker::PostFlush 的 queue_.push_back 缺少例外邊界，bad_alloc 穿越 window proc 終止 process | 3 | `ready` | — | [NR-167](work-items/NR-167-postflush-exception-boundary.md) |
+| NR-168 | testing.md 的 MVP 驗收清單仍要求「非空搜尋維持 grid」，與 §4.3/§4.7 單欄清單矛盾 | 0 | `ready` | — | [NR-168](work-items/NR-168-testing-md-search-list.md) |
 
 ## Dependency lanes
 
