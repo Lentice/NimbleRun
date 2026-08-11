@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -252,6 +253,41 @@ void TestLoadDuplicateLastLineWins() {
     Expect(SameRecord(recent[0], {L"app1", 9, 3000}),
            "the last line's values win and the app ranks newest");
     Expect(SameRecord(recent[1], {L"app2", 7, 2000}), "the other record is intact");
+    fs::remove_all(dir);
+}
+
+// NR-165: ParseUint64 accepts the full uint64_t range, so a hand-edited
+// total_launches = UINT64_MAX is legal data (NR-070 only rejects '-'). The
+// launch counter must saturate at the max instead of wrapping to 0 and
+// persisting the wrap on the next Save.
+void TestLaunchCountSaturatesAtMax() {
+    const std::wstring dir = MakeTempDir("saturate");
+    const std::string content = "schema=1\nsaturated_app\t18446744073709551615\t1000\n";
+    WriteBytes(dir + L"\\usage.tsv", content);
+    UsageStore store(dir);
+    Expect(store.Load() == UsageLoadResult::Loaded, "max-count file loads as legal data");
+    store.RecordLaunch(L"saturated_app", 2000);
+    Expect(store.Records()[0].total_launches == std::numeric_limits<std::uint64_t>::max(),
+           "a record at UINT64_MAX stays saturated after RecordLaunch");
+    Expect(store.Records()[0].last_launch_utc == 2000,
+           "last launch time still updates at the saturation ceiling");
+    store.RecordLaunch(L"normal_app", 2000);
+    Expect(store.Records()[1].total_launches == 1,
+           "a fresh record still starts at 1");
+    Expect(store.RecordLaunch(L"normal_app", 3000) && store.Records()[1].total_launches == 2,
+           "a non-saturated record still increments");
+    Expect(store.Save(), "save the saturated record");
+    UsageStore reloaded(dir);
+    Expect(reloaded.Load() == UsageLoadResult::Loaded, "saturated record reloads");
+    const UsageRecord* reloaded_saturated = nullptr;
+    for (const UsageRecord& record : reloaded.Records()) {
+        if (record.stable_id == L"saturated_app") {
+            reloaded_saturated = &record;
+        }
+    }
+    Expect(reloaded_saturated != nullptr &&
+               reloaded_saturated->total_launches == std::numeric_limits<std::uint64_t>::max(),
+           "UINT64_MAX survives the Save/Load round-trip unchanged");
     fs::remove_all(dir);
 }
 
@@ -622,6 +658,7 @@ int wmain() {
     TestTooManyRowsCorrupt();
     TestLoadDuplicateLastLineWins();
     TestNegativeTotalLaunchesRejected();
+    TestLaunchCountSaturatesAtMax();
     TestCorruptMidFileClearsRecords();
     TestNewerSchema();
     TestNewerSchemaSaveRefused();

@@ -5,6 +5,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -163,7 +164,12 @@ bool UsageStore::RecordLaunch(std::wstring stable_id, std::int64_t last_launch_u
     }
     for (UsageRecord& record : records_) {
         if (record.stable_id == stable_id) {
-            ++record.total_launches;
+            // NR-165: saturate instead of wrapping. usage.tsv is untrusted
+            // input and ParseUint64 accepts UINT64_MAX as legal data, so a
+            // hand-edited file must not wrap the lifetime counter back to 0.
+            if (record.total_launches != std::numeric_limits<std::uint64_t>::max()) {
+                ++record.total_launches;
+            }
             record.last_launch_utc = last_launch_utc;
             return true;
         }
