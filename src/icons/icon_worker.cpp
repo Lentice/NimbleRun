@@ -111,11 +111,21 @@ bool IconWorker::Post(IconRequest request) {
             }
             if (task.request.visible) {
                 // NR-099: visible always lands at the front; evict from the back,
-                // which is always a prewarm or flush task, never this visible one,
-                // so its fallback recovery (design-spec §FR-009) is never lost.
+                // never this visible one. The back is normally a prewarm or flush
+                // task, but NR-162: an all-visible queue makes the back the
+                // oldest queued visible request, so an evicted visible request
+                // must be reported through the dropped-keys channel -- silently
+                // dropping it would strand its pending entry and break fallback
+                // recovery (design-spec §FR-009).
                 queue_.push_front(std::move(task));
                 while (queue_.size() > kMaxQueuedTasks) {
+                    IconTask evicted = std::move(queue_.back());
                     queue_.pop_back();
+                    if (evicted.kind == IconTaskKind::Load && evicted.request.visible) {
+                        RememberDroppedRequest(evicted.request,
+                                               std::move(evicted.request.encoded_key),
+                                               store_, target_, result_message_);
+                    }
                 }
                 cv_.notify_one();
                 return true;

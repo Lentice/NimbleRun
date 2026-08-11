@@ -104,3 +104,42 @@ ctest --test-dir build -R icon_worker --output-on-failure
 rg -n -A 6 "queue_.pop_back\(\)" src/icons/icon_worker.cpp
 # expect: eviction 段對被踢的可見任務有 dropped 回報
 ```
+
+完成後在文件底部補齊本 item 的 Handoff 交接備註。
+
+## Handoff
+
+實作者需記錄改動位置、dropped 回報的訊息流、新測試與 build／CTest 結果。
+
+### 交接區（2026-08-11，實作完成）
+
+改兩檔：`src/icons/icon_worker.cpp`（14 行）與 `tests/unit/icon_worker_test.cpp`
+（+72 行，含新測試）。
+
+**`icon_worker.cpp` eviction 段（:112-130）：** 更新 NR-099 註解指出全 visible
+隊列反例；`pop_back()` 前先 move 出被踢的 task，若為 `Load` 且 `visible`，呼叫
+既有 `RememberDroppedRequest`（:37-56）——推入 `g_icon_dropped_keys` 並以
+`PostMessageW(target, result_message, 1, 0)` 觸發 drain（與 :295 的 OOM 回報同一
+通道與同一 wParam 慣例；main.cpp 的 wParam≠0 → `DrainDropped`）。
+
+**訊息流順序：** `Post` 對「本次請求」不發任何 message（結果由 worker 處理後才
+post）；eviction 只會踢到先前已入隊的請求——`BeginRequest` 在該請求 Post 時已
+同步完成，且 `Post` 只在 UI thread 呼叫，故 drop 回報送達時 `pending_` 必已存在
+該 key，drain 正確釋放。eviction 至多 pop 一次，被踢的永不可能是剛 push_front
+的本次請求。
+
+**新測試 `TestAllVisibleEvictionReportsDroppedKey`（:526-596）：** gate 卡住 v0
+後 post 64 個 visible 填滿隊列，第 65 個觸發 eviction；斷言
+`TakeIconDroppedKeys()` == `{v1|48}`（最舊 queued 可見請求）；以
+`std::set pending{L"v1|48"}` 吃 dropped keys 後 `pending.empty()`（模擬
+`DrainDropped` 的 erase 語意）；釋放 gate 後 65 個結果全到、v1 永不出現、
+`got.size() == kMaxQueuedTasks + 1`。
+
+**取捨：** 測試用既有 :683-687 的模式（本機 `std::set` + `TakeIconDroppedKeys`）
+而非直接操作 `IconRequestSession`——該 class 不在 icon_worker_test 的 link 範圍
+（`nimblerun_icons` only），接入需改 `tests/CMakeLists.txt`（超出 item 允許
+範圍），而 `DrainDropped` 本就是對每個 key `pending_.erase`，語意等價。
+
+**驗證結果：** Release build 零新增 warning；CTest 31/31 全綠（數量不變）；
+`ctest -R icon_worker` 1/1 綠；rg 確認 eviction 段（:123-128）對被踢的可見任務
+有 dropped 回報。無偏離 item 決策。

@@ -523,7 +523,76 @@ void TestVisibleEvictsPrewarmWhenFull() {
     DestroyWindow(window);
 }
 
-// NR-099: a flood of flush signals coalesces into a single latest task, never
+// NR-162: the queue can hold only visible requests. The NR-099 "back is
+// always a prewarm" assumption then breaks: pushing one more visible request
+// past the cap evicts the oldest QUEUED visible request, and that key must be
+// reported through the dropped-keys channel so the UI clears its pending
+// entry (design-spec §FR-009). Without the report the key would stay pending
+// forever and only ever show the fallback.
+void TestAllVisibleEvictionReportsDroppedKey() {
+    const HWND window = CreateMessageWindow();
+    nimblerun::TakeIconDroppedKeys();  // clean slate for this test
+    FakeProvider provider;
+    provider.gate = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    IconWorker worker(window, kReadyMessage, provider);
+    worker.Start();
+
+    // v0 is grabbed by the worker and blocks on the gate; only the queue below
+    // is reachable by later posts, so kMaxQueuedTasks + 1 more visible posts
+    // provably overflow the cap by exactly one.
+    worker.Post({Entry(L"v0"), Key(L"v0"), true});
+    const DWORD deadline = GetTickCount() + 1000;
+    while (!provider.entered.load() && GetTickCount() < deadline) {
+        Sleep(1);
+    }
+    Expect(provider.entered.load(), "worker is blocked on the gated visible request");
+
+    // Fill the queue to the cap with visible requests; each lands at the front,
+    // so the back holds the oldest queued one (v1).
+    for (int i = 1; i <= static_cast<int>(IconWorker::kMaxQueuedTasks); ++i) {
+        worker.Post({Entry(L"v" + std::to_wstring(i)),
+                     Key(L"v" + std::to_wstring(i)), true});
+    }
+    // One more visible request: push_front grows the queue past the cap, so the
+    // eviction pops the back -- the oldest queued visible request.
+    worker.Post({Entry(L"v" + std::to_wstring(IconWorker::kMaxQueuedTasks + 1)),
+                 Key(L"v" + std::to_wstring(IconWorker::kMaxQueuedTasks + 1)), true});
+
+    // NR-162: the evicted visible key is reported through the dropped-keys
+    // channel, never silently lost.
+    std::set<std::wstring> dropped;
+    for (const std::wstring& key : nimblerun::TakeIconDroppedKeys()) {
+        dropped.insert(key);
+    }
+    Expect(dropped == std::set<std::wstring>({L"v1|48"}),
+           "the evicted oldest visible key is reported as dropped");
+    // Acceptance: consuming the dropped keys clears the key's pending entry
+    // (the same erase IconRequestSession::DrainDropped performs).
+    std::set<std::wstring> pending{L"v1|48"};
+    for (const std::wstring& key : dropped) {
+        pending.erase(key);
+    }
+    Expect(pending.empty(), "the dropped key clears its pending entry");
+
+    // Every request that stayed queued still reports a result; the evicted
+    // one never does.
+    SetEvent(provider.gate);
+    std::vector<std::unique_ptr<IconResult>> results;
+    Expect(PumpResults(window, results,
+                       static_cast<int>(IconWorker::kMaxQueuedTasks) + 1),
+           "the in-flight and every surviving visible request report");
+    std::set<std::wstring> got;
+    for (const auto& result : results) {
+        got.insert(result->encoded_key);
+    }
+    Expect(got.count(L"v1|48") == 0, "the evicted request never reports a result");
+    Expect(got.size() == static_cast<std::size_t>(IconWorker::kMaxQueuedTasks) + 1,
+           "every non-evicted request reports exactly one result");
+
+    CloseHandle(provider.gate);
+    worker.Stop();
+    DestroyWindow(window);
+}
 // a stacked backlog. A gated Load keeps the worker busy so the flush tasks
 // provably pile up (unprocessed) in the queue.
 void TestFlushCoalesces() {
@@ -1058,6 +1127,7 @@ int wmain() {
     TestVisibleJumpsAheadOfQueuedPrewarm();
     TestQueueCapDropsPrewarmWhenFull();
     TestVisibleEvictsPrewarmWhenFull();
+    TestAllVisibleEvictionReportsDroppedKey();
     TestFlushCoalesces();
     TestCancelPrewarmDropsQueuedPrewarm();
     TestStopDropsQueueAndSilencesNewPosts();
