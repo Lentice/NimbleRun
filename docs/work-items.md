@@ -199,7 +199,7 @@
 | NR-160 | NR-151 的 OOM 最後手段已失效：!recorded 分支的 inline post 被當成 token 靜默丟棄 | 3 | `done` | NR-151 | [NR-160](work-items/NR-160-dead-inline-failure-fallback.md) |
 | NR-161 | icon_worker OOM 路徑 use-after-free：Register 回 0 後解引用已銷毀的 IconResult | 3 | `done` | — | [NR-161](work-items/NR-161-icon-worker-oom-use-after-free.md) |
 | NR-162 | 全 visible 隊列 eviction：被踢的可見請求永不回報，pending_ 永久卡死 | 3 | `done` | — | [NR-162](work-items/NR-162-visible-eviction-never-reported.md) |
-| NR-163 | 開機自動啟動的 Run 值未加引號：含空格路徑被 Explorer 誤解析 | 3 | `ready` | — | [NR-163](work-items/NR-163-run-key-unquoted.md) |
+| NR-163 | 開機自動啟動的 Run 值未加引號：含空格路徑被 Explorer 誤解析 | 3 | `done` | — | [NR-163](work-items/NR-163-run-key-unquoted.md) |
 
 ## Dependency lanes
 

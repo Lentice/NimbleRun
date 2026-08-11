@@ -50,9 +50,13 @@ bool SetStartupEnabled(bool enabled, const StartupOptionRegistry& registry) {
         RegCloseKey(key);
         return false;
     }
+    // Run values are command strings: Explorer runs them through
+    // CreateProcessW(lpApplicationName = nullptr), so a path containing
+    // spaces must be quoted to survive the command-line tokenizer.
+    const std::wstring quoted = L"\"" + path + L"\"";
     status = RegSetValueExW(key, kRunValueName, 0, REG_SZ,
-                            reinterpret_cast<const BYTE*>(path.c_str()),
-                            static_cast<DWORD>((path.size() + 1) * sizeof(wchar_t)));
+                            reinterpret_cast<const BYTE*>(quoted.c_str()),
+                            static_cast<DWORD>((quoted.size() + 1) * sizeof(wchar_t)));
     RegCloseKey(key);
     return status == ERROR_SUCCESS;
 }

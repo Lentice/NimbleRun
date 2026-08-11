@@ -69,6 +69,10 @@ std::wstring ModulePath() {
     return path;
 }
 
+std::wstring QuotedModulePath() {
+    return L"\"" + ModulePath() + L"\"";
+}
+
 bool WriteValue(const std::wstring& name, const std::wstring& data) {
     HKEY key = nullptr;
     if (RegCreateKeyExW(HKEY_CURRENT_USER, TestSubkey().c_str(), 0, nullptr,
@@ -146,7 +150,7 @@ void TestEnableCreatesEntry() {
     Expect(SetStartupEnabled(true, TestRegistry()), "enable writes the entry");
     std::wstring value;
     Expect(ReadValue(L"NimbleRun", value), "the Run value exists after enable");
-    Expect(value == ModulePath(), "the value points at the current module path");
+    Expect(value == QuotedModulePath(), "the value points at the quoted module path");
 }
 
 void TestDisableRemovesOnlyOwnValue() {
@@ -192,7 +196,7 @@ void TestRecreateAfterMove() {
     Expect(SetStartupEnabled(true, TestRegistry()), "enable rewrites the entry");
     std::wstring value;
     Expect(ReadValue(L"NimbleRun", value), "the value exists after re-create");
-    Expect(value == ModulePath(), "re-created value points at the current module path");
+    Expect(value == QuotedModulePath(), "re-created value points at the quoted module path");
 }
 
 void TestAutoStartEditorRoundTrip() {

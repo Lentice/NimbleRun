@@ -80,3 +80,30 @@ ctest --test-dir build -R startup_option --output-on-failure
 rg -n "RegSetValueExW" src/settings/startup_option.cpp
 # expect: 寫入值含前後引號
 ```
+
+完成後在文件底部補齊本 item 的 Handoff 交接備註。
+
+## Handoff
+
+實作者需記錄改動位置、更新的測試斷言與 build／CTest 結果。
+
+### 交接區（2026-08-11，實作完成）
+
+改兩檔：`src/settings/startup_option.cpp`（8 行）與
+`tests/unit/startup_option_test.cpp`（8 行）。
+
+**`startup_option.cpp` enable 分支（:53-60）：** 新增
+`const std::wstring quoted = L"\"" + path + L"\"";`，`RegSetValueExW` 改寫入
+`quoted`（位元組數依 `quoted.size() + 1` 計算，含 NUL）。附一行註解說明 Run 值
+是命令字串、含空格路徑須加引號才能通過命令列 tokenizer（正規做法，非新增防禦）。
+disabled 分支的 `RegDeleteValueW`、登錄路徑與 `kRunValueName` 未動。
+
+**測試更新：** 新增 helper `QuotedModulePath()`（`L"\"" + ModulePath() + L"\""`）；
+兩處期望值斷言改為 `value == QuotedModulePath()`——`TestEnableCreatesEntry`
+（:158）與 `TestRecreateAfterMove`（:203，re-enable 重寫路徑案例）；`WriteValue`
+（模擬 stale path 用）未動。
+
+**驗證結果：** rg 確認 `RegSetValueExW` 僅 enable 分支一處（:57）、寫入值為
+`quoted`（前後引號）；Release build 零新增 warning（0 warnings/errors）；
+CTest 31/31 全綠（數量不變）；`ctest -R startup_option` 1/1 綠。無偏離 item
+決策。
