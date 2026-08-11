@@ -53,112 +53,118 @@ void PostNotification(CatalogWatcher::Watch& watch, int level) {
 }
 
 void WatchLoop(std::shared_ptr<CatalogWatcher::Watch> watch) {
-    std::vector<BYTE> buffer(kBufferBytes);
-    const HANDLE completion = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-    if (!completion) {
-        return;
-    }
-    OVERLAPPED overlapped{};
-    overlapped.hEvent = completion;
-    // NR-074: one full-rescan notice per failure episode. A persistent error
-    // (root removed, access denied) must not post a marker every second -- that
-    // drives a 1 Hz rebuild loop in the host (§FR-008/NFR-002).
-    bool reported = false;
-    DWORD pending_retry_ms = kPendingNotifyRetryInitialMs;
-    for (;;) {
-        if (watch->stop.load()) {
-            break;
+    try {
+        std::vector<BYTE> buffer(kBufferBytes);
+        const HANDLE completion = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        if (!completion) {
+            return;
         }
-        // NR-101/105: re-deliver an intent a failed post retained earlier.
-        // PostNotification guards an invalid window itself.
-        if (watch->pending_notify.load() != 0) {
-            PostNotification(*watch, watch->pending_notify.load());
-        }
-        ResetEvent(completion);
-        const BOOL started = ReadDirectoryChangesW(
-            watch->directory,
-            buffer.data(),
-            static_cast<DWORD>(buffer.size()),
-            watch->recursive ? TRUE : FALSE,
-            kNotifyFilter,
-            nullptr,
-            &overlapped,
-            nullptr);
-        const DWORD start_error = started == FALSE ? GetLastError() : ERROR_SUCCESS;
-        // Stop() can win the race immediately before this read starts, so its
-        // first CancelIoEx may have seen no pending operation. Cancel again
-        // after the call to close that gap before entering the wait.
-        if (watch->stop.load()) {
-            CancelIoEx(watch->directory, &overlapped);
-        }
-        if (started == FALSE && start_error != ERROR_IO_PENDING) {
-            if (start_error == ERROR_OPERATION_ABORTED || watch->stop.load()) {
-                break;  // CancelIoEx from Stop(): normal shutdown
-            }
-            // ERROR_INVALID_PARAMETER (root not a directory / too small buffer)
-            // or a transient failure: report a full rescan and back off instead
-            // of busy-looping. Report the first failure only; the backoff sleep
-            // continues, and the next successful ReadDirectoryChangesW resets
-            // the flag so a genuine later event is reported again.
-            if (!reported) {
-                PostNotification(*watch, kNotifyFullRescan);
-            }
-            reported = true;
-            Sleep(1000);
-            continue;
-        }
-
+        OVERLAPPED overlapped{};
+        overlapped.hEvent = completion;
+        // NR-074: one full-rescan notice per failure episode. A persistent error
+        // (root removed, access denied) must not post a marker every second --
+        // that drives a 1 Hz rebuild loop in the host (§FR-008/NFR-002).
+        bool reported = false;
+        DWORD pending_retry_ms = kPendingNotifyRetryInitialMs;
         for (;;) {
-            const DWORD wait_ms = watch->pending_notify.load() != 0
-                                      ? pending_retry_ms
-                                      : INFINITE;
-            const DWORD wait = WaitForSingleObject(completion, wait_ms);
-            if (wait == WAIT_TIMEOUT) {
+            if (watch->stop.load()) {
+                break;
+            }
+            // NR-101/105: re-deliver an intent a failed post retained earlier.
+            // PostNotification guards an invalid window itself.
+            if (watch->pending_notify.load() != 0) {
                 PostNotification(*watch, watch->pending_notify.load());
-                if (watch->pending_notify.load() != 0) {
-                    // ponytail: conditional exponential wait, capped at 30s;
-                    // no idle wakeups when there is no retained intent.
-                    pending_retry_ms = pending_retry_ms < kPendingNotifyRetryMaxMs
-                                           ? pending_retry_ms * 2
-                                           : kPendingNotifyRetryMaxMs;
-                } else {
-                    pending_retry_ms = kPendingNotifyRetryInitialMs;
+            }
+            ResetEvent(completion);
+            const BOOL started = ReadDirectoryChangesW(
+                watch->directory,
+                buffer.data(),
+                static_cast<DWORD>(buffer.size()),
+                watch->recursive ? TRUE : FALSE,
+                kNotifyFilter,
+                nullptr,
+                &overlapped,
+                nullptr);
+            const DWORD start_error = started == FALSE ? GetLastError() : ERROR_SUCCESS;
+            // Stop() can win the race immediately before this read starts, so its
+            // first CancelIoEx may have seen no pending operation. Cancel again
+            // after the call to close that gap before entering the wait.
+            if (watch->stop.load()) {
+                CancelIoEx(watch->directory, &overlapped);
+            }
+            if (started == FALSE && start_error != ERROR_IO_PENDING) {
+                if (start_error == ERROR_OPERATION_ABORTED || watch->stop.load()) {
+                    break;  // CancelIoEx from Stop(): normal shutdown
                 }
+                // ERROR_INVALID_PARAMETER (root not a directory / too small buffer)
+                // or a transient failure: report a full rescan and back off instead
+                // of busy-looping. Report the first failure only; the backoff sleep
+                // continues, and the next successful ReadDirectoryChangesW resets
+                // the flag so a genuine later event is reported again.
+                if (!reported) {
+                    PostNotification(*watch, kNotifyFullRescan);
+                }
+                reported = true;
+                Sleep(1000);
                 continue;
             }
-            if (wait != WAIT_OBJECT_0) {
-                CloseHandle(completion);
-                return;
-            }
-            break;
-        }
-        if (watch->stop.load()) {
-            break;
-        }
 
-        DWORD bytes_returned = 0;
-        if (GetOverlappedResult(watch->directory, &overlapped, &bytes_returned, FALSE) == FALSE) {
-            const DWORD error = GetLastError();
-            if (error == ERROR_OPERATION_ABORTED || watch->stop.load()) {
-                break;  // CancelIoEx from Stop(): normal shutdown
+            for (;;) {
+                const DWORD wait_ms = watch->pending_notify.load() != 0
+                                          ? pending_retry_ms
+                                          : INFINITE;
+                const DWORD wait = WaitForSingleObject(completion, wait_ms);
+                if (wait == WAIT_TIMEOUT) {
+                    PostNotification(*watch, watch->pending_notify.load());
+                    if (watch->pending_notify.load() != 0) {
+                        // ponytail: conditional exponential wait, capped at 30s;
+                        // no idle wakeups when there is no retained intent.
+                        pending_retry_ms = pending_retry_ms < kPendingNotifyRetryMaxMs
+                                               ? pending_retry_ms * 2
+                                               : kPendingNotifyRetryMaxMs;
+                    } else {
+                        pending_retry_ms = kPendingNotifyRetryInitialMs;
+                    }
+                    continue;
+                }
+                if (wait != WAIT_OBJECT_0) {
+                    CloseHandle(completion);
+                    return;
+                }
+                break;
             }
-            if (!reported) {
+            if (watch->stop.load()) {
+                break;
+            }
+
+            DWORD bytes_returned = 0;
+            if (GetOverlappedResult(watch->directory, &overlapped, &bytes_returned, FALSE) == FALSE) {
+                const DWORD error = GetLastError();
+                if (error == ERROR_OPERATION_ABORTED || watch->stop.load()) {
+                    break;  // CancelIoEx from Stop(): normal shutdown
+                }
+                if (!reported) {
+                    PostNotification(*watch, kNotifyFullRescan);
+                }
+                reported = true;
+                Sleep(1000);
+                continue;
+            }
+            pending_retry_ms = kPendingNotifyRetryInitialMs;
+            reported = false;
+            if (bytes_returned == 0) {
+                // Buffer overflow: the event list is incomplete, rescan the source.
                 PostNotification(*watch, kNotifyFullRescan);
+                continue;
             }
-            reported = true;
-            Sleep(1000);
-            continue;
+            PostNotification(*watch, kNotifyChange);
         }
-        pending_retry_ms = kPendingNotifyRetryInitialMs;
-        reported = false;
-        if (bytes_returned == 0) {
-            // Buffer overflow: the event list is incomplete, rescan the source.
-            PostNotification(*watch, kNotifyFullRescan);
-            continue;
-        }
-        PostNotification(*watch, kNotifyChange);
+        CloseHandle(completion);
+    } catch (...) {
+        // NR-175: an allocation failure inside the body (64 KiB buffer, STL
+        // work) must not escape a std::thread entry to std::terminate. Return
+        // quietly: this watcher ends and Stop()'s join completes normally.
     }
-    CloseHandle(completion);
 }
 
 } // namespace
