@@ -200,7 +200,7 @@
 | NR-161 | icon_worker OOM 路徑 use-after-free：Register 回 0 後解引用已銷毀的 IconResult | 3 | `done` | — | [NR-161](work-items/NR-161-icon-worker-oom-use-after-free.md) |
 | NR-162 | 全 visible 隊列 eviction：被踢的可見請求永不回報，pending_ 永久卡死 | 3 | `done` | — | [NR-162](work-items/NR-162-visible-eviction-never-reported.md) |
 | NR-163 | 開機自動啟動的 Run 值未加引號：含空格路徑被 Explorer 誤解析 | 3 | `done` | — | [NR-163](work-items/NR-163-run-key-unquoted.md) |
-| NR-164 | 自訂資料夾驗證接受 mapped network drive，違反 FR-005「拒絕網路磁碟」 | 1 | `ready` | — | [NR-164](work-items/NR-164-settings-reject-network-drive.md) |
+| NR-164 | 自訂資料夾驗證接受 mapped network drive，違反 FR-005「拒絕網路磁碟」 | 1 | `done` | — | [NR-164](work-items/NR-164-settings-reject-network-drive.md) |
 | NR-165 | RecordLaunch 的 total_launches 對 UINT64_MAX 無號回繞為 0 | 1 | `ready` | — | [NR-165](work-items/NR-165-usage-counter-saturate.md) |
 
 ## Dependency lanes

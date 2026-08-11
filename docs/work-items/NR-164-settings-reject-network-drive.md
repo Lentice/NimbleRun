@@ -116,3 +116,41 @@ rg -n "GetDriveTypeW|IsAcceptableDriveType" src/settings/settings_store.cpp test
 ## Handoff
 
 實作者需記錄改動位置、新增測試與 build／CTest 結果。
+
+### 交接區（2026-08-11，實作完成）
+
+改三檔：`src/settings/settings_store.cpp`、`src/settings/settings_store.h`、
+`tests/unit/settings_store_test.cpp`。
+
+**`settings_store.cpp`：** 在 anonymous namespace 新增薄層 `DriveTypeOfRoot`
+（:72-76）——取字形檢查已保證的前三個字元為 drive root，`/` 正規化為 `\\`
+後呼叫 `GetDriveTypeW`（唯一 Win32 呼叫點）。`IsLocalAbsolutePath`（:86-96）
+改為字形檢查（`IsDisplayablePath`，**未動**）通過後回傳
+`IsAcceptableDriveType(DriveTypeOfRoot(trimmed))`，並依 Scope §3 補一行註解
+（mapped drive 由 GetDriveTypeW 拒絕、IsDisplayablePath 保持純字形檢查）。
+`IsAcceptableDriveType(DWORD)`（:80-82，nimblerun namespace、非匿名）為純函式：
+`return drive_type != DRIVE_REMOTE;`——只拒絕 REMOTE，NO_ROOT_DIR／UNKNOWN
+照舊接受（NR-092「缺失 root 先略過」語意保留）。`settings_store.h` 新增宣告
+（:45）並引入 `<windows.h>`（沿用 repo 內使用 Win32 型別標頭的慣例）；
+`app_filter.cpp`／`user_folder_catalog.cpp` 未動，無 `GetFullPathNameW`
+正規化、無新設定、無新 UI 字串（non-goals 全部遵守）。
+
+**測試：** `settings_store_test.cpp` 新增 `TestIsAcceptableDriveType`（:138-146）
+——`DRIVE_REMOTE` → false、`DRIVE_FIXED`／`DRIVE_REMOVABLE`／
+`DRIVE_NO_ROOT_DIR`／`DRIVE_UNKNOWN` → true，已註冊進 `wmain`（:563）。
+
+**驗證結果：**
+- Release build（`cmake --build build --clean-first`）：僅 `main.cpp:1410`
+  既有 warning（本 item 未觸碰該檔，非新增）；改動三檔 0 warnings/errors。
+- CTest 全量：**31/31 通過**（測試數量不變）。
+- `ctest -R "settings"`：**2/2 通過**（nimblerun_settings_test、
+  nimblerun_settings_ui_test）。
+- 同 item Agent checks 的 sanity grep：
+  `rg -n "GetDriveTypeW|IsAcceptableDriveType" src/settings tests/unit` ——
+  `GetDriveTypeW` 僅 `settings_store.cpp:75` 一處呼叫；`IsAcceptableDriveType`
+  宣告／定義／測試覆蓋齊全（見 item §Agent checks 期望形狀）。
+
+**執行環境備註：** 首次 build 曾因執行中的 NimbleRun.exe 鎖住輸出檔而 link
+失敗（Permission denied），`Stop-Process` 後重建成功——與本 item 程式碼無關。
+
+無偏離 item 決策。
