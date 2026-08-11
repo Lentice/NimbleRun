@@ -149,4 +149,4 @@ rg -n "CompleteIfReady" src/app_host/rebuild_pipeline.cpp
     Acceptance「零新增 warning」的違反。
   - `Start` 的迴圈改用 `push_back`（factory 回傳值），語意與原本
     `emplace_back` 相同。
-  - 提交：`a0de2df`（程式碼）、`<docs-commit>`（本文件與 tracker）。
+  - 提交：`a0de2df`（程式碼）、`7247aff`（本文件與 tracker）。
