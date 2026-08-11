@@ -31,8 +31,8 @@ When testing a conflicting or Windows-reserved shortcut, confirm that NimbleRun 
 - [ ] Hotkey focuses the search field and does not leak input to the previous foreground app.
 - [ ] Conflicting or Windows-reserved shortcuts are rejected without intercepting native input.
 - [ ] Empty search shows pins followed by usage-ranked apps without duplicates.
-- [ ] Non-empty search filters only launchable apps in the same grid.
-- [ ] Arrow keys move through the grid and `Enter` launches the selected app.
+- [ ] Non-empty search filters only launchable apps and switches to the single-column search list.
+- [ ] Arrow keys move through the empty-state grid; in the search list they move row by row, and `Enter` launches the selected app in both.
 - [ ] Win32 Start Menu and AppsFolder packaged apps can be discovered and launched.
 - [ ] Multiple configured local folders honor each folder's recursive setting and scan only the selected executable extension allowlist.
 - [ ] Start Menu or configured-folder changes refresh the catalog after the debounce window without rescanning on every panel show.
