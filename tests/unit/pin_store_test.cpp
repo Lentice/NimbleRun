@@ -399,6 +399,27 @@ void TestLoadDedupKeepsFirstPosition() {
     fs::remove_all(dir);
 }
 
+// NR-169: the dedup set used to hold views into a local PinRecord, which
+// dangles for an SSO short id once the local is destroyed; the set now owns
+// its keys. A file with the same short id twice and then a long (heap-backed)
+// id -- which re-hashes every key if the set must grow -- loads with the
+// duplicate appearing exactly once and in first position.
+void TestLoadDedupShortDuplicateWithLongId() {
+    const std::wstring dir = MakeTempDir("loaddedup_ssorehash");
+    const std::string long_id(64, 'x');
+    const std::string content =
+        "schema=2\nabc\t1000\tShort\nabc\t2000\tShortAgain\n" +
+        long_id + "\t3000\tLong\n";
+    WriteBytes(dir + L"\\favorites.txt", content);
+    PinStore store(dir);
+    Expect(store.Load() == PinLoadResult::Loaded, "short duplicate + long id file loads");
+    Expect(SameIds(store.OrderedPins(), {L"abc", std::wstring(64, L'x')}),
+           "duplicate short id appears once, keeps first position, long id present");
+    Expect(store.Records()[0].last_seen_utc == 1000, "first occurrence's last_seen kept");
+    Expect(store.Records().size() == 2, "no extra record for the duplicated id");
+    fs::remove_all(dir);
+}
+
 // NR-122: timing block for the two hot paths this item linearized. A
 // cap-boundary load (kMaxRows rows) measures the O(n) dedup load; a 50,000-pin
 // reconcile against a 5,000-entry catalog measures the O(n+m) membership set.
@@ -623,6 +644,7 @@ int wmain() {
     TestLoadSchema1File();
     TestTooManyRowsCorrupt();
     TestLoadDedupKeepsFirstPosition();
+    TestLoadDedupShortDuplicateWithLongId();
     TestLoadAndReconcileTiming();
     TestLoadTrailingFieldsIgnored();
     TestSaveRoundTripsDisplayName();

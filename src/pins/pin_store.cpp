@@ -49,9 +49,9 @@ PinLoadResult PinStore::Load() {
 
     // NR-122: the O(n²) dedup scan per row became an O(n) membership set. Line
     // order is pin order, so a duplicated stable id keeps its first position.
-    // The set holds views into each accepted pin's stable_id; the underlying
-    // buffers are moved (never mutated or reallocated) into pins_, which is
-    // reserved up front so those views stay valid for the whole loop.
+    // NR-169: the set owns its keys -- each insert copies the stable_id into
+    // the set, so it does not rely on move preserving the local pin's buffer
+    // (an SSO short string dangles once the local is destroyed).
     //
     // The row cap counts parsed (non-empty) rows, not raw lines: SplitLines
     // adds one trailing empty line for a file that ends in '\n' -- exactly how
@@ -59,7 +59,7 @@ PinLoadResult PinStore::Load() {
     // pre-check would quarantine our own cap-exact output. Reaching the cap
     // aborts mid-parse, which is the same corrupt path as any over-limit file.
     const std::size_t reserve_size = std::min(lines.size(), kMaxRows);
-    std::unordered_set<std::wstring_view> seen;
+    std::unordered_set<std::wstring> seen;
     seen.reserve(reserve_size);
     pins_.reserve(reserve_size);
     std::size_t data_rows = 0;
