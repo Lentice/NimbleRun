@@ -108,3 +108,55 @@ rg -n "GetLastError|ERROR_FILE_TOO_LARGE|error_out" src/storage/atomic_text_file
 ## Handoff
 
 實作者需記錄改動位置、新增測試與 build／CTest 結果。
+
+## 交接區（NR-166 done, 2026-08-11）
+
+**Files changed**
+
+- `src/storage/atomic_text_file.h` — `ReadAllBytes`、`ReadVersionedLines`
+- `tests/unit/settings_store_test.cpp` — 新增回歸測試
+- `docs/work-items.md` — NR-166 狀態 `ready` → `done`
+
+**Exact change**
+
+- `ReadAllBytes(path, out)` → `ReadAllBytes(path, out, DWORD* error_out = nullptr)`。
+  三條失敗路徑各自保存錯誤碼：`CreateFileW` 失敗立即 `*error_out = GetLastError()`；
+  `ReadFile` 失敗在 `CloseHandle` 之前 `error = GetLastError()`；容量超限分支
+  明確 `error = ERROR_FILE_TOO_LARGE`（不再依賴 thread-local last error，呼叫端
+  也不需事後讀它）。成功時 `error_out` 不被寫入；僅失敗時寫入。未更動
+  `VersionedReadStatus` 列舉、未更動任何 store 的 Load／PreserveCorrupt／通知語意。
+- `ReadVersionedLines` 的 `!ReadAllBytes` 分支改讀 `error`（區域變數）分流
+  `Missing`（僅 2／3）／`Unreadable`（其餘含 size cap），不再 `GetLastError()`。
+- 新增測試 `TestReadVersionedLinesOversizeNotMissing`：先 `SetLastError(ERROR_FILE_NOT_FOUND)`
+  污染 thread last-error，寫入 `kMaxReadBytes + 4096` 位元組的既有檔後
+  `ReadVersionedLines` 斷言為 `Unreadable`（非 `Missing`），置於 NR-057 的
+  `TestReadVersionedLines` 旁，並在 `wmain` 註冊。
+
+**Test results**
+
+- Release x64 build：成功。唯一警告為 `src/app_host/main.cpp:1410` 的
+  pre-existing unused-variable `target_size`（本 item 未觸及該檔，非新增警告）。
+- 全 CTest：31/31 passed（數量不變，與改動前一致）。
+- `ctest -R "settings|usage|pin|catalog"`：10/10 passed。
+
+**Sanity grep output**
+
+```
+41:    return GetLastError() == ERROR_ALREADY_EXISTS;
+83:// NR-166: reports the failure reason through error_out instead of leaving the
+87:// error_out is not touched; on failure it receives the captured code.
+89:                         DWORD* error_out = nullptr) {
+93:        if (error_out != nullptr) {
+94:            *error_out = GetLastError();  // NR-166: capture before any other Win32 call
+106:            error = GetLastError();  // NR-166: capture before CloseHandle may clobber it
+114:            error = ERROR_FILE_TOO_LARGE;  // NR-166: explicit, never a stale last-error
+121:    if (!success && error_out != nullptr) {
+122:        *error_out = error;
+```
+
+（`:41` 是 `EnsureDirectory` 的既有 `GetLastError`，非本 item 範圍。）
+
+**Deviations**
+
+- 無。全部依 item decisions 實作；`error_out` 只在失敗時寫入（決策 1 允許
+  「直接寫出錯誤碼」，成功路徑的寫入無呼叫端需要，故省略）。

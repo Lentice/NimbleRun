@@ -80,19 +80,30 @@ inline constexpr std::size_t kMaxReadBytes = 16 * 1024 * 1024;
 // still enforce what a legal file may contain. 1M is 50x the ~20k legal rows.
 inline constexpr std::size_t kMaxLines = 1'000'000;
 
-inline bool ReadAllBytes(const std::wstring& path, std::string& out) {
+// NR-166: reports the failure reason through error_out instead of leaving the
+// caller to read the thread-local last-error afterwards -- a later Win32 call
+// (e.g. CloseHandle) or a missing SetLastError can leave a stale value there
+// that would misclassify an over-cap or failed read as Missing. On success
+// error_out is not touched; on failure it receives the captured code.
+inline bool ReadAllBytes(const std::wstring& path, std::string& out,
+                         DWORD* error_out = nullptr) {
     const HANDLE file = CreateFileW(path.c_str(), GENERIC_READ,
         FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (file == INVALID_HANDLE_VALUE) {
+        if (error_out != nullptr) {
+            *error_out = GetLastError();  // NR-166: capture before any other Win32 call
+        }
         return false;
     }
     out.clear();
     char buffer[4096];
     BOOL ok = TRUE;
+    DWORD error = ERROR_SUCCESS;
     while (ok != FALSE) {
         DWORD read = 0;
         ok = ReadFile(file, buffer, sizeof(buffer), &read, nullptr);
         if (ok == FALSE) {
+            error = GetLastError();  // NR-166: capture before CloseHandle may clobber it
             break;
         }
         if (read == 0) {
@@ -100,12 +111,16 @@ inline bool ReadAllBytes(const std::wstring& path, std::string& out) {
         }
         if (out.size() + read > kMaxReadBytes) {
             ok = FALSE;  // NR-122: over the read cap -> treated as unreadable
+            error = ERROR_FILE_TOO_LARGE;  // NR-166: explicit, never a stale last-error
             break;
         }
         out.append(buffer, read);
     }
     const bool success = ok != FALSE;
     CloseHandle(file);
+    if (!success && error_out != nullptr) {
+        *error_out = error;
+    }
     return success;
 }
 
@@ -301,8 +316,11 @@ inline VersionedReadStatus ReadVersionedLines(std::wstring_view directory,
 
     const std::wstring path = JoinPath(directory, name);
     std::string bytes;
-    if (!ReadAllBytes(path, bytes)) {
-        const DWORD error = GetLastError();
+    DWORD error = ERROR_SUCCESS;
+    if (!ReadAllBytes(path, bytes, &error)) {
+        // NR-166: classify from the captured code, never the thread last-error
+        // (CloseHandle or an unrelated prior call can leave a stale 2/3 there,
+        // misreporting an over-cap or unreadable file as Missing).
         if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND) {
             return VersionedReadStatus::Missing;
         }

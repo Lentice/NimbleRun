@@ -481,6 +481,24 @@ void TestReadVersionedLines(const std::wstring& dir) {
            "loaded lines exclude the schema header line");
 }
 
+// NR-166 regression: the read size cap must never be classified as Missing.
+// Before the error_out fix, ReadAllBytes returned false for an over-cap file
+// without setting any last error, so a stale ERROR_FILE_NOT_FOUND left on the
+// thread made the store treat it as a first run -- skipping PreserveCorrupt
+// and letting the next Save() overwrite the file. The thread last-error is
+// deliberately poisoned here; the captured ERROR_FILE_TOO_LARGE must win.
+void TestReadVersionedLinesOversizeNotMissing(const std::wstring& dir) {
+    std::string content = "schema=1\n";
+    content.append(nimblerun::kMaxReadBytes + 4096, 'x');
+    WriteBytes(dir + L"\\oversize.txt", content);
+
+    SetLastError(ERROR_FILE_NOT_FOUND);
+    std::vector<std::wstring> lines;
+    Expect(ReadVersionedLines(dir, L"oversize.txt", 1, lines) == VersionedReadStatus::Unreadable,
+           "oversize file with stale ERROR_FILE_NOT_FOUND reports Unreadable, not Missing");
+    Expect(lines.empty(), "oversize file leaves lines empty");
+}
+
 void TestUnavailableUserDataRootIsFailClosed() {
     Expect(UserDataDirFromLocalAppData(L"").empty(), "empty LocalAppData is rejected");
     Expect(UserDataDirFromLocalAppData(L"relative\\path").empty(),
@@ -578,6 +596,7 @@ int wmain() {
     TestCorruptLoadSaveWritesFile(MakeTempDir("writable_corrupt"));
     TestAtomicWriteFailure(MakeTempDir("atomic"));
     TestReadVersionedLines(MakeTempDir("versioned"));
+    TestReadVersionedLinesOversizeNotMissing(MakeTempDir("oversize_nr166"));
     TestUnavailableUserDataRootIsFailClosed();
     std::printf("NR-004 settings store check PASSED\n");
     return 0;
