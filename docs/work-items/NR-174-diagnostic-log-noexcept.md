@@ -86,3 +86,23 @@ rg -n "void DiagnosticLog::Write|noexcept|catch" src/diagnostics/diagnostic_log.
 ## Handoff
 
 實作者需記錄改動位置與 build／CTest 結果。
+
+## 交接區
+
+- 改動檔案：`src/diagnostics/diagnostic_log.cpp`、`src/diagnostics/diagnostic_log.h`（各 1 處）。
+- 改動內容：`Write` 宣告與定義標 `noexcept`（`diagnostic_log.h:29`、
+  `diagnostic_log.cpp:33`）；整個本體包在最外層 `try/catch (...)`，catch 內
+  僅 `return`，無任何動作（`diagnostic_log.cpp:38,93-95`）。無其他方法、呼叫端、
+  簽章、診斷事件、測試 seam 變動；行為不變。
+- Build／CTest（Release x64, LLVM-MinGW + Ninja）：設定與 build 成功；
+  全數 31/31 tests passed（數量與先前一致）；`-R "diagnostic"` 1/1 passed。
+- Warning：本改動零新增 warning（build 出現的唯一 warning 為
+  `main.cpp:1410` unused variable `target_size`，git stash 驗證為改動前即存在）。
+- Sanity grep：
+  ```
+  33:void DiagnosticLog::Write(std::wstring_view stage, std::wstring_view detail) noexcept {
+  36:    // sits inside an empty catch-all: a logging failure must never abort the
+  93:    } catch (...) {
+  ```
+- 提交：`da9c8a0`（NR-174: make DiagnosticLog::Write noexcept and catch-all）。
+- 偏差：無。

@@ -210,7 +210,7 @@
 | NR-171 | WM_SIZE 直接採用偽造 lParam 尺寸呼叫 Resize，可要求 65535×65535 render target | 3 | `done` | — | [NR-171](work-items/NR-171-wm-size-lparam-dimensions.md) |
 | NR-172 | 磁碟根目錄可被設為遞迴 Catalog source，整顆磁碟掃描違反 §19.5 | 1 | `done` | — | [NR-172](work-items/NR-172-reject-volume-root-source.md) |
 | NR-173 | RebuildPipeline 每次 rebuild 深拷貝整份列舉結果（const 後 copy-assign） | 3 | `done` | — | [NR-173](work-items/NR-173-rebuild-move-entries.md) |
-| NR-174 | DiagnosticLog::Write 宣稱 never throws 但無例外邊界，錯誤記錄路徑可終止 process | 5 | `ready` | — | [NR-174](work-items/NR-174-diagnostic-log-noexcept.md) |
+| NR-174 | DiagnosticLog::Write 宣稱 never throws 但無例外邊界，錯誤記錄路徑可終止 process | 5 | `done` | — | [NR-174](work-items/NR-174-diagnostic-log-noexcept.md) |
 | NR-175 | WatchLoop thread body 無最外層例外邊界，配置失敗逃出 std::thread 呼叫 std::terminate | 2 | `ready` | — | [NR-175](work-items/NR-175-watchloop-exception-boundary.md) |
 
 ## Dependency lanes
