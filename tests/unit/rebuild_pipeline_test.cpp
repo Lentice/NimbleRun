@@ -5,6 +5,7 @@
 #include <atomic>
 #include <chrono>
 #include <mutex>
+#include <new>
 #include <thread>
 #include <vector>
 
@@ -90,6 +91,29 @@ void TestDeliveryFailureCompletesOnce() {
     for (int i = 0; i < 200 && completed == 0; ++i) Sleep(5);
     Expect(completed == 1, "delivery failure completes the generation once");
     Expect(!refresh.IsRebuildInProgress(), "delivery failure clears in-progress state");
+}
+
+void TestThreadCreationFailureCompletes() {
+    CatalogRefreshCoordinator refresh;
+    AppEntry cached;
+    cached.display_name = L"Cached AppsFolder";
+    cached.stable_id = L"cached-apps";
+    cached.source = AppSource::AppsFolder;
+    cached.launch_verified = false;
+    refresh.SetSnapshot({cached});
+    refresh.SeedSourceEntriesFromSnapshot();
+    int completed = 0;
+    RebuildPipeline pipeline(
+        refresh, [] { return Settings{}; },
+        [](UINT, WPARAM, LPARAM) { return true; }, Enumerate,
+        [&] { ++completed; }, [] {}, [] {}, [] {},
+        [](std::function<void()>) -> std::thread { throw std::bad_alloc(); });
+    pipeline.Request({CatalogSource::AppsFolder}, RebuildReason::Explicit);
+    Expect(completed == 1, "thread factory failure completes the generation once");
+    Expect(!refresh.IsRebuildInProgress(), "thread factory failure clears in-progress state");
+    Expect(refresh.Snapshot().size() == 1 &&
+               refresh.Snapshot().front().display_name == L"Cached AppsFolder",
+           "thread factory failure retains the failed source cache row");
 }
 
 void TestCacheFailureRetention() {
@@ -325,6 +349,7 @@ void TestShutdownBounded() {
 
 int wmain() {
     TestDeliveryFailureCompletesOnce();
+    TestThreadCreationFailureCompletes();
     TestCacheFailureRetention();
     TestForgedDeliveryFailureIgnored();
     TestFullRescanThrottleAndWatchMap();

@@ -56,6 +56,7 @@ public:
     using SettingsSnapshot = std::function<Settings()>;
     using Complete = std::function<void()>;
     using ScheduleDebounce = std::function<void()>;
+    using ThreadFactory = std::function<std::thread(std::function<void()>)>;
 
     RebuildPipeline(CatalogRefreshCoordinator& refresh,
                     SettingsSnapshot settings,
@@ -64,7 +65,8 @@ public:
                     Complete on_complete,
                     Complete on_repaint,
                     ScheduleDebounce schedule_debounce,
-                    Complete on_exception = {});
+                    Complete on_exception = {},
+                    ThreadFactory thread_factory = {});
     ~RebuildPipeline();
 
     RebuildPipeline(const RebuildPipeline&) = delete;
@@ -110,6 +112,7 @@ private:
     Complete on_repaint_;
     ScheduleDebounce schedule_debounce_;
     Complete on_exception_;
+    ThreadFactory thread_factory_;
     HandoffRegistry<RebuildResult> handoffs_;
     std::mutex failure_mutex_;
     std::vector<std::pair<std::uint64_t, CatalogSource>> failures_;

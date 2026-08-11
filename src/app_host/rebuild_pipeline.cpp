@@ -27,7 +27,8 @@ RebuildPipeline::RebuildPipeline(CatalogRefreshCoordinator& refresh,
                                  Complete on_complete,
                                  Complete on_repaint,
                                  ScheduleDebounce schedule_debounce,
-                                 Complete on_exception)
+                                 Complete on_exception,
+                                 ThreadFactory thread_factory)
     : refresh_(refresh),
       settings_(std::move(settings)),
       post_to_ui_(std::move(post_to_ui)),
@@ -36,6 +37,11 @@ RebuildPipeline::RebuildPipeline(CatalogRefreshCoordinator& refresh,
       on_repaint_(std::move(on_repaint)),
       schedule_debounce_(std::move(schedule_debounce)),
       on_exception_(std::move(on_exception)),
+      thread_factory_(thread_factory
+                          ? std::move(thread_factory)
+                          : [](std::function<void()> fn) {
+                                return std::thread(std::move(fn));
+                            }),
       failure_event_(CreateEventW(nullptr, TRUE, FALSE, nullptr)) {
 }
 
@@ -106,7 +112,7 @@ void RebuildPipeline::Start(std::vector<CatalogSource> sources) {
     }
     for (const CatalogSource source : sources) {
         try {
-            workers_.emplace_back([this, generation, source, snapshot]() {
+            workers_.push_back(thread_factory_([this, generation, source, snapshot]() {
                 RebuildResult* result = nullptr;
                 try {
                     result = new RebuildResult;
@@ -139,10 +145,11 @@ void RebuildPipeline::Start(std::vector<CatalogSource> sources) {
                     handoffs_.Erase(token);
                     QueueFailure(generation, source);
                 }
-            });
+            }));
         } catch (...) {
             if (on_exception_) on_exception_();
             refresh_.ApplySourceFailure(generation, source);
+            CompleteIfReady(generation);
         }
     }
 }
