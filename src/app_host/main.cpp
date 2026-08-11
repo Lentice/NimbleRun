@@ -150,6 +150,9 @@ constexpr wchar_t kPageDown[] = L"PgDn";
 // NR-024: the Alt+digit quick-select hint group (design-spec §4.9).
 constexpr wchar_t kLaunch[] = L"Launch";
 constexpr wchar_t kAltOnePrefix[] = L"Alt+1~";
+// NR-176: the grid binds the full digit sequence (design-spec §4.7), so its
+// footer box shows Alt+0~9 instead of a viewport-derived range.
+constexpr wchar_t kAltZeroNine[] = L"Alt+0~9";
 // NR-045: shown in the grid state while Alt is up, in place of the
 // Alt+1~N / Launch group (design-spec §4.9).
 constexpr wchar_t kHoldAltHint[] = L"Hold Alt to show shortcuts";
@@ -1743,9 +1746,11 @@ void Render(HWND window) {
     hints_left = std::min(hints_left, right);
 
     // NR-024: "Launch" group to the left of "Scroll", separated by the hint
-    // gap. The wide box content is "Alt+1~" followed by the last digit bound
-    // to the current viewport (8 visible rows -> Alt+1~8, >=10 -> Alt+1~0);
-    // built per frame since the viewport can change.
+    // gap. The wide box content depends on the state: the grid shows the full
+    // digit sequence Alt+0~9 (NR-176, design-spec §4.7), the list shows
+    // "Alt+1~" followed by the last digit bound to the current viewport
+    // (8 visible rows -> Alt+1~8, >=10 -> Alt+1~0); built per frame since the
+    // viewport can change.
     right -= nimblerun::layout::kFooterHintGapDip;
     if (g_model && g_model->Columns() > 1 && !AltHeld()) {
         // NR-045: in the grid state while Alt is up the per-cell digit boxes
@@ -1755,12 +1760,17 @@ void Render(HWND window) {
         right -= draw_right_label(footer_strings::kHoldAltHint, right);
         hints_left = std::min(hints_left, right);
     } else {
-        const int last_slot =
-            std::min(g_model ? g_model->ViewportRows() : 0,
-                     nimblerun::ui::kQuickSelectSlotCount) - 1;
-        std::wstring alt_label(footer_strings::kAltOnePrefix);
-        if (const wchar_t* last_label = nimblerun::ui::QuickSelectLabelForSlot(last_slot)) {
-            alt_label += last_label;
+        std::wstring alt_label;
+        if (g_model && g_model->Columns() > 1) {
+            alt_label = footer_strings::kAltZeroNine;
+        } else {
+            const int last_slot =
+                std::min(g_model ? g_model->ViewportRows() : 0,
+                         nimblerun::ui::kQuickSelectSlotCount) - 1;
+            alt_label = footer_strings::kAltOnePrefix;
+            if (const wchar_t* last_label = nimblerun::ui::QuickSelectLabelForSlot(last_slot)) {
+                alt_label += last_label;
+            }
         }
         right = draw_key_box(alt_label.c_str(), right,
                              nimblerun::layout::kFooterWideKeyBoxWidthDip);
