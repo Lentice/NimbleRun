@@ -1,5 +1,7 @@
 #pragma once
 
+#include <windows.h>
+
 #include <cstddef>
 #include <string>
 #include <string_view>
@@ -34,6 +36,13 @@ inline constexpr int kMaxRecentCount = 40;
 // UNC, network, URI and device paths are rejected (design-spec §FR-005).
 // Shared with the user-folder catalog enumerator for its defensive guard.
 bool IsLocalAbsolutePath(std::wstring_view value);
+
+// True except for DRIVE_REMOTE. Mapped network drives fail FR-005 (local
+// paths only); disconnected local volumes (DRIVE_NO_ROOT_DIR / DRIVE_UNKNOWN)
+// stay acceptable so a missing root is skipped by the enumerator (NR-092)
+// rather than rejected here. Pure predicate over the GetDriveTypeW result, so
+// the decision table is testable without creating a real network drive.
+bool IsAcceptableDriveType(DWORD drive_type);
 
 // NR-140: settings.ini is untrusted input (design-spec §10.4). These caps keep
 // a crafted file from spawning a watcher thread per root at startup (each root

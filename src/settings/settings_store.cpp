@@ -64,14 +64,35 @@ Theme ParseTheme(std::wstring_view text) {
     return Theme::System;
 }
 
+// Drive root of a shape-checked "X:\..." path: the first three characters,
+// with the forward-slash form normalized to the backslash GetDriveTypeW
+// expects (e.g. "C:/Tools" -> "C:\").
+DWORD DriveTypeOfRoot(std::wstring_view path) {
+    std::wstring root(path.substr(0, 3));
+    if (root.size() == 3 && root[2] == L'/') {
+        root[2] = L'\\';
+    }
+    return GetDriveTypeW(root.c_str());
+}
+
 } // namespace
+
+bool IsAcceptableDriveType(DWORD drive_type) {
+    return drive_type != DRIVE_REMOTE;
+}
 
 // A local absolute path: drive-letter root (e.g. C:\...). UNC, network,
 // URI and device paths are rejected (design-spec §FR-005).
 // NR-144: converges with IsDisplayablePath (app_filter.cpp) -- same predicate;
 // Trim kept because callers (UserDataDirFromLocalAppData, Load) rely on it.
+// Mapped network drives are rejected via GetDriveTypeW here (FR-005);
+// IsDisplayablePath stays a pure shape check for the per-frame display path.
 bool IsLocalAbsolutePath(std::wstring_view value) {
-    return IsDisplayablePath(Trim(value));
+    const std::wstring trimmed = Trim(value);
+    if (!IsDisplayablePath(trimmed)) {
+        return false;
+    }
+    return IsAcceptableDriveType(DriveTypeOfRoot(trimmed));
 }
 
 Settings DefaultSettings() {

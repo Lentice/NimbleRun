@@ -22,6 +22,7 @@
 namespace fs = std::filesystem;
 
 using nimblerun::DefaultSettings;
+using nimblerun::IsAcceptableDriveType;
 using nimblerun::ReadVersionedLines;
 using nimblerun::Settings;
 using nimblerun::SettingsLoadResult;
@@ -128,6 +129,20 @@ void TestCatalogRootsRoundTrip(const std::wstring& dir) {
     Expect(loaded.catalog_roots[1].path == L"D:\\Games\\Emu", "catalog root 2 path");
     Expect(loaded.catalog_roots[1].recursive == false, "catalog root 2 recursive");
     Expect(loaded.catalog_extensions == expected.catalog_extensions, "catalog extensions round-trip");
+}
+
+// NR-164: mapped network drives fail FR-005 ("local paths only") at the
+// drive-type predicate; every other GetDriveTypeW result stays acceptable so
+// a disconnected local volume is skipped by the enumerator (NR-092) instead
+// of being rejected here.
+void TestIsAcceptableDriveType() {
+    Expect(IsAcceptableDriveType(DRIVE_REMOTE) == false,
+           "DRIVE_REMOTE rejected: mapped network drives are not local (FR-005)");
+    Expect(IsAcceptableDriveType(DRIVE_FIXED) == true, "DRIVE_FIXED accepted");
+    Expect(IsAcceptableDriveType(DRIVE_REMOVABLE) == true, "DRIVE_REMOVABLE accepted");
+    Expect(IsAcceptableDriveType(DRIVE_NO_ROOT_DIR) == true,
+           "DRIVE_NO_ROOT_DIR accepted: missing root is skipped, not rejected (NR-092)");
+    Expect(IsAcceptableDriveType(DRIVE_UNKNOWN) == true, "DRIVE_UNKNOWN accepted");
 }
 
 void TestCatalogRootsValidation(const std::wstring& dir) {
@@ -545,6 +560,7 @@ int wmain() {
     TestEscaping(MakeTempDir("escaping"));
     TestValidation(MakeTempDir("validation"));
     TestCatalogRootsRoundTrip(MakeTempDir("catalogroots"));
+    TestIsAcceptableDriveType();
     TestCatalogRootsValidation(MakeTempDir("catalogvalidation"));
     TestCorrupt(MakeTempDir("corrupt"));
     TestCorruptMidFileUsesDefaults(MakeTempDir("midcorrupt"));
