@@ -93,4 +93,21 @@ rg -n -A5 "case WM_SIZE" src/app_host/main.cpp
 
 ## Handoff
 
-實作者需記錄改動位置與 build／CTest 結果。
+- 2026-08-11 完成（NR-171, commit `1ed4248`：`NR-171: size the render target
+  from GetClientRect, not forged WM_SIZE lParam`）。
+- 變更：`src/app_host/main.cpp:2783-2805` — `WM_SIZE` 分支不再解參考 lParam，
+  改以 `GetClientRect(window)` 取實際 client size 呼叫
+  `g_render_target->Resize`；`Resize` 的 HRESULT 以 `FAILED` 檢查，失敗時沿用
+  既有診斷形狀寫入 `g_diag->Write(L"resize", L"error " + ...)`（同
+  `open-location`／`properties` 模式），不崩潰。既有
+  `UpdateViewportRows`／`RepositionSearchEdit` 順序不變。NR-171 註解說明
+  lParam 尺寸不可信（同 integrity 可 `SendMessageW` 偽造 65535×65535）、
+  真 WM_SIZE 的 lParam 本就等於 client rect 故正常路徑零影響。
+- 驗證：Release（llvm-mingw/Ninja）build 成功；新 warnings 0（既有
+  `main.cpp:1410 unused variable 'target_size'` 為 NR-120/NR-133 時代引入，與
+  本 item 無關）；CTest 31/31 全綠（數量不變）。
+- grep 驗證：`case WM_SIZE` 分支使用 `GetClientRect`，`Resize` HRESULT 被檢查；
+  分支內無 `LOWORD(l_param)`／`HIWORD(l_param)`。
+- 交接：無。未加 sender 驗證／token／timer／測試 seam（依 item Decisions 與
+  NR-060 先例）；render target 重建仍由既有 `D2DERR_RECREATE_TARGET` 路徑
+  （NR-067）負責。
