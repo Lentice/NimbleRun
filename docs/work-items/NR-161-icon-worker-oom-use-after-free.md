@@ -97,3 +97,30 @@ ctest --test-dir build -R icon_worker --output-on-failure
 rg -n -B 3 -A 6 "if \(!registered\)" src/icons/icon_worker.cpp
 # expect: 分支內無 result-> 解引用；encoded local 先行擷取
 ```
+
+完成後在文件底部補齊本 item 的 Handoff 交接備註。
+
+## Handoff
+
+實作者需記錄改動位置、rg 驗證結果與 build／CTest 結果。
+
+### 交接區（2026-08-11，實作完成）
+
+只改 `src/icons/icon_worker.cpp`（10 insertions／5 deletions）。
+
+- `:306` 在 `Register` 之前新增 `const std::wstring encoded = result->encoded_key;`（
+  附 NR-161 說明註解）。
+- `:310-313` 修正誤導註解：「owned guard still owns」→「Register has consumed the
+  payload (deleting it on failure)」。
+- `:314-315` `!registered` 分支改用 `encoded` local，不再解引用 `result`。
+- `:320` 的 `PostMessageW` 失敗分支不動——Register 成功時物件存活於 registry，
+  原本就安全（比照 Decisions §3 的最小變更）。
+
+**rg 驗證：** `!registered` 分支內零 `result->`；`encoded` local（:306）在
+`Register`（:307）之前擷取。
+
+**驗證結果：** Release build 全量重建 112/112 成功、icon_worker.cpp 零 warning
+（唯一 warning 是 `main.cpp:1410` 既有、未動）；CTest 31/31 全綠（數量不變）；
+`ctest -R icon_worker` 1/1 綠。無偏離 item 決策；未新增測試（Non-goals 明文）。
+附帶動作：重 configure 前刪除失效的 `build/` cache（原 cache 指向
+`D:/Documents/GitHub/NimbleRun`，無法產生 build.ninja），屬驗證必要。

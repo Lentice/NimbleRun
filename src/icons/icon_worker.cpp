@@ -299,15 +299,20 @@ void IconWorker::Run() {
         // message queue (PostMessageW fails) erases the token, which deletes
         // the object -- the old "window gone" leak guard.
         std::unique_ptr<IconResult> owned(result);
+        // NR-161: Register consumes the payload by value; on a bad_alloc it
+        // returns 0 and the object is deleted at scope end. Capture the
+        // encoded key before the call so the failure branch never touches the
+        // (possibly destroyed) result.
+        const std::wstring encoded = result->encoded_key;
         const std::uintptr_t token = g_icon_handoffs.Register(std::move(owned));
         const bool registered = token != 0;
         if (!registered) {
             // NR-097/109: a bad_alloc during registry insertion must not
-            // terminate the process or leak the object. The owned guard still
-            // owns an unregistered result, and this path is outside the mutex
-            // before recording the visible request's completion.
-            RememberDroppedRequest(request, std::move(result->encoded_key), store_,
-                                   target_, result_message_);
+            // terminate the process or leak the object. Register has consumed
+            // the payload (deleting it on failure), so this branch only uses
+            // the encoded key captured before the call.
+            RememberDroppedRequest(request, encoded, store_, target_,
+                                   result_message_);
             continue;
         }
         if (!PostMessageW(target_, result_message_, 0,
