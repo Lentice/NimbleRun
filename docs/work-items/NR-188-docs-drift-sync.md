@@ -57,3 +57,9 @@ git diff --stat
 ## 交接區
 
 （實作者填寫：testing.md 的寫法選擇、release evidence 重產命令與輸出摘要、AGENTS.md／README 改寫內容、diff 清單）
+
+- **testing.md 寫法選擇**：不寫死數字。改寫為「`ctest --test-dir build -N` lists the registered suite; the live count is the single source of truth (it is not hardcoded here because the number drifted twice before)」。理由：NR-104 已為 31 漂移開過一次 item、本 item 又為 32 重演一次；CTest 註冊數是唯一權威（release_evidence.ps1 也這樣用），繼續寫死必然第三次漂移。
+- **release evidence 重產命令與輸出摘要**：`pwsh -NoProfile -File tests/release/release_evidence.ps1`（環境工具鏈齊全，可直接執行）。輸出：`Evidence written to E:\GitHub\NimbleRun\docs\release-evidence.md`，接著 `Evidence is incomplete: one or more blocking NFR-001 metrics are not measured.`（exit 2，script 設計如此——九項 NFR-001 阻塞指標未量測即 INCOMPLETE，非重產失敗）。新檔：`Total Tests: 32`、`100% tests passed out of 32`、CTest gate `registered 32 vs executed 32 | PASS`，32 項全過、CTest 登錄/執行一致（NR-104 的 STALE 檢查 PASS）。生成時間戳與 Git commit 為執行當下值（6c11b7f 前未 commit 狀態的 HEAD）。
+- **AGENTS.md §Current baseline 改寫**：刪除 Phase 0 probe 誤述，改為實際基準——「mid-MVP, Phase 5 (release gate), `docs/roadmap.md` is the authoritative phase status; executable is a real launcher, not a probe」，五項清單：三來源 catalog（Start Menu／AppsFolder／user folders、watcher refresh、immutable snapshots、refresh generations）、lazy Shell icon store（bounded LRU＋`icons.cache`）、search／usage scoring／pinning／settings dialog／tray menu／native cell tooltips、atomic persistence（`%LOCALAPPDATA%\NimbleRun`，startup 可先秀 cached catalog）、32 CTest checks＋release-evidence runner（NFR-001 尚未量測）。
+- **README.md 改寫**：Status 段改為 mid-MVP（Phase 5 release gate）實際描述：real launcher（多來源 catalog＋watcher、icon store、usage ranking、pinning、settings、tray、native tooltips），並誠實保留「未 release、evidence INCOMPLETE 直至 NFR-001 量測」。
+- **diff 清單**：`docs/testing.md`（一行改寫）、`docs/release-evidence.md`（整份由 script 重產：header、CTest 31→32、CTest gate、git commit 等）、`AGENTS.md`（§Current baseline 重寫）、`README.md`（Status 段一行）、`docs/work-items.md`（NR-188 列 `ready`→`done`）、本文件（交接區）。無任何程式碼變更。

@@ -44,15 +44,13 @@ Work items live in `docs/work-items/` and are tracked in `docs/work-items.md`.
 
 ## Current baseline
 
-The repository currently contains the Phase 0 foundation:
+The repository is mid-MVP, in Phase 5 (release gate) — `docs/roadmap.md` is the authoritative phase status. The executable is a real launcher:
 
-- CMake project for a Windows GUI executable.
-- Native popup window with a global `Alt+Space` hotkey.
-- Direct2D/DirectWrite rendering probe with an English fake app grid.
-- Pure catalog search/ranking module with a small unit test.
-- Project-local development, testing, performance, and roadmap documents.
-
-Do not treat the probe UI as the finished product. Implement the vertical slices in the roadmap incrementally.
+- Multi-source catalog: Start Menu, AppsFolder, and user folders, with directory-watcher refresh, immutable snapshots, and refresh generations.
+- Lazy Shell icon store with bounded LRU cache and `icons.cache` persistence.
+- Search, usage scoring, pinning, settings dialog, tray menu, and native cell tooltips.
+- Atomic persistence under `%LOCALAPPDATA%\NimbleRun`; startup can show a cached catalog while the first rebuild runs.
+- 32 CTest-registered checks plus a release-evidence runner (`docs/testing.md`). Pre-release: NFR-001 resource gates are not yet measured.
 
 ## Validation
 

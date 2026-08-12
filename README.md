@@ -12,7 +12,7 @@ The MVP is intentionally narrow:
 
 ## Status
 
-The repository is set up with the Phase 0 foundation described in `docs/roadmap.md`. The current executable is a rendering and hotkey probe, not the finished launcher.
+The repository is mid-MVP (Phase 5 release gate, see `docs/roadmap.md`). The current executable is a real launcher: multi-source catalog with watcher-driven refresh, lazy icon store, search with usage ranking, pinning, settings, tray menu, and native cell tooltips. It is not yet a released product — release evidence (`docs/release-evidence.md`) is INCOMPLETE until the NFR-001 resource gates are measured.
 
 ## Requirements
 
