@@ -71,4 +71,13 @@ rg -n "launch_verified|kReasonInvalid|Still preparing" src/app_host/main.cpp src
 
 ## 交接區
 
-（實作者填寫：分支位置與形狀（ActivateRow 或 LaunchResult 層）、訊息常數名稱與文字、refresh gate 不被消耗的確認、暖機路徑不變的證據、測試案例、build／CTest 證據）
+實作（2026-08-12）：
+
+- **分支位置與形狀**：`ActivateRow`（`src/app_host/main.cpp:1053`）內、`IsMissingPin` 守門之後、`LaunchEntry` 之前——對 `!entry.launch_verified` 新增專屬分支（`main.cpp:1070-1081`），呼叫 `ShowErrorDialog` 後直接 `return`，不進入 launch failure 路徑。`src/launch/shell_launch.cpp:8` 的 NR-113 guard 一字未動，仍是最後防線；`LaunchEntry` 的全 repo 唯一 production call site 是 `ActivateRow`（rg 證實），故所有啟動入口（Enter、滑鼠、Alt+digit）都收斂到同一分支。
+- **訊息常數**：`dialog_strings::kStillPreparing`（`src/app_host/main.cpp:184-187`，集中式字串表），文字 `"Still preparing apps \u2014 try again in a moment."`（英文，em-dash 以 `\u2014` 跳脫，與既有 `\u2026` 慣例一致）。
+- **refresh gate 不被消耗**：分支在 `g_launch_failure_refresh.OnLaunchAttempt` 之前提早 `return`，兩次 `OnLaunchAttempt` 呼叫（`main.cpp:1088` failure 側、`main.cpp:1105` success 側）都只在 verified 分支與其後到達——未驗證列**零**消耗 one-shot gate，背景 rebuild 照常跑完。
+- **暖機路徑逐位元不變**：verified 分支的程式碼未動（`LaunchEntry` → failure dialog／success usage＋hide 原樣），`main.cpp` 的 diff 純為 16 行新增（`git diff` 驗證，無任何既有行被改）；cache／shell_launch 兩個檔零 diff。
+- **kReasonInvalid 只剩真壞 entry 服務**：`main.cpp:909` 的映射未改；未驗證列不再到達 `LaunchEntry`，故 `ERROR_INVALID_PARAMETER` 現在只剩「verified 但 identity 空／異常」的合法位置。
+- **測試**：ActivateRow 是視窗層、分支是單一守門＋對話框，抽純函式反而多一層抽象，依 item Scope §4 以 sanity grep＋build 覆蓋；NR-113 既有 focused 測試（`shell_launch_test.cpp` `TestRejectsUnverifiedIdentity`、`catalog_refresh_test.cpp` `TestCacheLoadEntriesAreUnverified`／`TestSeedSourceEntriesRetainsFailedSourceRows`）原樣全綠，證明 guard 防線仍擋未驗證列。
+- **build／CTest**：Release x64（LLVM-MinGW＋Ninja）configure+build 無 error、無新增 warning（`main.cpp:1534` 的 `unused variable 'target_size'` 以 git stash 驗證為既有警告，非本 item 引入）；CTest 32/32 全 Passed（52.74 s）。
+- **未涵蓋**：待啟動佇列（audit 選項 2）與 NR-113 信任模型重估（選項 3）依 item Non-goals 不做，未另立 item；此處僅記錄。

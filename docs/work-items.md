@@ -221,7 +221,7 @@
 | NR-182 | RebuildPipeline::Start() 無界 join 舊 worker：換代時 UI 凍結（§9.4） | 3 | `done` | NR-123 | [NR-182](work-items/NR-182-rebuild-start-bounded-join.md) |
 | NR-183 | Explicit Refresh 繞過重掃節流：Ctrl+R 可被無限重複驅動全來源掃描 | 3 | `done` | NR-182 | [NR-183](work-items/NR-183-explicit-refresh-throttle.md) |
 | NR-184 | IconWorker::Stop() 無界 join：Shell 圖示擷取卡住即關閉無限延遲 | 3 | `done` | NR-099 | [NR-184](work-items/NR-184-icon-worker-bounded-stop.md) |
-| NR-185 | 冷啟動 cache 列不可啟動的誤導訊息：換成誠實的準備中提示 | 3 | `ready` | NR-113, NR-116 | [NR-185](work-items/NR-185-cold-start-cache-honest-message.md) |
+| NR-185 | 冷啟動 cache 列不可啟動的誤導訊息：換成誠實的準備中提示 | 3 | `done` | NR-113, NR-116 | [NR-185](work-items/NR-185-cold-start-cache-honest-message.md) |
 | NR-186 | 輸入契約對齊：滾輪不搬選取、無對應項目時 Alt+digit 不吞鍵、搜尋長度上限、空白查詢 prewarm 判定一致 | 3 | `ready` | — | [NR-186](work-items/NR-186-input-contracts-alignment.md) |
 | NR-187 | 錯誤與持久化路徑的兩個缺口：Save 失敗被靜默忽略、ShowInfoBalloon 對 string_view 讀越界 | 3 | `ready` | — | [NR-187](work-items/NR-187-save-failure-propagation-and-balloon-nul.md) |
 | NR-188 | 文件漂移同步：測試數 31→32、release evidence 重產、AGENTS.md／README 過時 baseline | 5 | `ready` | — | [NR-188](work-items/NR-188-docs-drift-sync.md) |

@@ -179,6 +179,12 @@ constexpr wchar_t kLaunchFailedSuffix[] = L"\". ";
 constexpr wchar_t kReasonNotInstalled[] = L"The app may have been removed or moved.";
 constexpr wchar_t kReasonInvalid[] = L"The app entry is invalid.";
 constexpr wchar_t kReasonAccessDenied[] = L"Access was denied.";
+// NR-185: a cold-start cache row is displayable but not yet launchable
+// (NR-113 provenance gate; design-spec §FR-008). Not a launch failure -- the
+// background rebuild is already running -- so it gets its own honest message
+// instead of "The app entry is invalid.".
+constexpr wchar_t kStillPreparing[] =
+    L"Still preparing apps \u2014 try again in a moment.";
 // NR-040: shown when the Shell's properties dialog cannot be opened.
 constexpr wchar_t kPropertiesFailed[] = L"Failed to open properties.";
 // NR-130: the single-instance mutex is held but no window could be reached
@@ -1061,6 +1067,16 @@ void ActivateRow(std::size_t index, HWND window) {
     // failure flow -- nothing happens at all.
     if (nimblerun::PanelModel::IsMissingPin(entry)) {
         return;
+    }
+    // NR-185: a cold-start cache row (launch_verified=false, NR-113) can be
+    // displayed but not launched until the background rebuild re-verifies it.
+    // Dedicated branch before LaunchEntry: honest "still preparing" message
+    // instead of the launch-failure dialog, no g_launch_failure_refresh
+    // consumption (the rebuild is already running by §FR-008), panel stays
+    // visible, no usage recorded.
+    if (!entry.launch_verified) {
+        ShowErrorDialog(window, dialog_strings::kStillPreparing);
+        return;  // keep the panel visible; no launch attempt
     }
     const nimblerun::LaunchResult result = nimblerun::LaunchEntry(entry, window);
     if (!result.ok) {
