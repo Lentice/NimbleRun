@@ -75,3 +75,17 @@ git status --short
 ## 交接區
 
 （實作者填寫：提交內容、InitCommonControlsEx 位置、window_ 清理、build／CTest 證據、commit hash）
+
+- Start: 2026-08-12
+- 提交（兩個 commit，工作樹原修正與本 item 補強各自獨立）：
+  - `8dd2545` — `NR-181: use TTM_UPDATETIPTEXTW, require comctl32 v6, init common controls`：`src/ui/cell_tooltip.cpp`（`TTM_SETTIPTEXTW`→`TTM_UPDATETIPTEXTW`＝`WM_USER+57`，`#ifndef` 補定義因 MinGW 缺此常數；`Show()` 改送完整 `TOOLINFOW`）＋ `src/resources/NimbleRun.manifest`（`Microsoft.Windows.Common-Controls` v6.0.0.0 相依）。即工作樹既有未提交修正，原樣提交。
+  - `05a9787` — `NR-181: init common controls in wWinMain, drop stale tooltip HWND`：`src/app_host/main.cpp`＋`src/ui/cell_tooltip.cpp`（見下兩點）。
+- InitCommonControlsEx 位置：`wWinMain` 開頭、`SetProcessDpiAwarenessContext` 之後、任何視窗建立之前（`main.cpp:3079-3082`）：`INITCOMMONCONTROLSEX icc{sizeof(icc), ICC_BAR_CLASSES}; InitCommonControlsEx(&icc);`。`#include <commctrl.h>` 已加至 main.cpp 系統標頭區。
+- window_ 清理（I-1 殘留，Scope 3）：`EnsureCreated` 首行 guard 改為 `if (window_ && IsWindow(window_)) return;` 並在下方 `window_ = nullptr;` —— 面板 `WM_DESTROY` 銷毀常駐 tooltip（owned window 隨 owner 銷毀）後，stale HWND 在下次 `EnsureCreated` 即被丟棄重造，不再留下「只是目前沒人碰」的 dangling 推論。`Show()` 的 `tool_owner_ != panel` 分支經確認在 `if (window_) return;` 下確實不做事，簡化為 `if (!window_)`（一行）。未在 `Hide()` 置空：`Hide()` 於每次滑鼠離開／面板隱藏都會呼叫，置空會破壞 NR-180 決策 #9 的常駐控制項政策並在每次 hover 週期重建視窗。
+- Agent checks（全部通過）：
+  - `rg -n "TTM_SETTIPTEXTW|TTM_UPDATETIPTEXTW|InitCommonControlsEx" src`：`TTM_SETTIPTEXTW` 僅存在於註解（解釋 SDK 無此訊息，非程式碼使用）零程式碼命中；`TTM_UPDATETIPTEXTW` 一處 `SendMessageW` 呼叫（`cell_tooltip.cpp:143`，另有 `#ifndef` 補定義區塊）；`InitCommonControlsEx` 一命中（`main.cpp:3081`）。
+  - `cmake -S . -B build -G Ninja -D"CMAKE_TOOLCHAIN_FILE=cmake/llvm-mingw.cmake" -DCMAKE_BUILD_TYPE=Release`：done，無 error。
+  - `cmake --build build`：成功，唯一 warning 為 `main.cpp:1518` `target_size` unused（HEAD 即存在的既有 warning，原 `:1517` 因本 item 新增 include 位移一行，NR-180 交接區已有記錄，非本 item 引入）。
+  - `ctest --test-dir build --output-on-failure`：32/32 Passed（含 `nimblerun_cell_tooltip_test` #32）。
+  - `git status --short`：本次修改已全部 commit（剩本文件與 `docs/work-items.md` 的交接更新）。
+- 未完成／注意：無阻礙。tooltip 視覺行為（原生外觀、wrap、穿透）屬人工驗證，依 NR-180 政策不在此追蹤；NR-180 驗收條件自此成立於已提交 HEAD。
