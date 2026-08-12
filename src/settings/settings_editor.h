@@ -38,6 +38,7 @@ enum class SettingsString {
     ClearUsageButton,
     ResetSettingsButton,
     OpenLogFolderButton,
+    SaveButton,
     OkButton,
     CancelButton,
     HotkeyRejectedNotice,

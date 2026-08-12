@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Six local visual concepts for the NimbleRun settings window.">
+  <title>NimbleRun Settings — 6 Concepts</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --page: #101218;
+      --page-2: #171a22;
+      --ink: #f3f5f7;
+      --muted: #9da6b4;
+      --line: #303642;
+      --accent: #6fa8dc;
+      --accent-2: #8ab4ff;
+      --shadow: 0 24px 70px rgba(0, 0, 0, .28);
+      font-family: "Segoe UI", system-ui, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-width: 320px;
+      background: radial-gradient(circle at 10% 0%, #28303b 0, transparent 34rem), var(--page);
+      color: var(--ink);
+    }
+    button, input, select { font: inherit; }
+    button { cursor: pointer; }
+    button:focus-visible, input:focus-visible, select:focus-visible {
+      outline: 3px solid rgba(138, 180, 255, .55);
+      outline-offset: 2px;
+    }
+    .wrap { max-width: 1500px; margin: 0 auto; padding: 44px 28px 72px; }
+    .masthead { display: flex; align-items: end; justify-content: space-between; gap: 24px; margin-bottom: 30px; }
+    .eyebrow { margin: 0 0 10px; color: var(--accent); font-size: 12px; font-weight: 800; letter-spacing: .16em; text-transform: uppercase; }
+    h1 { margin: 0; max-width: 680px; font-size: clamp(30px, 4vw, 54px); line-height: .98; letter-spacing: -.045em; }
+    .intro { max-width: 600px; margin: 14px 0 0; color: var(--muted); line-height: 1.55; }
+    .selection {
+      min-width: 250px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 14px;
+      background: rgba(255,255,255,.045); color: var(--muted); font-size: 13px;
+    }
+    .selection strong { display: block; margin-top: 4px; color: var(--ink); font-size: 16px; }
+    .gallery { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+    .concept {
+      position: relative; overflow: hidden; border: 1px solid #2c323d; border-radius: 22px;
+      background: #181c24; box-shadow: 0 10px 35px rgba(0,0,0,.18);
+      transition: border-color .2s ease, transform .2s ease, box-shadow .2s ease;
+    }
+    .concept:hover { transform: translateY(-3px); border-color: #596678; box-shadow: 0 18px 44px rgba(0,0,0,.25); }
+    .concept.is-selected { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(97,215,189,.18), 0 18px 44px rgba(0,0,0,.25); }
+    .concept-meta { display: flex; align-items: start; justify-content: space-between; gap: 16px; padding: 18px 20px 16px; }
+    .concept-number { color: var(--accent); font-size: 12px; font-weight: 800; letter-spacing: .12em; }
+    .concept h2 { margin: 4px 0 0; font-size: 21px; letter-spacing: -.02em; }
+    .concept-note { margin: 7px 0 0; color: var(--muted); font-size: 13px; line-height: 1.4; }
+    .choose { border: 1px solid #4a5361; border-radius: 8px; padding: 8px 12px; background: transparent; color: var(--ink); font-size: 12px; white-space: nowrap; }
+    .choose:hover { border-color: var(--accent); color: var(--accent); }
+
+    .preview { min-height: 450px; padding: 22px; border-top: 1px solid rgba(255,255,255,.08); }
+    .window { min-height: 404px; overflow: hidden; border: 1px solid var(--w-line, #c7ccd1); border-radius: var(--w-radius, 10px); background: var(--w-bg, #f6f7f8); color: var(--w-ink, #20252b); box-shadow: var(--w-shadow, 0 15px 30px rgba(0,0,0,.18)); }
+    .window button, .window input, .window select { color: inherit; }
+    .window input, .window select { min-width: 0; border: 1px solid var(--w-line, #c7ccd1); border-radius: var(--control-radius, 4px); background: var(--control-bg, #fff); color: inherit; }
+    .window input:focus-visible, .window select:focus-visible { outline: 2px solid var(--w-accent, #1b75d0); outline-offset: 1px; }
+    .window small { color: var(--w-muted, #66717d); }
+    .window-header { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 11px 14px; border-bottom: 1px solid var(--w-line, #c7ccd1); background: var(--header-bg, transparent); }
+    .window-title { display: flex; align-items: center; gap: 9px; font-size: 13px; font-weight: 700; }
+    .window-mark { display: grid; width: 22px; height: 22px; place-items: center; border-radius: 6px; background: var(--w-accent, #1b75d0); color: #fff; font-size: 11px; font-weight: 900; }
+    .window-close { width: 26px; height: 26px; border: 0; background: transparent; color: var(--w-muted, #66717d); font-size: 18px; line-height: 1; }
+    .window-body { padding: 16px; }
+    .section-title { margin: 0 0 10px; color: var(--w-muted, #66717d); font-size: 10px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+    .setting-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 32px; font-size: 11px; }
+    .setting-row + .setting-row { margin-top: 7px; }
+    .setting-label { min-width: 0; }
+    .setting-label small { display: block; margin-top: 2px; font-size: 9px; }
+    .window input[type="text"], .window input[type="number"] { height: 26px; padding: 4px 7px; font-size: 11px; }
+    .window input[type="number"] { width: 54px; }
+    .window select { height: 27px; padding: 2px 7px; font-size: 11px; }
+    .window input[type="checkbox"] { width: 14px; height: 14px; accent-color: var(--w-accent, #1b75d0); }
+    .check-row { display: flex; align-items: center; gap: 7px; font-size: 11px; }
+    .check-row + .check-row { margin-top: 8px; }
+    .hotkey { display: flex; align-items: center; gap: 6px; }
+    .hotkey input { width: 124px; }
+    .window button:not(.window-close) { border: 1px solid var(--w-line, #c7ccd1); border-radius: var(--control-radius, 4px); padding: 5px 10px; background: var(--button-bg, #fff); color: inherit; font-size: 10px; }
+    .window button:not(.window-close):hover { border-color: var(--w-accent, #1b75d0); }
+    .window .primary { border-color: var(--w-accent, #1b75d0); background: var(--w-accent, #1b75d0); color: #fff; }
+    .window-footer { display: flex; align-items: center; justify-content: end; gap: 7px; padding: 12px 16px; border-top: 1px solid var(--w-line, #c7ccd1); }
+    .window-footer .footer-link { margin-right: auto; border: 0; background: none; color: var(--w-muted, #66717d); font-size: 10px; }
+    .catalog-box { margin-top: 14px; padding-top: 13px; border-top: 1px solid var(--w-line, #c7ccd1); }
+    .folder-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 7px 0 9px; }
+    .folder-list { min-height: 38px; padding: 5px 7px; border: 1px solid var(--w-line, #c7ccd1); background: var(--control-bg, #fff); font-size: 10px; }
+    .folder-list .selected { display: block; padding: 2px 4px; background: var(--w-accent, #1b75d0); color: #fff; }
+    .exts { display: flex; flex-wrap: wrap; gap: 8px 12px; margin-top: 10px; color: var(--w-muted, #66717d); font-size: 10px; }
+    .exts label { display: flex; align-items: center; gap: 4px; }
+
+    /* 01 Native compact */
+    .concept[data-style="native"] .window { --w-bg:#f1f3f5; --w-ink:#1d2329; --w-muted:#5f6872; --w-line:#c7cdd3; --control-bg:#fff; --button-bg:#f8f9fa; --w-accent:#0b6fca; --w-radius:7px; --control-radius:3px; --header-bg:#e9edf1; font-family:"Segoe UI", sans-serif; }
+    .concept[data-style="native"] .window-body { padding: 14px 16px 10px; }
+    .concept[data-style="native"] .section-title { padding-bottom: 6px; border-bottom: 1px solid var(--w-line); color:#424b54; letter-spacing: .03em; }
+    .concept[data-style="native"] .catalog-box { margin-top: 12px; }
+
+    /* 02 Calm cards: same palette, card-based grouping */
+    .concept[data-style="calm"] .window { --w-bg:#f1f3f5; --w-ink:#1d2329; --w-muted:#5f6872; --w-line:#c7cdd3; --control-bg:#fff; --button-bg:#f8f9fa; --w-accent:#0b6fca; --w-radius:12px; --control-radius:6px; --header-bg:#e9edf1; font-family:"Segoe UI", sans-serif; }
+    .concept[data-style="calm"] .window-body { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 14px; }
+    .concept[data-style="calm"] .window-header { padding: 13px 16px; }
+    .concept[data-style="calm"] .window-mark { border-radius: 8px; }
+    .concept[data-style="calm"] .section-title { padding: 8px 10px; border-radius: 8px; background:#e9edf1; color:#1d2329; }
+    .concept[data-style="calm"] .catalog-box { grid-column:1 / -1; margin-top:0; padding:12px; border:1px solid var(--w-line); border-radius:12px; background:#fff; }
+    .concept[data-style="calm"] .window-footer { background:#fff; }
+
+    /* 03 Command center: same palette, keyboard-first rail */
+    .concept[data-style="command"] .window { --w-bg:#f1f3f5; --w-ink:#1d2329; --w-muted:#5f6872; --w-line:#c7cdd3; --control-bg:#fff; --button-bg:#f8f9fa; --w-accent:#0b6fca; --w-radius:8px; --control-radius:4px; --header-bg:#e9edf1; font-family:Consolas,"Segoe UI",sans-serif; }
+    .concept[data-style="command"] .window-body { display:grid; grid-template-columns: 106px 1fr; gap:16px; padding:0; }
+    .concept[data-style="command"] .window-body::before { content:"GENERAL\A\A LAUNCHER\A\A CATALOG\A\A ADVANCED"; white-space:pre; padding:18px 10px; border-right:1px solid var(--w-line); color:var(--w-muted); font-size:9px; line-height:1.35; }
+    .concept[data-style="command"] .section-title { color:var(--w-accent); }
+    .concept[data-style="command"] .catalog-box { margin-right:14px; }
+    .concept[data-style="command"] .window-footer { justify-content:end; background:#e9edf1; }
+
+    /* 04 Paper index: same palette, typographic hierarchy */
+    .concept[data-style="paper"] .window { --w-bg:#f1f3f5; --w-ink:#1d2329; --w-muted:#5f6872; --w-line:#c7cdd3; --control-bg:#fff; --button-bg:#f8f9fa; --w-accent:#0b6fca; --w-radius:3px; --control-radius:2px; --header-bg:#e9edf1; font-family:Georgia,"Times New Roman",serif; }
+    .concept[data-style="paper"] .window-header { padding:14px 17px; }
+    .concept[data-style="paper"] .window-mark { border-radius:2px; }
+    .concept[data-style="paper"] .window-body { padding:18px 20px 12px; }
+    .concept[data-style="paper"] .section-title { color:#1d2329; font-family:"Segoe UI",sans-serif; font-size:10px; letter-spacing:.02em; text-transform:none; }
+    .concept[data-style="paper"] .catalog-box { margin-top:16px; padding-top:15px; border-top:2px solid var(--w-ink); }
+    .concept[data-style="paper"] .window-footer { border-top:2px solid var(--w-ink); }
+
+    /* 05 Dense matrix: same palette, denser control matrix */
+    .concept[data-style="matrix"] .window { --w-bg:#f1f3f5; --w-ink:#1d2329; --w-muted:#5f6872; --w-line:#c7cdd3; --control-bg:#fff; --button-bg:#f8f9fa; --w-accent:#0b6fca; --w-radius:4px; --control-radius:3px; --header-bg:#e9edf1; font-family:"Segoe UI",sans-serif; }
+    .concept[data-style="matrix"] .window-header { border-bottom:0; }
+    .concept[data-style="matrix"] .window-mark { border-radius:3px; }
+    .concept[data-style="matrix"] .window-body { padding:14px 16px 12px; }
+    .concept[data-style="matrix"] .section-title { color:var(--w-accent); }
+    .concept[data-style="matrix"] .catalog-box { margin-top:12px; padding:12px; border:1px solid var(--w-line); background:#e9edf1; }
+    .concept[data-style="matrix"] .folder-list { background:#fff; }
+    .concept[data-style="matrix"] .window-footer { border-top:0; background:#e9edf1; }
+
+    /* 06 Fluent split: same palette, spacious navigation rail */
+    .concept[data-style="fluent"] .window { --w-bg:#f1f3f5; --w-ink:#1d2329; --w-muted:#5f6872; --w-line:#c7cdd3; --control-bg:#fff; --button-bg:#f8f9fa; --w-accent:#0b6fca; --w-radius:10px; --control-radius:5px; --header-bg:#fff; font-family:"Segoe UI",sans-serif; }
+    .concept[data-style="fluent"] .window-body { display:grid; grid-template-columns:104px 1fr; gap:17px; padding:0; }
+    .concept[data-style="fluent"] .window-body::before { content:"Settings\A\A Launcher\A\A Catalog\A\A About"; white-space:pre; padding:18px 12px; border-right:1px solid var(--w-line); color:var(--w-muted); font-size:10px; line-height:1.55; }
+    .concept[data-style="fluent"] .section-title { color:#1d2329; letter-spacing:.03em; }
+    .concept[data-style="fluent"] .catalog-box { margin-right:16px; }
+    .concept[data-style="fluent"] .window-footer { background:#fff; }
+
+    /* Round 2: all new directions keep the same 02 palette and only change layout. */
+    .concept[data-style^="ours-"] .window,
+    .concept[data-style^="oc-"] .window { --w-bg:#f1f3f5; --w-ink:#1d2329; --w-muted:#5f6872; --w-line:#c7cdd3; --control-bg:#fff; --button-bg:#f8f9fa; --w-accent:#0b6fca; --header-bg:#e9edf1; font-family:"Segoe UI",sans-serif; }
+    .concept[data-style^="ours-"] .window-body,
+    .concept[data-style^="oc-"] .window-body { padding:14px; }
+    .concept[data-style^="ours-"] .section-title,
+    .concept[data-style^="oc-"] .section-title { color:#1d2329; letter-spacing:.05em; }
+    .concept[data-style="ours-stack"] .window-body { display:block; }
+    .concept[data-style="ours-stack"] .window-body > div { padding:10px; border:1px solid var(--w-line); border-radius:8px; background:#fff; }
+    .concept[data-style="ours-stack"] .window-body > div + div { margin-top:10px; }
+    .concept[data-style="ours-stack"] .catalog-box { margin-top:0; padding-top:10px; }
+    .concept[data-style="ours-lanes"] .window-body { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+    .concept[data-style="ours-lanes"] .window-body > div { padding:9px; border:1px solid var(--w-line); border-radius:7px; background:#fff; }
+    .concept[data-style="ours-lanes"] .catalog-box { grid-column:1 / -1; margin:0; }
+    .concept[data-style="ours-rail"] .window-body { display:grid; grid-template-columns:82px 1fr; gap:12px; padding:0; }
+    .concept[data-style="ours-rail"] .window-body::before { content:"SETUP\A\A LAUNCH\A\A SOURCES"; white-space:pre; padding:16px 9px; border-right:1px solid var(--w-line); color:var(--w-accent); font-size:9px; font-weight:700; line-height:1.4; }
+    .concept[data-style="ours-rail"] .catalog-box { margin-right:12px; }
+    .concept[data-style="ours-source-first"] .window-body { display:flex; flex-direction:column; padding:12px; }
+    .concept[data-style="ours-source-first"] .catalog-box { order:-1; margin:0 0 10px; padding:10px; border:1px solid var(--w-line); border-radius:8px; background:#fff; }
+    .concept[data-style="ours-source-first"] .window-body > div:not(.catalog-box) { padding:8px 0; border-top:1px solid var(--w-line); }
+    .concept[data-style="ours-overview"] .window-body { display:grid; grid-template-columns:1fr 1fr; gap:8px; padding:10px; }
+    .concept[data-style="ours-overview"] .window-body > div { padding:8px; }
+    .concept[data-style="ours-overview"] .catalog-box { grid-column:1 / -1; margin:0; padding:10px; border:1px solid var(--w-line); border-radius:6px; background:#e9edf1; }
+
+    .concept[data-style="oc-frequency"] .window-body { display:block; }
+    .concept[data-style="oc-frequency"] .window-body > div { padding:8px 0; border-bottom:1px solid var(--w-line); }
+    .concept[data-style="oc-frequency"] .catalog-box { margin-top:10px; padding-top:10px; border-top:2px solid var(--w-accent); border-bottom:0; }
+    .concept[data-style="oc-flow"] .window-body { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    .concept[data-style="oc-flow"] .window-body > div:first-child { grid-column:1 / -1; padding:10px; border:1px solid var(--w-line); border-radius:8px; background:#fff; }
+    .concept[data-style="oc-flow"] .catalog-box { grid-column:1 / -1; margin:0; }
+    .concept[data-style="oc-sources"] .window-body { display:flex; flex-direction:column; padding:12px; }
+    .concept[data-style="oc-sources"] .catalog-box { order:-1; margin:0 0 12px; padding:12px; border:1px solid var(--w-line); border-radius:8px; background:#fff; }
+    .concept[data-style="oc-rail"] .window-body { display:grid; grid-template-columns:96px 1fr; gap:14px; padding:0; }
+    .concept[data-style="oc-rail"] .window-body::before { content:"ESSENTIALS\A\A BEHAVIOR\A\A CATALOG\A\A MAINTENANCE"; white-space:pre; padding:16px 10px; border-right:1px solid var(--w-line); color:var(--w-muted); font-size:8px; font-weight:700; line-height:1.35; }
+    .concept[data-style="oc-rail"] .catalog-box { margin-right:14px; }
+    .concept[data-style="oc-table"] .window-body { display:block; padding:10px; }
+    .concept[data-style="oc-table"] .window-body > div { display:grid; grid-template-columns:1fr; padding:9px 0; border-bottom:1px solid var(--w-line); }
+    .concept[data-style="oc-table"] .catalog-box { margin-top:0; padding-top:10px; border-bottom:0; }
+    .concept[data-style="oc-actions"] .window-body { display:grid; grid-template-columns:1fr 1fr; gap:8px; padding:10px; }
+    .concept[data-style="oc-actions"] .window-body > div { padding:9px; border:1px solid var(--w-line); border-radius:7px; background:#fff; }
+    .concept[data-style="oc-actions"] .catalog-box { grid-column:1 / -1; margin:0; }
+    .concept[data-style="oc-actions"] .window-footer { justify-content:flex-start; }
+
+    .showcase-tip { margin-top: 28px; color: var(--muted); font-size: 12px; text-align: center; }
+    .showcase-tip kbd { padding: 3px 6px; border: 1px solid var(--line); border-radius: 5px; background:var(--page-2); color:var(--ink); }
+
+    dialog { width:min(920px, calc(100vw - 30px)); padding:0; border:1px solid #566272; border-radius:18px; background:#171b22; color:var(--ink); box-shadow:0 28px 90px #000b; }
+    dialog::backdrop { background:#05070a99; backdrop-filter:blur(3px); }
+    .dialog-head { display:flex; justify-content:space-between; gap:20px; align-items:start; padding:20px 22px; border-bottom:1px solid #303642; }
+    .dialog-head h2 { margin:3px 0 0; font-size:24px; }
+    .dialog-close { border:0; background:transparent; color:var(--muted); font-size:22px; }
+    .dialog-preview { padding:22px; }
+    .dialog-preview .preview { min-height:0; padding:0; border:0; }
+    .dialog-preview .window { min-height:560px; }
+    .dialog-preview .window-body { min-height:425px; }
+    @media (max-width: 880px) {
+      .masthead { display:block; }
+      .selection { margin-top:20px; }
+      .gallery { grid-template-columns:1fr; }
+    }
+    @media (max-width: 560px) {
+      .wrap { padding:28px 14px 50px; }
+      .preview { padding:12px; }
+      .window { transform-origin:top left; }
+      .concept[data-style="calm"] .window-body, .concept[data-style="command"] .window-body, .concept[data-style="fluent"] .window-body { display:block; }
+      .concept[data-style="calm"] .window-body::before, .concept[data-style="command"] .window-body::before, .concept[data-style="fluent"] .window-body::before { display:none; }
+    }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior:auto !important; transition:none !important; } }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <header class="masthead">
+      <div>
+        <p class="eyebrow">NimbleRun / Settings exploration</p>
+        <h1>Twelve ways to make settings feel lighter.</h1>
+        <p class="intro">方案02 保留，再比較 5 個新排版與 6 個 OpenCode brief fallback 方向。所有預覽共用同一套 Windows 淺色、中性灰、系統藍色盤。</p>
+      </div>
+      <div class="selection" aria-live="polite">Selected direction<strong id="selected-name">None yet</strong></div>
+    </header>
+
+    <section class="gallery" aria-label="Twelve settings design concepts">
+      <article class="concept" data-style="native" data-name="01 · Native Compact">
+        <div class="concept-meta"><div><div class="concept-number">01 / NATIVE COMPACT</div><h2>Familiar, dense, direct</h2><p class="concept-note">Closest to the current Win32 dialog. Fast to scan and easiest to ship.</p></div><button class="choose" type="button">Choose</button></div>
+        <div class="preview"><div class="window" role="group" aria-label="Native Compact settings preview">
+          <div class="window-header"><div class="window-title"><span class="window-mark">N</span>NimbleRun Settings</div><button class="window-close" type="button" aria-label="Close">×</button></div>
+          <div class="window-body"><p class="section-title">Global hotkey</p><div class="setting-row"><span class="setting-label">Shortcut</span><div class="hotkey"><input type="text" value="Alt+Space" aria-label="Shortcut"><button type="button">Change</button></div></div>
+            <p class="section-title" style="margin-top:16px">Launcher</p><div class="setting-row"><span class="setting-label">Recent apps to show <small>8–40</small></span><input type="number" value="20" aria-label="Recent apps to show"></div><label class="check-row"><input type="checkbox" checked>Hide after launching an app</label><label class="check-row"><input type="checkbox" checked>Launch at startup</label><div class="setting-row" style="margin-top:10px"><span class="setting-label">Theme</span><select aria-label="Theme"><option>Follow system</option></select></div>
+            <div class="catalog-box"><p class="section-title">Catalog sources</p><label class="check-row"><input type="checkbox" checked>Include Windows apps <small>(Start Menu and installed apps)</small></label><div class="folder-line"><span>User folders:</span><div><button type="button">Add…</button> <button type="button">Remove</button></div></div><div class="folder-list"><span class="selected">D:\Program files</span></div><label class="check-row" style="margin-top:7px"><input type="checkbox" checked>Include subfolders</label><div class="exts"><label><input type="checkbox" checked>.exe</label><label><input type="checkbox" checked>.cmd</label><label><input type="checkbox" checked>.bat</label><label><input type="checkbox" checked>.lnk</label><label><input type="checkbox" checked>.appref-ms</label></div></div>
+          </div><div class="window-footer"><button class="footer-link" type="button">Clear usage history</button><button type="button">Reset settings</button><button type="button">Open log folder</button><button type="button">Cancel</button><button class="primary" type="button">OK</button></div>
+        </div></div>
+      </article>
+
+      <article class="concept" data-style="calm" data-name="02 · Calm Cards">
+        <div class="concept-meta"><div><div class="concept-number">02 / CALM CARDS</div><h2>Breathing room, clear groups</h2><p class="concept-note">Turns a long form into three calm cards with stronger section hierarchy.</p></div><button class="choose" type="button">Choose</button></div>
+        <div class="preview"><div class="window" role="group" aria-label="Calm Cards settings preview">
+          <div class="window-header"><div class="window-title"><span class="window-mark">N</span><span>Settings</span></div><button class="window-close" type="button" aria-label="Close">×</button></div>
+          <div class="window-body"><div><p class="section-title">Global hotkey</p><div class="setting-row"><span class="setting-label">Shortcut</span><div class="hotkey"><input type="text" value="Alt+Space" aria-label="Shortcut"><button type="button">Change</button></div></div></div><div><p class="section-title">Launcher</p><div class="setting-row"><span class="setting-label">Recent apps</span><input type="number" value="20" aria-label="Recent apps"></div><label class="check-row"><input type="checkbox" checked>Hide after launch</label><label class="check-row"><input type="checkbox" checked>Launch at startup</label><div class="setting-row" style="margin-top:10px"><span>Theme</span><select aria-label="Theme"><option>Follow system</option></select></div></div>
+            <div class="catalog-box"><p class="section-title">Catalog sources</p><label class="check-row"><input type="checkbox" checked>Include Windows apps <small>(Start Menu and installed apps)</small></label><div class="folder-line"><span>User folders:</span><div><button type="button">Add…</button> <button type="button">Remove</button></div></div><div class="folder-list"><span class="selected">D:\Program files</span></div><label class="check-row" style="margin-top:7px"><input type="checkbox" checked>Include subfolders</label><div class="exts"><label><input type="checkbox" checked>.exe</label><label><input type="checkbox" checked>.cmd</label><label><input type="checkbox" checked>.bat</label><label><input type="checkbox" checked>.lnk</label><label><input type="checkbox" checked>.appref-ms</label></div></div>
+          </div><div class="window-footer"><button class="footer-link" type="button">Clear usage history</button><button type="button">Reset settings</button><button type="button">Open log folder</button><button type="button">Cancel</button><button class="primary" type="button">Save</button></div>
+        </div></div>
+      </article>
+
+      <article class="concept" data-style="command" data-name="03 · Command Center">
+        <div class="concept-meta"><div><div class="concept-number">03 / COMMAND CENTER</div><h2>Keyboard-first, power-user ready</h2><p class="concept-note">A compact left rail makes the page feel like a focused control surface.</p></div><button class="choose" type="button">Choose</button></div>
+        <div class="preview"><div class="window" role="group" aria-label="Command Center settings preview">
+          <div class="window-header"><div class="window-title"><span class="window-mark">&gt;_</span>nimble.run / settings</div><button class="window-close" type="button" aria-label="Close">×</button></div>
+          <div class="window-body"><div><p class="section-title">Global hotkey</p><div class="setting-row"><span class="setting-label">shortcut</span><div class="hotkey"><input type="text" value="Alt+Space" aria-label="Shortcut"><button type="button">Change</button></div></div><p class="section-title" style="margin-top:16px">Launcher</p><div class="setting-row"><span class="setting-label">recent_apps</span><input type="number" value="20" aria-label="Recent apps"></div><label class="check-row"><input type="checkbox" checked>hide_after_launch</label><label class="check-row"><input type="checkbox" checked>launch_at_startup</label><div class="setting-row" style="margin-top:10px"><span>theme</span><select aria-label="Theme"><option>Follow system</option></select></div></div>
+            <div class="catalog-box"><p class="section-title">Catalog sources</p><label class="check-row"><input type="checkbox" checked>include_windows_apps</label><small>Start Menu and installed apps</small><div class="folder-line"><span>user_folders</span><div><button type="button">Add…</button> <button type="button">Remove</button></div></div><div class="folder-list"><span class="selected">D:\Program files</span></div><label class="check-row" style="margin-top:7px"><input type="checkbox" checked>include_subfolders</label><div class="exts"><label><input type="checkbox" checked>.exe</label><label><input type="checkbox" checked>.cmd</label><label><input type="checkbox" checked>.bat</label><label><input type="checkbox" checked>.lnk</label><label><input type="checkbox" checked>.appref-ms</label></div></div>
+          </div><div class="window-footer"><button class="footer-link" type="button">clear_usage_history</button><button type="button">reset</button><button type="button">logs</button><button type="button">cancel</button><button class="primary" type="button">apply</button></div>
+        </div></div>
+      </article>
+
+      <article class="concept" data-style="paper" data-name="04 · Paper Index">
+        <div class="concept-meta"><div><div class="concept-number">04 / PAPER INDEX</div><h2>Editorial, human, quiet</h2><p class="concept-note">Uses typography and rules instead of boxes, so settings feel less technical.</p></div><button class="choose" type="button">Choose</button></div>
+        <div class="preview"><div class="window" role="group" aria-label="Paper Index settings preview">
+          <div class="window-header"><div class="window-title"><span class="window-mark">N</span>NimbleRun Settings</div><button class="window-close" type="button" aria-label="Close">×</button></div>
+          <div class="window-body"><p class="section-title">Global hotkey</p><div class="setting-row"><span class="setting-label">Shortcut</span><div class="hotkey"><input type="text" value="Alt+Space" aria-label="Shortcut"><button type="button">Change</button></div></div><p class="section-title" style="margin-top:16px">Launcher</p><div class="setting-row"><span class="setting-label">Recent apps to show</span><input type="number" value="20" aria-label="Recent apps"></div><label class="check-row"><input type="checkbox" checked>Hide after launching an app</label><label class="check-row"><input type="checkbox" checked>Launch at startup</label><div class="setting-row" style="margin-top:10px"><span>Theme</span><select aria-label="Theme"><option>Follow system</option></select></div>
+            <div class="catalog-box"><p class="section-title">Catalog sources</p><label class="check-row"><input type="checkbox" checked>Include Windows apps <small>(Start Menu and installed apps)</small></label><div class="folder-line"><span>User folders:</span><div><button type="button">Add…</button> <button type="button">Remove</button></div></div><div class="folder-list"><span class="selected">D:\Program files</span></div><label class="check-row" style="margin-top:7px"><input type="checkbox" checked>Include subfolders</label><div class="exts"><label><input type="checkbox" checked>.exe</label><label><input type="checkbox" checked>.cmd</label><label><input type="checkbox" checked>.bat</label><label><input type="checkbox" checked>.lnk</label><label><input type="checkbox" checked>.appref-ms</label></div></div>
+          </div><div class="window-footer"><button class="footer-link" type="button">Clear usage history</button><button type="button">Reset settings</button><button type="button">Open log folder</button><button type="button">Cancel</button><button class="primary" type="button">OK</button></div>
+        </div></div>
+      </article>
+
+      <article class="concept" data-style="matrix" data-name="05 · Blue Matrix">
+        <div class="concept-meta"><div><div class="concept-number">05 / BLUE MATRIX</div><h2>Dense, structured, efficient</h2><p class="concept-note">A compact control matrix keeps related values close and reduces vertical scanning.</p></div><button class="choose" type="button">Choose</button></div>
+        <div class="preview"><div class="window" role="group" aria-label="Blue Matrix settings preview">
+          <div class="window-header"><div class="window-title"><span class="window-mark">N</span>NIMBLERUN // SETTINGS</div><button class="window-close" type="button" aria-label="Close">×</button></div>
+          <div class="window-body"><p class="section-title">Global hotkey</p><div class="setting-row"><span class="setting-label">Shortcut</span><div class="hotkey"><input type="text" value="Alt+Space" aria-label="Shortcut"><button type="button">Change</button></div></div><p class="section-title" style="margin-top:16px">Launcher</p><div class="setting-row"><span class="setting-label">Recent apps to show <small>8–40</small></span><input type="number" value="20" aria-label="Recent apps"></div><label class="check-row"><input type="checkbox" checked>Hide after launching an app</label><label class="check-row"><input type="checkbox" checked>Launch at startup</label><div class="setting-row" style="margin-top:10px"><span>Theme</span><select aria-label="Theme"><option>Follow system</option></select></div>
+            <div class="catalog-box"><p class="section-title">Catalog sources</p><label class="check-row"><input type="checkbox" checked>Include Windows apps <small>(Start Menu and installed apps)</small></label><div class="folder-line"><span>User folders:</span><div><button type="button">Add…</button> <button type="button">Remove</button></div></div><div class="folder-list"><span class="selected">D:\Program files</span></div><label class="check-row" style="margin-top:7px"><input type="checkbox" checked>Include subfolders</label><div class="exts"><label><input type="checkbox" checked>.exe</label><label><input type="checkbox" checked>.cmd</label><label><input type="checkbox" checked>.bat</label><label><input type="checkbox" checked>.lnk</label><label><input type="checkbox" checked>.appref-ms</label></div></div>
+          </div><div class="window-footer"><button class="footer-link" type="button">Clear usage history</button><button type="button">Reset settings</button><button type="button">Open log folder</button><button type="button">Cancel</button><button class="primary" type="button">OK</button></div>
+        </div></div>
+      </article>
+
+      <article class="concept" data-style="fluent" data-name="06 · Fluent Split">
+        <div class="concept-meta"><div><div class="concept-number">06 / FLUENT SPLIT</div><h2>Modern Windows-native</h2><p class="concept-note">A quiet navigation rail gives each settings area a stable home.</p></div><button class="choose" type="button">Choose</button></div>
+        <div class="preview"><div class="window" role="group" aria-label="Fluent Split settings preview">
+          <div class="window-header"><div class="window-title"><span class="window-mark">N</span>NimbleRun</div><button class="window-close" type="button" aria-label="Close">×</button></div>
+          <div class="window-body"><p class="section-title">Global hotkey</p><div class="setting-row"><span class="setting-label">Shortcut</span><div class="hotkey"><input type="text" value="Alt+Space" aria-label="Shortcut"><button type="button">Change</button></div></div><p class="section-title" style="margin-top:16px">Launcher</p><div class="setting-row"><span class="setting-label">Recent apps to show</span><input type="number" value="20" aria-label="Recent apps"></div><label class="check-row"><input type="checkbox" checked>Hide after launching an app</label><label class="check-row"><input type="checkbox" checked>Launch at startup</label><div class="setting-row" style="margin-top:10px"><span>Theme</span><select aria-label="Theme"><option>Follow system</option></select></div>
+            <div class="catalog-box"><p class="section-title">Catalog sources</p><label class="check-row"><input type="checkbox" checked>Include Windows apps <small>(Start Menu and installed apps)</small></label><div class="folder-line"><span>User folders:</span><div><button type="button">Add…</button> <button type="button">Remove</button></div></div><div class="folder-list"><span class="selected">D:\Program files</span></div><label class="check-row" style="margin-top:7px"><input type="checkbox" checked>Include subfolders</label><div class="exts"><label><input type="checkbox" checked>.exe</label><label><input type="checkbox" checked>.cmd</label><label><input type="checkbox" checked>.bat</label><label><input type="checkbox" checked>.lnk</label><label><input type="checkbox" checked>.appref-ms</label></div></div>
+          </div><div class="window-footer"><button class="footer-link" type="button">Clear usage history</button><button type="button">Reset settings</button><button type="button">Open log folder</button><button type="button">Cancel</button><button class="primary" type="button">OK</button></div>
+        </div></div>
+      </article>
+    </section>
+
+    <p class="showcase-tip">Tip: click <kbd>Choose</kbd> to mark a direction, or click a whole concept to open a larger preview.</p>
+  </main>
+
+  <dialog id="preview-dialog" aria-labelledby="dialog-title">
+    <div class="dialog-head"><div><div class="concept-number" id="dialog-number"></div><h2 id="dialog-title"></h2></div><button class="dialog-close" type="button" aria-label="Close preview">×</button></div>
+    <div class="dialog-preview" id="dialog-content"></div>
+  </dialog>
+
+  <script>
+    const templateConcept = document.querySelector('.concept[data-style="calm"]');
+    const conceptSpecs = [
+      {style:'ours-stack', number:'OURS / 07', name:'07 · Stacked Cards', title:'One clear card per group', note:'Keeps every group full-width and easy to scan in a narrow settings window.'},
+      {style:'ours-lanes', number:'OURS / 08', name:'08 · Three Lanes', title:'Three equal work lanes', note:'Places setup, launcher behavior, and catalog sources into equally weighted columns.'},
+      {style:'ours-rail', number:'OURS / 09', name:'09 · Section Rail', title:'A small map, one canvas', note:'Uses a restrained section rail without turning the page into a multi-screen wizard.'},
+      {style:'ours-source-first', number:'OURS / 10', name:'10 · Sources First', title:'Catalog work up front', note:'Prioritizes the largest and most operational section, then leaves preferences below.'},
+      {style:'ours-overview', number:'OURS / 11', name:'11 · Compact Overview', title:'Balanced overview', note:'A compact two-column overview keeps the window short while preserving grouping.'},
+      {style:'oc-frequency', number:'OPENCODE FALLBACK / OC-01', name:'OC-01 · Frequency Order', title:'Most-used controls first', note:'Fallback concept: hotkey and launcher settings lead; catalog sources form the closing section.'},
+      {style:'oc-flow', number:'OPENCODE FALLBACK / OC-02', name:'OC-02 · Launch Flow', title:'From invoke to launch', note:'Fallback concept: follows the user journey from shortcut, to behavior, to app discovery.'},
+      {style:'oc-sources', number:'OPENCODE FALLBACK / OC-03', name:'OC-03 · Catalog Workspace', title:'Source management center', note:'Fallback concept: puts catalog scope first for users who tune folders and extensions often.'},
+      {style:'oc-rail', number:'OPENCODE FALLBACK / OC-04', name:'OC-04 · Four Sections', title:'Essentials to maintenance', note:'Fallback concept: groups settings by responsibility while keeping one continuous page.'},
+      {style:'oc-table', number:'OPENCODE FALLBACK / OC-05', name:'OC-05 · Reading List', title:'Quiet label-value rhythm', note:'Fallback concept: reduces cards and uses a consistent label-value reading pattern.'},
+      {style:'oc-actions', number:'OPENCODE FALLBACK / OC-06', name:'OC-06 · Action Footer', title:'Settings with clear exit', note:'Fallback concept: keeps configuration in cards and gives the bottom actions stronger presence.'}
+    ];
+    conceptSpecs.forEach(spec => {
+      const concept = templateConcept.cloneNode(true);
+      concept.dataset.style = spec.style;
+      concept.dataset.name = spec.name;
+      concept.querySelector('.concept-number').textContent = spec.number;
+      concept.querySelector('h2').textContent = spec.title;
+      concept.querySelector('.concept-note').textContent = spec.note;
+      concept.querySelector('.window').setAttribute('aria-label', `${spec.name} settings preview`);
+      templateConcept.parentElement.appendChild(concept);
+    });
+    [...document.querySelectorAll('.concept')].forEach(concept => {
+      if (concept !== templateConcept && !conceptSpecs.some(spec => spec.style === concept.dataset.style)) concept.remove();
+    });
+
+    const concepts = [...document.querySelectorAll('.concept')];
+    const selection = document.querySelector('#selected-name');
+    const dialog = document.querySelector('#preview-dialog');
+    const dialogContent = document.querySelector('#dialog-content');
+    const dialogTitle = document.querySelector('#dialog-title');
+    const dialogNumber = document.querySelector('#dialog-number');
+
+    function choose(concept) {
+      concepts.forEach(item => item.classList.toggle('is-selected', item === concept));
+      selection.textContent = concept.dataset.name;
+    }
+
+    concepts.forEach(concept => {
+      concept.querySelector('.choose').addEventListener('click', event => {
+        event.stopPropagation();
+        choose(concept);
+      });
+      concept.addEventListener('click', event => {
+        if (event.target.closest('button, input, select, label')) return;
+        dialogNumber.textContent = concept.querySelector('.concept-number').textContent;
+        dialogTitle.textContent = concept.querySelector('h2').textContent;
+        dialogContent.replaceChildren(concept.querySelector('.preview').cloneNode(true));
+        dialog.showModal();
+      });
+    });
+
+    document.querySelector('.dialog-close').addEventListener('click', () => dialog.close());
+    dialog.addEventListener('click', event => { if (event.target === dialog) dialog.close(); });
+
+    // Small guard for this standalone artifact: fail loudly if a concept is accidentally removed.
+    console.assert(concepts.length === 12, 'Expected exactly twelve settings concepts.');
+  </script>
+</body>
+</html>

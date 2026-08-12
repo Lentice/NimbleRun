@@ -66,6 +66,7 @@ struct CaptureContext {
     HotkeyCaptureState state;
     bool confirmable = false;                // a parseable combo has been captured
     std::optional<HotkeyBinding> candidate;  // the captured combo, when any
+    HFONT display_font = nullptr;
 };
 
 HWND g_capture_dialog = nullptr;
@@ -157,16 +158,46 @@ INT_PTR CALLBACK HotkeyCaptureDialogProc(HWND dialog, UINT message, WPARAM w_par
         SetWindowTextW(dialog, StringText(SettingsString::CaptureDialogTitle).c_str());
         SetDlgItemTextW(dialog, IDC_CAPTURE_PROMPT,
                         StringText(SettingsString::CapturePrompt).c_str());
+        SetDlgItemTextW(dialog, IDC_HOTKEY_HINT,
+                        StringText(SettingsString::HotkeyHint).c_str());
         SetDlgItemTextW(dialog, IDOK, StringText(SettingsString::OkButton).c_str());
         SetDlgItemTextW(dialog, IDCANCEL, StringText(SettingsString::CancelButton).c_str());
         auto* context = new CaptureContext;
         context->editor = reinterpret_cast<SettingsEditor*>(l_param);
         SetWindowLongPtrW(dialog, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(context));
         g_capture_dialog = dialog;
+        const HFONT dialog_font = reinterpret_cast<HFONT>(
+            SendMessageW(dialog, WM_GETFONT, 0, 0));
+        LOGFONTW lf{};
+        if (dialog_font) {
+            GetObjectW(dialog_font, sizeof(lf), &lf);
+        }
+        if (lf.lfHeight < 0) {
+            lf.lfHeight -= 2;
+        } else {
+            lf.lfHeight += 2;
+        }
+        lf.lfWeight = FW_BOLD;
+        context->display_font = CreateFontIndirectW(&lf);
+        SendMessageW(GetDlgItem(dialog, IDC_CAPTURE_DISPLAY), WM_SETFONT,
+                     reinterpret_cast<WPARAM>(context->display_font), TRUE);
         EnableWindow(GetDlgItem(dialog, IDOK), FALSE);
         g_capture_hook = SetWindowsHookExW(WH_KEYBOARD_LL, CaptureKeyboardProc,
                                            GetModuleHandleW(nullptr), 0);
         return TRUE;
+    }
+
+    case WM_CTLCOLORDLG:
+        return reinterpret_cast<INT_PTR>(GetSysColorBrush(COLOR_WINDOW));
+
+    case WM_CTLCOLORSTATIC: {
+        const HWND control = reinterpret_cast<HWND>(l_param);
+        const HDC dc = reinterpret_cast<HDC>(w_param);
+        if (control == GetDlgItem(dialog, IDC_CAPTURE_DISPLAY)) {
+            SetTextColor(dc, GetSysColor(COLOR_HIGHLIGHT));
+            SetBkMode(dc, TRANSPARENT);
+        }
+        return reinterpret_cast<INT_PTR>(GetSysColorBrush(COLOR_WINDOW));
     }
 
     case WM_COMMAND:
@@ -210,6 +241,10 @@ INT_PTR CALLBACK HotkeyCaptureDialogProc(HWND dialog, UINT message, WPARAM w_par
         g_capture_dialog = nullptr;
         if (auto* context = reinterpret_cast<CaptureContext*>(
                 GetWindowLongPtrW(dialog, GWLP_USERDATA))) {
+            if (context->display_font) {
+                DeleteObject(context->display_font);
+                context->display_font = nullptr;
+            }
             delete context;
             SetWindowLongPtrW(dialog, GWLP_USERDATA, 0);
         }
@@ -232,7 +267,6 @@ void InitLabels(HWND dialog) {
     SetWindowTextW(dialog, StringText(SettingsString::DialogTitle).c_str());
     SetControlText(dialog, IDC_HOTKEY_GROUP, SettingsString::HotkeyGroup);
     SetControlText(dialog, IDC_HOTKEY_LABEL, SettingsString::HotkeyLabel);
-    SetControlText(dialog, IDC_HOTKEY_HINT, SettingsString::HotkeyHint);
     SetControlText(dialog, IDC_LAUNCHER_GROUP, SettingsString::LauncherGroup);
     SetControlText(dialog, IDC_RECENT_LABEL, SettingsString::RecentCountLabel);
     SetControlText(dialog, IDC_HIDE_AFTER_LAUNCH, SettingsString::HideAfterLaunchLabel);
@@ -248,7 +282,7 @@ void InitLabels(HWND dialog) {
     SetControlText(dialog, IDC_CLEAR_USAGE, SettingsString::ClearUsageButton);
     SetControlText(dialog, IDC_RESET_SETTINGS, SettingsString::ResetSettingsButton);
     SetControlText(dialog, IDC_OPEN_LOG_FOLDER, SettingsString::OpenLogFolderButton);
-    SetControlText(dialog, IDOK, SettingsString::OkButton);
+    SetControlText(dialog, IDOK, SettingsString::SaveButton);
     SetControlText(dialog, IDCANCEL, SettingsString::CancelButton);
 }
 

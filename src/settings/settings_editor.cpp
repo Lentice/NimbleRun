@@ -102,23 +102,23 @@ std::wstring_view SettingsStringText(SettingsString key) {
     case SettingsString::DialogTitle:
         return L"NimbleRun Settings";
     case SettingsString::HotkeyGroup:
-        return L"Global hotkey";
+        return L"GLOBAL HOTKEY";
     case SettingsString::HotkeyLabel:
-        return L"Shortcut:";
+        return L"Shortcut";
     case SettingsString::HotkeyHint:
         // NR-088: Win-key combos are allowed now (they warn on conflict), so
         // the old "rejected" claim is gone from the hint.
         return L"Alt+Space, Ctrl+Alt+Space, Ctrl+Win+E, ...";
     case SettingsString::LauncherGroup:
-        return L"Launcher";
+        return L"LAUNCHER";
     case SettingsString::RecentCountLabel:
-        return L"Recent apps to show (8-40):";
+        return L"Recent apps";
     case SettingsString::HideAfterLaunchLabel:
-        return L"Hide after launching an app";
+        return L"Hide after launch";
     case SettingsString::StartupAutoStartLabel:
         return L"Launch at startup";
     case SettingsString::ThemeLabel:
-        return L"Theme:";
+        return L"Theme";
     case SettingsString::ThemeSystem:
         return L"Follow system";
     case SettingsString::ThemeLight:
@@ -126,7 +126,7 @@ std::wstring_view SettingsStringText(SettingsString key) {
     case SettingsString::ThemeDark:
         return L"Dark";
     case SettingsString::CatalogSourcesGroup:
-        return L"Catalog sources";
+        return L"CATALOG SOURCES";
     case SettingsString::IncludeWindowsAppsLabel:
         return L"Include Windows apps (Start Menu and installed apps)";
     case SettingsString::UserFoldersLabel:
@@ -147,6 +147,8 @@ std::wstring_view SettingsStringText(SettingsString key) {
         return L"Reset settings";
     case SettingsString::OpenLogFolderButton:
         return L"Open log folder";
+    case SettingsString::SaveButton:
+        return L"Save";
     case SettingsString::OkButton:
         return L"OK";
     case SettingsString::CancelButton:
