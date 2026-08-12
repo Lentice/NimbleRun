@@ -1108,7 +1108,13 @@ void ActivateRow(std::size_t index, HWND window) {
     // Success: update usage and hide per settings.
     if (g_usage) {
         g_usage->RecordLaunch(entry.stable_id, static_cast<std::int64_t>(std::time(nullptr)));
-        g_usage->Save();
+        // NR-187: a failed Save silently loses this launch's record across a
+        // restart (disk full / permissions / AV lock). No retry (pointless on
+        // disk full), no user notification -- one visible diagnostic line
+        // shaped like the launch-failure record above.
+        if (!g_usage->Save() && g_diag) {
+            g_diag->Write(L"usage", L"save failed");
+        }
         // The new score has to reach the snapshot the next search reads. With
         // hide-after-launch off the panel stays open, so waiting for the next
         // show would rank the app the user just launched on its old score.
@@ -1390,7 +1396,15 @@ void OnGenerationCompleteRefresh() {
     g_launch_failure_refresh.OnRefreshComplete();
     RefreshPanelSnapshot();
     if (g_rebuild_pipeline && !g_rebuild_pipeline->CacheWritesDisabled()) {
-        nimblerun::SaveCatalogCache(g_user_data_directory, g_refresh->Snapshot());
+        // NR-187: the cache is rebuildable, but a silent write failure hides a
+        // disk/permission problem the next cold start will hit again; one
+        // diagnostic line keeps it visible. Result is checked at the call site
+        // (the cache module owns no logger, and adding one would be a new
+        // dependency for a one-line record).
+        if (!nimblerun::SaveCatalogCache(g_user_data_directory, g_refresh->Snapshot()) &&
+            g_diag) {
+            g_diag->Write(L"catalog_cache", L"save failed");
+        }
     }
 }
 
@@ -2068,15 +2082,20 @@ void RemoveTrayIcon(HWND window) {
 
 // Shared NOTIFYICONDATAW info-balloon filler for the one-shot tray balloons
 // below; the only info-balloon filling in this file.
-void ShowInfoBalloon(HWND window, std::wstring_view text) {
+// NR-187: takes const std::wstring& (was std::wstring_view) so the copied
+// buffer is always NUL-terminated, and copies with an explicit cap + NUL
+// instead of wcsncpy on text.data() -- a view's data() carries no NUL
+// guarantee, so a future substr() caller would over-read.
+void ShowInfoBalloon(HWND window, const std::wstring& text) {
     NOTIFYICONDATAW nid{};
     nid.cbSize = sizeof(nid);
     nid.hWnd = window;
     nid.uID = kTrayIconId;
     nid.uFlags = NIF_INFO;
     wcsncpy(nid.szInfoTitle, L"NimbleRun", sizeof(nid.szInfoTitle) / sizeof(nid.szInfoTitle[0]) - 1);
-    wcsncpy(nid.szInfo, text.data(),
-            sizeof(nid.szInfo) / sizeof(nid.szInfo[0]) - 1);
+    const std::size_t copied = text.copy(
+        nid.szInfo, sizeof(nid.szInfo) / sizeof(nid.szInfo[0]) - 1);
+    nid.szInfo[copied] = L'\0';
     nid.dwInfoFlags = NIIF_NONE;
     Shell_NotifyIconW(NIM_MODIFY, &nid);
 }

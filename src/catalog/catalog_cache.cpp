@@ -69,7 +69,7 @@ std::wstring SerializeEntry(const AppEntry& entry) {
 }
 
 // the cache is just merged entries; older/none handled by rebuild.
-void WriteCache(const std::wstring& directory, const std::vector<AppEntry>& entries) {
+bool WriteCache(const std::wstring& directory, const std::vector<AppEntry>& entries) {
     std::wstring text;
     text += kSchemaPrefix;
     text += std::to_wstring(kSchemaVersion);
@@ -78,13 +78,13 @@ void WriteCache(const std::wstring& directory, const std::vector<AppEntry>& entr
         text += SerializeEntry(entry);
         text += L'\n';
     }
-    AtomicWriteUtf8Text(directory, kFileName, text);
+    return AtomicWriteUtf8Text(directory, kFileName, text);
 }
 
 } // namespace
 
-void SaveCatalogCache(const std::wstring& directory, const std::vector<AppEntry>& entries) {
-    WriteCache(directory, entries);
+bool SaveCatalogCache(const std::wstring& directory, const std::vector<AppEntry>& entries) {
+    return WriteCache(directory, entries);
 }
 
 bool LoadCatalogCache(const std::wstring& directory, std::vector<AppEntry>& out,

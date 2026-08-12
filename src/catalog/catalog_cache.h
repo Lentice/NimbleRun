@@ -20,7 +20,9 @@ constexpr std::size_t kMaxCacheRows = 20000;
 // a speed-only snapshot of the merged catalog, never a source of truth. Read
 // errors are tolerated by simply rebuilding. Uses the same tmp + flush +
 // atomic replace conventions as settings.ini / usage.tsv.
-void SaveCatalogCache(const std::wstring& directory, const std::vector<AppEntry>& entries);
+// NR-187: returns false when the atomic write failed, so the caller can make
+// the failure visible (the cache module owns no logger).
+bool SaveCatalogCache(const std::wstring& directory, const std::vector<AppEntry>& entries);
 
 // Returns true when a valid cache was loaded into `out`; false when the file is
 // missing, corrupt, or from a newer schema (the caller rebuilds in the
