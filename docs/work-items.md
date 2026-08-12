@@ -213,6 +213,10 @@
 | NR-174 | DiagnosticLog::Write 宣稱 never throws 但無例外邊界，錯誤記錄路徑可終止 process | 5 | `done` | — | [NR-174](work-items/NR-174-diagnostic-log-noexcept.md) |
 | NR-175 | WatchLoop thread body 無最外層例外邊界，配置失敗逃出 std::thread 呼叫 std::terminate | 2 | `done` | — | [NR-175](work-items/NR-175-watchloop-exception-boundary.md) |
 | NR-176 | 格狀狀態 footer 快選指引固定顯示完整鍵序 `Alt+0~9`，不再隨列數縮減 | 3 | `done` | NR-024, NR-029, NR-045 | [NR-176](work-items/NR-176-grid-footer-quick-select-range.md) |
+| NR-177 | 釘選標記改為琥珀截角（grid）＋直條換色（list）；覆寫 NR-041 形狀與筆刷決策 | 3 | `done` | — | [NR-177](work-items/NR-177-pin-marker-amber-corner.md) |
+| NR-178 | 格狀 hover 的 cell tooltip：截斷名稱顯示完整名稱（bootstrap 樣式自繪浮動視窗） | 3 | `done` | NR-029, NR-015, NR-133 | [NR-178](work-items/NR-178-cell-tooltip.md) |
+| NR-179 | cell tooltip 優先顯示在格子下方＋修復箭頭不可見（NR-178 放置規則覆寫） | 3 | `done` | NR-178 | [NR-179](work-items/NR-179-cell-tooltip-below-and-arrow-fix.md) |
+| NR-180 | cell tooltip 改用 Windows 原生 tooltip（覆寫 NR-178 技術路線與 ADR-0001） | 3 | `done` | NR-178, NR-179 | [NR-180](work-items/NR-180-cell-tooltip-native.md) |
 
 ## Dependency lanes
 
@@ -551,6 +555,8 @@ NR-159（spec 措辭）── 純文件，最後做
 ```
 
 ## 計畫決策紀錄
+
+- 2026-08-11（NR-177 ready，grilling 協議產出）：使用者回饋——NR-041 的釘選標記（grid 左上角藍色圓點）被誤讀為「新增／未讀」提示。採 grilling 逐輪確認後收斂成 NR-177：**grid 改為左上角 ◤ 琥珀截角三角形**（直角在格左上角、兩腿貼齊上緣／左緣、斜邊朝格內、腿長 10 DIP、畫在選取邊框之上並蓋過邊框左上角），**list 直條形狀不變、同步換同色**，**新色為琥珀金**（light `0xA87400`／dark `0xE0B050`；HC 沿用 `highlight_text` 不變）。**覆寫 NR-041 Decisions #4 與兩條硬約束**，新證據：(1) 藍色圓點＝unread badge 標準形狀＋顏色，NR-041 未預見的語意衝突；(2) NR-041「三角形要建立 ID2D1PathGeometry 是代價」的假設不成立——factory 為 device-independent，仿 `g_dash_style`（`main.cpp:485`）建立一次即可跨 `D2DERR_RECREATE_TARGET` 存活，每幀 `FillGeometry` 與 `FillEllipse` 同價。**刻意不問／不開**：拖曳 ghost 畫標記（現況只畫圖示，維持不變）；顏色可自訂設定選項（MVP 範圍外）。無障礙朗讀沿用 NR-041 決策（視覺 item，`AccessibleNameFor` 不變）。spec 同步：§4.2 增補一句釘選標記視覺契約（琥珀截角／直條、形狀承載狀態、HC 用系統色），因為琥珀已成為使用者可見的語意色。未 commit。
 
 - 2026-08-10（NR-149～NR-159 ready，第十四次稽核第 2 輪產出）：NR-139～NR-148 全部
   `done` 後重跑四軸稽核。主 Agent 對兩個 IMPORTANT（安全軸的 WM_DPICHANGED lParam

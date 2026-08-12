@@ -36,6 +36,7 @@
 #include "ui/panel_palette.h"
 #include "ui/pin_drag_state.h"
 #include "ui/quick_select.h"
+#include "ui/cell_tooltip.h"
 #include "win/com.h"
 #include "win/handoff_registry.h"
 #include "win/handle_guard.h"
@@ -93,6 +94,14 @@ constexpr UINT kIconReadyMessage = WM_APP + 9;
 constexpr UINT kRebuildDeliveryFailedMessage = WM_APP + 10;
 // NR-011: debounce timer id (500 ms, see FR-008).
 constexpr UINT_PTR kRebuildTimerId = 2;
+// NR-178: one-shot cell-tooltip hover timer (design-spec §4.8). It exists only
+// while the pointer rests on a cell whose name is truncated (NFR-002: no
+// resident timer).
+constexpr UINT_PTR kTooltipTimerId = 3;
+constexpr UINT kTooltipDelayMs = 150;
+// NR-178: the grid name rect is the cell inset 4 DIP per side (Render's
+// name_rect); a name whose natural width exceeds this is drawn trimmed.
+constexpr float kTooltipNameWidthDip = nimblerun::layout::kCellWidthDip - 8.0f;
 
 constexpr UINT kTrayIconId = 1;
 constexpr UINT kCmdOpen = 1;
@@ -335,6 +344,10 @@ ID2D1HwndRenderTarget* g_render_target = nullptr;
 // (device-independent), so it is created with the factory and released with it,
 // never in the render-target create/release pair.
 ID2D1StrokeStyle* g_dash_style = nullptr;
+// NR-177: pinned marker triangle (cell's top-left corner-cut). Device-independent
+// like g_dash_style: created from the factory once, survives DiscardDeviceResources,
+// released where the factory is released below the message loop.
+ID2D1PathGeometry* g_pin_geometry = nullptr;
 ID2D1SolidColorBrush* g_text_brush = nullptr;
 ID2D1SolidColorBrush* g_dim_brush = nullptr;
 ID2D1SolidColorBrush* g_card_brush = nullptr;
@@ -343,6 +356,7 @@ ID2D1SolidColorBrush* g_selected_border_brush = nullptr;
 ID2D1SolidColorBrush* g_hover_brush = nullptr;  // NR-029: grid hover cell fill
 ID2D1SolidColorBrush* g_search_fill_brush = nullptr;
 ID2D1SolidColorBrush* g_search_border_brush = nullptr;
+ID2D1SolidColorBrush* g_pin_marker_brush = nullptr;  // NR-177: pinned marker (amber corner / stripe)
 IDWriteFactory* g_write_factory = nullptr;
 IDWriteTextFormat* g_title_format = nullptr;
 IDWriteTextFormat* g_text_format = nullptr;
@@ -364,6 +378,10 @@ int g_grid_hover_index = -1;
 // True between a successful TrackMouseEvent(TME_LEAVE) and its WM_MOUSELEAVE,
 // so leave-tracking is re-armed only after the leave actually fires.
 bool g_tracking_mouse_leave = false;
+
+// NR-180: grid cell tooltip = one resident native TOOLTIPS_CLASS window
+// (window-layer visual state, hover-only, per design-spec §4.8/§4.9).
+nimblerun::ui::CellTooltip g_cell_tooltip;
 
 // NR-136: pure pinned-cell drag-reorder state; the host supplies hit testing
 // and system drag thresholds at the message boundary.
@@ -394,6 +412,7 @@ void DiscardDeviceResources() {
     Release(g_hover_brush);
     Release(g_search_fill_brush);
     Release(g_search_border_brush);
+    Release(g_pin_marker_brush);
 }
 
 // NR-015 OS state readers. Kept here (the host touches the OS); the pure
@@ -462,8 +481,8 @@ nimblerun::palette::PanelColors ResolveCurrentColors() {
 
 bool CreateDeviceResources(HWND window) {
     if (g_render_target && g_text_brush && g_dim_brush && g_card_brush &&
-        g_selected_brush && g_selected_border_brush && g_hover_brush &&
-        g_search_fill_brush && g_search_border_brush &&
+        g_selected_brush && g_selected_border_brush && g_pin_marker_brush &&
+        g_hover_brush && g_search_fill_brush && g_search_border_brush &&
         g_title_format && g_text_format && g_small_format &&
         g_grid_name_format && g_key_format) {
         return true;
@@ -488,6 +507,27 @@ bool CreateDeviceResources(HWND window) {
                                         D2D1_CAP_STYLE_FLAT, D2D1_LINE_JOIN_MITER, 10.0f,
                                         D2D1_DASH_STYLE_DASH, 0.0f),
             nullptr, 0, &g_dash_style);
+    }
+    // NR-177: the pinned-marker triangle geometry is built once on the factory
+    // like g_dash_style (device-independent); Render() only translates it into
+    // each pinned cell, so per-frame cost is a single FillGeometry. Vertices are
+    // relative to the cell's top-left corner; failure is tolerated (the marker
+    // is decoration, Render() skips it when the geometry is null).
+    if (g_d2d_factory && !g_pin_geometry) {
+        g_d2d_factory->CreatePathGeometry(&g_pin_geometry);
+        if (g_pin_geometry) {
+            ID2D1GeometrySink* sink = nullptr;
+            if (SUCCEEDED(g_pin_geometry->Open(&sink))) {
+                constexpr float kPinMarkerSizeDip = 10.0f;
+                sink->BeginFigure(D2D1::Point2F(0.0f, 0.0f),
+                                  D2D1_FIGURE_BEGIN_FILLED);
+                sink->AddLine(D2D1::Point2F(kPinMarkerSizeDip, 0.0f));
+                sink->AddLine(D2D1::Point2F(0.0f, kPinMarkerSizeDip));
+                sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+                sink->Close();
+                sink->Release();
+            }
+        }
     }
 
     if (!g_write_factory && FAILED(DWriteCreateFactory(
@@ -624,6 +664,8 @@ bool CreateDeviceResources(HWND window) {
         SUCCEEDED(g_render_target->CreateSolidColorBrush(
             D2D1::ColorF(c.selected_border), &g_selected_border_brush)) &&
         SUCCEEDED(g_render_target->CreateSolidColorBrush(
+            D2D1::ColorF(c.pin_marker), &g_pin_marker_brush)) &&
+        SUCCEEDED(g_render_target->CreateSolidColorBrush(
             D2D1::ColorF(c.hover_fill), &g_hover_brush)) &&
         SUCCEEDED(g_render_target->CreateSolidColorBrush(
             D2D1::ColorF(c.input_fill), &g_search_fill_brush)) &&
@@ -681,6 +723,64 @@ int PinnedRowCount() {
     }
     const int recent_start = g_model->RecentStartIndex();
     return recent_start > 0 ? recent_start : 0;
+}
+
+// NR-178: the tooltip's 150 ms one-shot timer (design-spec §4.8). A hover
+// change dismisses any visible tooltip immediately, then the one-shot delay is
+// re-armed only when the new hovered cell's name is actually truncated.
+void UpdateTooltipTimer(HWND window) {
+    g_cell_tooltip.Hide();
+    KillTimer(window, kTooltipTimerId);
+    if (g_write_factory && g_grid_name_format && g_model &&
+        g_model->Columns() > 1 && g_grid_hover_index >= 0 &&
+        g_grid_hover_index < static_cast<int>(g_model->Rows().size())) {
+        const nimblerun::AppEntry& entry =
+            g_model->Rows()[static_cast<std::size_t>(g_grid_hover_index)];
+        if (nimblerun::ui::NameIsTruncated(
+                *g_write_factory, *g_grid_name_format,
+                entry.display_name.c_str(), kTooltipNameWidthDip)) {
+            SetTimer(window, kTooltipTimerId, kTooltipDelayMs, nullptr);
+            return;
+        }
+    }
+}
+
+// NR-178: every tooltip hide point funnels through here (KillTimer is a no-op
+// on an unarmed timer and Hide on an invisible tooltip is cheap).
+void HideCellTooltip(HWND window) {
+    KillTimer(window, kTooltipTimerId);
+    g_cell_tooltip.Hide();
+}
+
+// NR-178: WM_TIMER fired. Re-verifies that the hover cell is still the same
+// truncated cell (the timer is killed on any hover change), then shows the
+// tooltip over it. Reads only; never writes PanelModel state.
+void ShowTooltipForHoverCell(HWND window) {
+    if (!g_model || !g_write_factory || !g_grid_name_format ||
+        g_model->Columns() <= 1) {
+        return;
+    }
+    if (g_grid_hover_index < 0 ||
+        g_grid_hover_index >= static_cast<int>(g_model->Rows().size())) {
+        return;
+    }
+    const nimblerun::AppEntry& entry =
+        g_model->Rows()[static_cast<std::size_t>(g_grid_hover_index)];
+    if (!nimblerun::ui::NameIsTruncated(
+            *g_write_factory, *g_grid_name_format,
+            entry.display_name.c_str(), kTooltipNameWidthDip)) {
+        return;
+    }
+    const float scale =
+        static_cast<float>(GetDpiForWindow(window)) / nimblerun::layout::kDpi96;
+    const int slot = g_grid_hover_index - g_model->FirstVisibleRow();
+    const nimblerun::layout::SlotRectDip cell =
+        nimblerun::layout::SlotRect(slot, g_model->Columns());
+    g_cell_tooltip.Show(
+        window, scale, D2D1::RectF(cell.left, cell.top, cell.right, cell.bottom),
+        nimblerun::layout::kListTopDip, ClientHeightDip(window, scale),
+        nimblerun::layout::kListLeftDip, nimblerun::layout::kListRightDip,
+        entry.display_name.c_str());
 }
 
 void SyncAccessibility(HWND window);
@@ -930,6 +1030,10 @@ void UpdateSnapshotRanking(bool pins_changed);
 // already loaded (design-spec §10.2); it rides the flush task as a pure-value
 // copy and the worker never re-reads favorites.txt.
 void HidePanel(HWND window) {
+    // NR-178: every way the panel disappears also dismisses the cell tooltip
+    // (design-spec §4.8); without this a toggle-off would leave a floating
+    // popup on screen.
+    HideCellTooltip(window);
     ShowWindow(window, SW_HIDE);
     if (g_icon_worker) {
         // NR-099: drop the previous hide cycle's queued prewarm before the
@@ -1517,21 +1621,19 @@ void Render(HWND window) {
                     }
                 }
 
-                // NR-041: pinned marker -- a filled dot in the cell's top-left
-                // corner. Drawn last so it sits above the selection border, and
-                // placed on the left because the top-right corner is the NR-024
-                // quick-select digit box. Shape, not color, carries the state
-                // (design-spec §NFR-006); the border color is reused because the
-                // palette already guarantees it contrasts with every fill and
-                // follows the system colors under high contrast.
-                if (g_pins && g_pins->IsPinned(rows[row].stable_id)) {
-                    constexpr float kPinDotRadiusDip = 4.0f;
-                    constexpr float kPinDotInsetDip = 8.0f;
-                    g_render_target->FillEllipse(
-                        D2D1::Ellipse(D2D1::Point2F(cell.left + kPinDotInsetDip,
-                                                    cell.top + kPinDotInsetDip),
-                                      kPinDotRadiusDip, kPinDotRadiusDip),
-                        g_selected_border_brush);
+                // NR-177: pinned marker -- an amber corner-cut triangle in the
+                // cell's top-left corner (overrides NR-041's dot; the dot read
+                // as an unread badge). Drawn last so it sits above the selection
+                // border; the legs sit on the cell's top and left edges,
+                // hypotenuse inside the cell. Shape, not color, carries the
+                // state (design-spec §NFR-006).
+                if (g_pins && g_pins->IsPinned(rows[row].stable_id) &&
+                    g_pin_geometry) {
+                    g_render_target->SetTransform(
+                        D2D1::Matrix3x2F::Translation(cell.left, cell.top));
+                    g_render_target->FillGeometry(g_pin_geometry,
+                                                  g_pin_marker_brush);
+                    g_render_target->SetTransform(D2D1::Matrix3x2F::Identity());
                 }
             }
 
@@ -1597,14 +1699,16 @@ void Render(HWND window) {
 
                 // NR-041: pinned marker -- a stripe on the row's leading edge,
                 // in the gap kTileInsetDip already leaves before the icon. Same
-                // rule as the grid dot: shape, not color, and drawn after the
+                // rule as the grid marker: shape, not color, and drawn after the
                 // selection border so it stays visible on the selected row.
+                // NR-177: the stripe shares the amber pin_marker color with the
+                // grid corner-cut triangle.
                 if (g_pins && g_pins->IsPinned(rows[i].stable_id)) {
                     constexpr float kPinStripeWidthDip = 3.0f;
                     g_render_target->FillRectangle(
                         D2D1::RectF(row.left, row.top,
                                     row.left + kPinStripeWidthDip, row.bottom),
-                        g_selected_border_brush);
+                        g_pin_marker_brush);
                 }
                 // NR-012: fixed tile inside the row, vertically centered. The decoded
                 // icon (when cached) is drawn into the same rect the placeholder
@@ -1887,6 +1991,9 @@ void ShowPanel(HWND window) {
     // swallow the WM_MOUSELEAVE that would otherwise clear the flag).
     g_grid_hover_index = -1;
     g_tracking_mouse_leave = false;
+    // NR-178: same rule for the cell tooltip -- a hidden panel cannot show a
+    // hover popup (design-spec §4.8).
+    HideCellTooltip(window);
     // NR-046: same rule for the pinned-cell drag state; reset it for this show
     // so a drag that never got its mouse-up cannot leave a stale placeholder or
     // ghost behind (WM_CAPTURECHANGED covers the panel hiding mid-drag).
@@ -2342,10 +2449,13 @@ LRESULT CALLBACK SearchEditProc(HWND edit, UINT message, WPARAM w_param, LPARAM 
                 }
                 break;
             case VK_PRIOR:
+                // NR-178: paging dismisses the tooltip (design-spec §4.8).
+                HideCellTooltip(GetParent(edit));
                 g_model->ScrollBy(-g_model->ViewportRows());
                 InvalidateRect(GetParent(edit), nullptr, FALSE);
                 return 0;
             case VK_NEXT:
+                HideCellTooltip(GetParent(edit));
                 g_model->ScrollBy(g_model->ViewportRows());
                 InvalidateRect(GetParent(edit), nullptr, FALSE);
                 return 0;
@@ -2450,6 +2560,11 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
         if (w_param == kRebuildTimerId) {
             KillTimer(window, kRebuildTimerId);
             if (g_rebuild_pipeline) g_rebuild_pipeline->OnDebounceTimer();
+        } else if (w_param == kTooltipTimerId) {
+            // NR-178: one-shot -- the tooltip shows once per hover, then the
+            // next hover change re-arms the timer.
+            KillTimer(window, kTooltipTimerId);
+            ShowTooltipForHoverCell(window);
         }
         return 0;
     case kSettingsMessage: {
@@ -2542,6 +2657,9 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
             if (g_grid_hover_index != -1) {
                 g_grid_hover_index = -1;
             }
+            // NR-178: the layout switch out of the grid dismisses the tooltip
+            // (design-spec §4.8).
+            HideCellTooltip(window);
             InvalidateRect(window, nullptr, FALSE);
         }
         return 0;
@@ -2558,6 +2676,8 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
         }
         return DefWindowProcW(window, message, w_param, l_param);
     case WM_MOUSEWHEEL: {
+        // NR-178: scrolling dismisses the tooltip (design-spec §4.8).
+        HideCellTooltip(window);
         // NR-021: the wheel scrolls the list by the OS "lines per wheel notch"
         // setting (design-spec §4.8). WHEEL_PAGESCROLL means one viewport;
         // a failed SPI read falls back to 3. The wheel delta sign picks the
@@ -2585,6 +2705,10 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
         // ghost follows the cursor, the gap tracks the pinned region, and
         // nothing recomputes the hover fill until the gesture ends.
         if (g_pin_drag_state.Active()) {
+            // NR-178: the drag gesture dismisses the tooltip (design-spec
+            // §4.8); the press that armed the drag already hid it, this covers
+            // the press-then-drag transition.
+            HideCellTooltip(window);
             const int x = GET_X_LPARAM(l_param);
             const int y = GET_Y_LPARAM(l_param);
             const bool was_dragging = g_pin_drag_state.Dragging();
@@ -2617,13 +2741,15 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
         // NR-029: grid hover is a window-layer visual state. The hit index is
         // only recomputed and invalidated when the hit cell actually changes
         // (no per-pixel paint); TME_LEAVE clears it when the pointer exits the
-        // panel. No timers.
+        // panel. No timers. NR-178: the tooltip timer follows the same rule --
+        // it is re-armed only when the hover cell changes.
         if (g_model && g_model->Columns() > 1) {
             const int cell =
                 CellAtPoint(window, GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param));
             if (cell != g_grid_hover_index) {
                 g_grid_hover_index = cell;
                 InvalidateRect(window, nullptr, FALSE);
+                UpdateTooltipTimer(window);
             }
             if (!g_tracking_mouse_leave) {
                 TRACKMOUSEEVENT track{};
@@ -2641,8 +2767,13 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
             g_grid_hover_index = -1;
             InvalidateRect(window, nullptr, FALSE);
         }
+        // NR-178: the pointer left the panel, so the tooltip goes with it
+        // (design-spec §4.8).
+        HideCellTooltip(window);
         return 0;
     case WM_LBUTTONDOWN: {
+        // NR-178: any press dismisses the tooltip (design-spec §4.8).
+        HideCellTooltip(window);
         // NR-020/NR-029: a single click selects and launches the row (list) or
         // cell (grid) under the cursor (design-spec §4.8).
         const int cell = CellAtPoint(window, GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param));
@@ -2728,6 +2859,9 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
         }
         return 0;
     case WM_RBUTTONDOWN: {
+        // NR-178: a right press dismisses the tooltip like a left press
+        // (design-spec §4.8).
+        HideCellTooltip(window);
         // NR-018: right-click offers Pin/Unpin (per the item's current pinned
         // state) and "Open file location" for valid paths (design-spec §4.8).
         // CellAtPoint() returns -1 on its own when g_model is null, so it is
@@ -2858,6 +2992,9 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
         InvalidateRect(window, nullptr, FALSE);
         return 0;
     case WM_DESTROY:
+        // NR-178: tear the tooltip down with the panel (its D2D resources are
+        // created from factories that are released after the message loop).
+        HideCellTooltip(window);
         RemoveTrayIcon(window);
         g_hotkey.Shutdown();
         // NR-032/NR-036: stop the icon worker before the D2D resources and the
@@ -3288,6 +3425,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     Release(g_ellipsis_sign);
     Release(g_write_factory);
     Release(g_dash_style);
+    Release(g_pin_geometry);
     Release(g_d2d_factory);
     if (g_accessibility) {
         auto* provider = g_accessibility;

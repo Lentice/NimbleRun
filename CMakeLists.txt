@@ -238,6 +238,7 @@ add_library(nimblerun_ui STATIC
     src/ui/panel_accessibility.cpp
     src/ui/panel_palette.cpp
     src/ui/pin_drag_state.cpp
+    src/ui/cell_tooltip.cpp
 )
 
 target_include_directories(nimblerun_ui
@@ -385,6 +386,7 @@ target_link_libraries(NimbleRun
         nimblerun_rebuild_pipeline
         nimblerun_icon_request_session
         nimblerun_hotkey
+        comctl32
         d2d1
         dwrite
         dwmapi

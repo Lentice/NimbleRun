@@ -1,0 +1,8 @@
+# Cell tooltip is the native tooltip control (supersedes ADR-0001)
+
+The empty-state grid truncates app names with a trailing ellipsis, and the hover cell tooltip reveals the full name. ADR-0001 chose a custom Direct2D popup over the native `TOOLTIPS_CLASS` to get a Bootstrap-style look (dark, rounded, arrow pointing at the cell). That route was abandoned on 2026-08-11: the arrow rendering failed twice in a row on real hardware (NR-178 shipped an invisible arrow, NR-179 fixed the transform but the user still reported the pointed corner was wrong), and a fact check showed the native control cannot produce the dark look on Windows 10/11 anyway (`TTM_SETTIPBKCOLOR`/`TTM_SETTIPTEXTCOLOR` are ignored when visual styles are enabled). We now use the native track tooltip (`TOOLTIPS_CLASS`, `TTF_TRACK | TTF_ABSOLUTE | TTF_TRANSPARENT`, `TTM_TRACKPOSITION`), which keeps the NR-179 below-first placement via exact screen coordinates, keeps click-through via `TTF_TRANSPARENT`, gives system theme colors (including high-contrast) for free, and costs only a few KB as a single resident control window.
+
+## Considered options
+
+- **Custom Direct2D popup (ADR-0001, now rejected)**: full look control, but the arrow was the recurring failure point and the dark look was the entire point — two NR items in a row were about rendering it correctly, with no acceptance on the hardware.
+- **Native TOOLTIPS_CLASS (chosen)**: zero custom drawing; placement, click-through, colors, and high-contrast are native behaviors; the one-shot 150 ms hover timer stays in application code because track tooltips appear immediately on `TTM_TRACKACTIVATE`. Cost: system appearance (no dark background, no arrow), which the user accepted on 2026-08-11.
