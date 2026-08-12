@@ -185,7 +185,7 @@ void PanelModel::MoveSelection(int delta) {
     EnsureSelectionVisible();
 }
 
-void PanelModel::ScrollBy(int delta_rows) {
+void PanelModel::ScrollBy(int delta_rows, bool move_selection) {
     if (rows_.empty()) {
         return;
     }
@@ -193,7 +193,13 @@ void PanelModel::ScrollBy(int delta_rows) {
     // (NR-029), so the scroll distance is scaled here.
     first_visible_ += delta_rows * Columns();
     ClampFirstVisible();
-    selected_ = first_visible_;
+    // NR-186: only keyboard paging (PgUp/PgDn, design-spec §4.7) moves the
+    // selection with the page. The mouse wheel (design-spec §4.8: "hover does
+    // not change the selection") leaves it where it is, even when that is
+    // outside the new visible window; Enter still launches the selected cell.
+    if (move_selection) {
+        selected_ = first_visible_;
+    }
 }
 
 int PanelModel::RowForVisibleSlot(int slot) const {
@@ -209,9 +215,11 @@ int PanelModel::RowForVisibleSlot(int slot) const {
 
 std::vector<AppEntry> PanelModel::EmptyStatePrewarmEntries(std::size_t max_items) const {
     // Prewarming only applies to the state the next panel show starts in
-    // (empty query, NR-037); a non-empty query is a defensive no-op, and
-    // max_items == 0 means "prewarm nothing".
-    if (!query_.empty() || max_items == 0) {
+    // (empty query, NR-037). NR-186: the blank-query rule is the same one
+    // RefreshRows uses (NR-052) -- a whitespace-only query normalizes to
+    // empty and stays in the empty-query grid, so it prewarms like the empty
+    // query. max_items == 0 means "prewarm nothing".
+    if (!NormalizeName(query_).empty() || max_items == 0) {
         return {};
     }
     // Reuse the rows_ RefreshRows already built (pinned then recent,

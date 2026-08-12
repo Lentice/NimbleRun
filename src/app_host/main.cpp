@@ -2400,7 +2400,9 @@ LRESULT CALLBACK SearchEditProc(HWND edit, UINT message, WPARAM w_param, LPARAM 
         // exactly like Enter on that row (design-spec §4.7; reuses the same
         // ActivateRow usage/hide-after-launch/NR-022 failure path). Bit 29 of
         // lParam is the ALT state; Ctrl+Alt and unbound combos like Alt+Space
-        // keep their default processing.
+        // keep their default processing. NR-186: a digit with no matching
+        // visible row is not bound ("沒有對應項目的數字不綁定") and falls
+        // through to the default handler instead of being swallowed.
         if ((l_param & (1 << 29)) != 0 && GetKeyState(VK_CONTROL) >= 0 &&
             g_model != nullptr) {
             const int slot = nimblerun::ui::QuickSelectSlotForKey(
@@ -2410,12 +2412,11 @@ LRESULT CALLBACK SearchEditProc(HWND edit, UINT message, WPARAM w_param, LPARAM 
                 if (row >= 0) {
                     g_model->SelectRow(static_cast<std::size_t>(row));
                     ActivateRow(static_cast<std::size_t>(row), GetParent(edit));
+                    return 0;
                 }
-                // A bound digit never beeps, even when no row maps to it.
-                return 0;
             }
         }
-        break;  // unbound (e.g. Alt+Space) -> default processing
+        break;  // unbound or no matching row -> default processing
     case WM_SYSKEYUP:
     case WM_KEYUP:
         // NR-045: releasing Alt (WM_SYSKEYUP; a release that follows a
@@ -2428,11 +2429,16 @@ LRESULT CALLBACK SearchEditProc(HWND edit, UINT message, WPARAM w_param, LPARAM 
         break;
     case WM_SYSCHAR:
         // NR-024: swallow the system beep for the 10 bound digits; the
-        // WM_SYSKEYDOWN above already handled the launch. Everything else
-        // falls through to the default.
-        if ((l_param & (1 << 29)) != 0 &&
-            nimblerun::ui::QuickSelectSlotForKey(static_cast<int>(w_param)) >= 0) {
-            return 0;
+        // WM_SYSKEYDOWN above already handled the launch. NR-186: the swallow
+        // mirrors the WM_SYSKEYDOWN guard -- only a digit with a matching
+        // visible row is swallowed, everything else falls through to the
+        // default (system beep / other apps).
+        if ((l_param & (1 << 29)) != 0 && g_model != nullptr) {
+            const int slot =
+                nimblerun::ui::QuickSelectSlotForKey(static_cast<int>(w_param));
+            if (slot >= 0 && g_model->RowForVisibleSlot(slot) >= 0) {
+                return 0;
+            }
         }
         break;
     case WM_KEYDOWN:
@@ -2468,12 +2474,12 @@ LRESULT CALLBACK SearchEditProc(HWND edit, UINT message, WPARAM w_param, LPARAM 
             case VK_PRIOR:
                 // NR-178: paging dismisses the tooltip (design-spec §4.8).
                 HideCellTooltip(GetParent(edit));
-                g_model->ScrollBy(-g_model->ViewportRows());
+                g_model->ScrollBy(-g_model->ViewportRows(), true);
                 InvalidateRect(GetParent(edit), nullptr, FALSE);
                 return 0;
             case VK_NEXT:
                 HideCellTooltip(GetParent(edit));
-                g_model->ScrollBy(g_model->ViewportRows());
+                g_model->ScrollBy(g_model->ViewportRows(), true);
                 InvalidateRect(GetParent(edit), nullptr, FALSE);
                 return 0;
             case VK_RETURN: {
@@ -2712,7 +2718,11 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
         const int steps = g_wheel_delta_carry / WHEEL_DELTA;
         g_wheel_delta_carry %= WHEEL_DELTA;
         if (g_model && lines > 0 && steps != 0) {
-            g_model->ScrollBy(-steps * static_cast<int>(lines));
+            // NR-186: the wheel scrolls the view but must not move the
+            // selection (design-spec §4.8: scrolling does not change keyboard
+            // selection; Enter still launches the selected cell). move_selection
+            // stays false so the wheel path never touches the selection.
+            g_model->ScrollBy(-steps * static_cast<int>(lines), false);
             InvalidateRect(window, nullptr, FALSE);
         }
         return 0;
@@ -3359,6 +3369,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         g_search_original_proc =
             reinterpret_cast<WNDPROC>(SetWindowLongPtrW(g_search_edit, GWLP_WNDPROC,
                                                        reinterpret_cast<LONG_PTR>(SearchEditProc)));
+        // NR-186: cap the edit at 1023 wchar_t so truncation happens visibly
+        // in the box instead of silently in the EN_UPDATE buffer (both agree
+        // on 1023 + NUL; the limit does not grow the contract).
+        SendMessageW(g_search_edit, EM_LIMITTEXT, 1023, 0);
         RepositionSearchEdit(window);
         UpdateSearchFont(window);
     }

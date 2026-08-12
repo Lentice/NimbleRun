@@ -70,4 +70,43 @@ rg -n "ScrollBy|RowForVisibleSlot|EM_LIMITTEXT|NormalizeName\(query_\)\.empty" s
 
 ## 交接區
 
-（實作者填寫：ScrollBy 參數形狀與呼叫點清單、Alt+digit fall-through 的實作細節（WM_SYSKEYDOWN/WM_SYSCHAR 各自）、EM_LIMITTEXT 值、prewarm 判定 diff、新增測試案例、build／CTest 證據）
+實作完成 2026-08-12（commit `NR-186: align input contracts (wheel, alt-digit, limittext, prewarm)`）。
+
+### 1. 滾輪不搬選取（claude I-6）
+
+- **參數形狀**：`PanelModel::ScrollBy(int delta_rows, bool move_selection = true)`（`panel_model.h:139`）。採「加參數＋預設 true」而非拆第二函式：PgUp/PgDn 現況逐位元等價（Non-goals 第一條），既有呼叫不用改。
+- **實作**：`panel_model.cpp:188-202` — `selected_ = first_visible_` 只在 `move_selection` 為 true 時執行；滾輪路徑完全不碰 `selected_`，因此也不存在 EnsureSelectionVisible 需求（§4.8 允許選取離開可見範圍；`MoveSelection` 既有的 EnsureSelectionVisible 在方向鍵回來時恢復）。
+- **呼叫點清單**：
+  - `main.cpp:2477` VK_PRIOR → `ScrollBy(-ViewportRows(), true)`
+  - `main.cpp:2482` VK_NEXT → `ScrollBy(ViewportRows(), true)`
+  - `main.cpp:2725` WM_MOUSEWHEEL → `ScrollBy(-steps * lines, false)`
+- 測試既有 `TestScrollBy*`（true 路徑）全數原樣通過；新增兩個 false 路徑案例（見下）。
+
+### 2. Alt+digit fall-through（codex M3）
+
+- **WM_SYSKEYDOWN**（`main.cpp:2396-2428`）：`return 0` 移進 `row >= 0` 分支內；`slot >= 0` 但 `RowForVisibleSlot(slot) == -1`（少於 10 個可見項、清單尾端、footer 空白）時不再 return 0，fall through 到 `break` 走 `DefWindowProcW` 預設處理（系統 beep／其他 App 收到鍵）。
+- **WM_SYSCHAR**（`main.cpp:2435-2445`）：吞鍵條件從「是 digit」改為「`slot >= 0 && RowForVisibleSlot(slot) >= 0`」，與 WM_SYSKEYDOWN 的 guard 同步；並補 `g_model != nullptr` 防護（`RowForVisibleSlot` 會解引用 model）。有對應項目時兩條訊息行為與 NR-024 現況一致（launch 照舊、beep 照吞）。
+- 舊註解「A bound digit never beeps, even when no row maps to it」一併移除（正是 M3 的病根）。
+
+### 3. EM_LIMITTEXT（codex L1）
+
+- `main.cpp:3375`：`g_search_edit` 建立並 subclass 後、`RepositionSearchEdit` 前，`SendMessageW(g_search_edit, EM_LIMITTEXT, 1023, 0)` 一次。EN_UPDATE 的 `wchar_t buffer[1024]` 維持不動（1023 字元＋NUL，兩邊一致）；截斷現在發生在使用者看得到的輸入框內，UI 與 model 一致。
+
+### 4. prewarm 判定（codex L3）
+
+- `panel_model.cpp:222`：`!query_.empty()` → `!NormalizeName(query_).empty()`，與 `RefreshRows`（`:53`）同一判定；不新增 helper。空白字串查詢（`" "`、`"   "`）維持格狀（§4.3）且照常 prewarm 下一頁圖示。
+
+### 5. 新增測試（`tests/unit/panel_model_test.cpp`）
+
+- `TestScrollByWheelKeepsSelection`：`ScrollBy(5, false)`／`ScrollBy(100, false)`／回滾後 `SelectionIndex()` 全程不變；`ScrollBy(5, true)` 仍搬選取。
+- `TestScrollByWheelKeepsSelectionInGrid`：格狀（6 欄）下 `ScrollBy(4, false)` 選取不變；`MoveSelection(0)` 後 `EnsureSelectionVisible` 把離螢幕選取拉回可見。
+- `TestEmptyStatePrewarmEntriesWhitespaceQuery`：`" "` 與 `"   "` prewarm 結果與空查詢逐項相同。
+- `TestEmptyStatePrewarmEntriesWhitespaceStaysGridRows`：空白查詢維持 6 欄格狀，prewarm 數等於 `Rows()` 數。
+
+### 6. Build／CTest 證據
+
+- `cmake -S . -B build -G Ninja -D"CMAKE_TOOLCHAIN_FILE=cmake/llvm-mingw.cmake" -DCMAKE_BUILD_TYPE=Release` OK。
+- `cmake --build build`：Release x64 無 error；唯一 warning 為**既有**的 `main.cpp:1534 unused variable 'target_size'`（stash 驗證 pre-existing，非本 item 引入）。
+- `ctest --test-dir build --output-on-failure`：**32/32 Passed**（含 `nimblerun_list_vertical_slice_test`＝panel_model_test 別名）。
+- rg greps：`ScrollBy` 呼叫點三處（鍵盤 true×2、滾輪 false×1）；`RowForVisibleSlot` 在 WM_SYSKEYDOWN/WM_SYSCHAR 各一；`EM_LIMITTEXT` 一命中；prewarm 與 RefreshRows 共用 `NormalizeName(query_).empty()` 判定。
+- 踩坑紀錄：第一版 prewarm 判定誤寫成 `NormalizeName(query_).empty()`（方向反了，空查詢反而變 no-op，`TestEmptyStatePrewarmEntriesPinsThenRecent` 立刻抓出）；修正為 `!NormalizeName(query_).empty()` 後全綠。

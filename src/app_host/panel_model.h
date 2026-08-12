@@ -131,9 +131,12 @@ public:
 
     // Scrolls the visible window by delta_rows (PgUp/PgDn and the mouse wheel
     // share this single entry point). The window is clamped to the list ends
-    // and never wraps; the selection follows the new first visible row
-    // (design-spec §4.7). No-op on an empty list.
-    void ScrollBy(int delta_rows);
+    // and never wraps. move_selection=true (PgUp/PgDn, design-spec §4.7)
+    // moves the selection to the new first visible row; false (mouse wheel,
+    // design-spec §4.8) leaves the selection untouched -- it may leave the
+    // visible window, and MoveSelection()'s EnsureSelectionVisible brings it
+    // back. No-op on an empty list.
+    void ScrollBy(int delta_rows, bool move_selection = true);
 
     // Absolute row index for the slot-th visible row (0-based slot), or -1 when
     // the slot is outside the current viewport or past the end of the list

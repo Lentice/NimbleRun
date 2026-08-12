@@ -424,6 +424,57 @@ void TestScrollByRoundTripNoWrap() {
     Expect(model.SelectionIndex() == 0, "selection follows the returned first visible row");
 }
 
+// NR-186: the mouse wheel scrolls the view but must not move the selection
+// (design-spec §4.8: hover/scroll does not change keyboard selection; Enter
+// still launches the selected cell). The keyboard paging tests above cover
+// move_selection=true -- byte-identical to the pre-NR-186 behavior.
+
+void TestScrollByWheelKeepsSelection() {
+    const std::vector<AppEntry> catalog = CatalogOf(20);
+    PanelModel model(&catalog, {});
+    model.SetQuery(L"App");
+    model.SetViewportRows(5);
+    model.MoveSelection(1);
+    const std::size_t selection_before = model.SelectionIndex();
+    Expect(selection_before == 1, "selection moved off the first row");
+    model.ScrollBy(5, false);
+    Expect(model.FirstVisibleRow() == 5, "wheel scroll advances the viewport");
+    Expect(model.SelectionIndex() == selection_before,
+           "wheel scroll leaves the selection where it was");
+    model.ScrollBy(100, false);
+    Expect(model.FirstVisibleRow() == 15, "wheel scroll to the tail clamps");
+    Expect(model.SelectionIndex() == selection_before,
+           "wheel scroll to the tail still leaves the selection untouched");
+    model.ScrollBy(-5, false);
+    model.ScrollBy(-5, false);
+    model.ScrollBy(-5, false);
+    Expect(model.FirstVisibleRow() == 0, "wheel scroll back to the start clamps");
+    Expect(model.SelectionIndex() == selection_before,
+           "wheel scroll round trip never moves the selection");
+    model.ScrollBy(5, true);
+    Expect(model.SelectionIndex() == static_cast<std::size_t>(model.FirstVisibleRow()),
+           "PgUp/PgDn still moves the selection with the page");
+}
+
+void TestScrollByWheelKeepsSelectionInGrid() {
+    const std::vector<AppEntry> catalog = CatalogOf(50);
+    PanelModel model(&catalog, catalog);
+    model.SetGridColumns(6);
+    model.SetViewportRows(4);
+    model.SelectRow(3);
+    const std::size_t selection_before = model.SelectionIndex();
+    Expect(selection_before == 3, "grid selection on the first page");
+    model.ScrollBy(4, false);
+    Expect(model.FirstVisibleRow() == 24, "wheel scroll pages the grid view");
+    Expect(model.SelectionIndex() == selection_before,
+           "grid wheel scroll leaves the selection where it was");
+    model.MoveSelection(0);
+    Expect(model.SelectionIndex() == selection_before,
+           "selection survives intact off-screen");
+    Expect(model.FirstVisibleRow() == 0,
+           "a keyboard move brings the off-screen selection back into view");
+}
+
 // NR-024: Alt+digit maps a visible slot (0-based position in the viewport) to
 // an absolute row index; the mapping is pure (design-spec §4.7) and never
 // mutates model state.
@@ -757,6 +808,41 @@ void TestEmptyStatePrewarmEntriesAbsentPinSkipped() {
     }
 }
 
+// NR-186: a whitespace-only query normalizes to empty, so the grid stays up
+// (NR-052) and the prewarm must not be a no-op -- same rule as RefreshRows.
+
+void TestEmptyStatePrewarmEntriesWhitespaceQuery() {
+    const std::vector<AppEntry> catalog = CatalogOf(8);
+    PanelModel model(&catalog, catalog);
+    model.SetPins(Pins({L"id0", L"id1"}));
+    const std::vector<AppEntry> empty = model.EmptyStatePrewarmEntries(24);
+    Expect(!empty.empty(), "empty query prewarms the first page");
+    model.SetQuery(L" ");
+    const std::vector<AppEntry> spaced = model.EmptyStatePrewarmEntries(24);
+    Expect(spaced.size() == empty.size(),
+           "a single space prewarms like the empty query");
+    model.SetQuery(L"   ");
+    const std::vector<AppEntry> multi = model.EmptyStatePrewarmEntries(24);
+    Expect(multi.size() == empty.size(),
+           "multiple spaces prewarm like the empty query");
+    for (std::size_t i = 0; i < spaced.size(); ++i) {
+        Expect(spaced[i].stable_id == empty[i].stable_id,
+               "space query prewarms the same entries as the empty query");
+    }
+}
+
+void TestEmptyStatePrewarmEntriesWhitespaceStaysGridRows() {
+    const std::vector<AppEntry> catalog = CatalogOf(8);
+    PanelModel model(&catalog, catalog);
+    model.SetGridColumns(6);
+    model.SetPins(Pins({L"id0"}));
+    model.SetQuery(L" ");
+    Expect(model.Columns() == 6, "space query stays in the grid layout");
+    Expect(model.Rows().size() == 8, "space query keeps the pinned+recent rows");
+    Expect(model.EmptyStatePrewarmEntries(24).size() == model.Rows().size(),
+           "space query prewarms the grid rows it displays");
+}
+
 void TestEmptyStatePrewarmEntriesKeepOrderAndFilterMissingPin() {
     const std::vector<AppEntry> catalog = CatalogOf(3);
     PanelModel model(&catalog, {catalog[2]});
@@ -1086,6 +1172,8 @@ int wmain() {
     TestScrollByFewerRowsThanViewport();
     TestScrollByEmptyList();
     TestScrollByRoundTripNoWrap();
+    TestScrollByWheelKeepsSelection();
+    TestScrollByWheelKeepsSelectionInGrid();
     TestRowForVisibleSlotBasics();
     TestRowForVisibleSlotTracksScroll();
     TestRowForVisibleSlotOutOfRange();
@@ -1108,6 +1196,8 @@ int wmain() {
     TestEmptyStatePrewarmEntriesEmptyCatalog();
     TestEmptyStatePrewarmEntriesIsConst();
     TestEmptyStatePrewarmEntriesAbsentPinSkipped();
+    TestEmptyStatePrewarmEntriesWhitespaceQuery();
+    TestEmptyStatePrewarmEntriesWhitespaceStaysGridRows();
     TestEmptyStatePrewarmEntriesKeepOrderAndFilterMissingPin();
     TestRecentStartIndexPinsThenRecent();
     TestRecentStartIndexAllPinned();
