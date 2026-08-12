@@ -119,7 +119,6 @@ void TestEnterLaunchesSelectedOnly() {
     model.SetQuery(L"two");
     const PanelAction action = model.Activate();
     Expect(action.launch, "Enter on a selection launches");
-    Expect(action.identity == catalog[1].launch_identity, "launches the selected entry");
 }
 
 void TestEnterEmptyResultNoLaunch() {

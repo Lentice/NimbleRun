@@ -341,10 +341,6 @@ std::unique_ptr<nimblerun::RebuildPipeline> g_rebuild_pipeline;
 // teardown then must not destroy the pipeline (see wWinMain).
 bool g_rebuild_shutdown_timed_out = false;
 
-std::int64_t MonotonicMs() {
-    return static_cast<std::int64_t>(GetTickCount64());
-}
-
 ID2D1Factory* g_d2d_factory = nullptr;
 ID2D1HwndRenderTarget* g_render_target = nullptr;
 // NR-046: dashed stroke for the drag placeholder. Created from the D2D factory
@@ -732,12 +728,14 @@ int PinnedRowCount() {
     return recent_start > 0 ? recent_start : 0;
 }
 
+// Defined below: the single tooltip hide point, reused by UpdateTooltipTimer.
+void HideCellTooltip(HWND window);
+
 // NR-178: the tooltip's 150 ms one-shot timer (design-spec §4.8). A hover
 // change dismisses any visible tooltip immediately, then the one-shot delay is
 // re-armed only when the new hovered cell's name is actually truncated.
 void UpdateTooltipTimer(HWND window) {
-    g_cell_tooltip.Hide();
-    KillTimer(window, kTooltipTimerId);
+    HideCellTooltip(window);
     if (g_write_factory && g_grid_name_format && g_model &&
         g_model->Columns() > 1 && g_grid_hover_index >= 0 &&
         g_grid_hover_index < static_cast<int>(g_model->Rows().size())) {
@@ -982,7 +980,7 @@ void ShowAboutDialog(HWND window) {
 
 // NR-011: starts one background thread per source for a rebuild cycle; defined
 // below, forward-declared for the NR-022 launch-failure refresh path.
-void StartRebuild(HWND window, std::vector<nimblerun::CatalogSource> sources);
+void StartRebuild(std::vector<nimblerun::CatalogSource> sources);
 
 // NR-037: prewarms exactly one empty-state page (design-spec §4.3, 24 cells)
 // on the worker, so the next panel show's first frame already has real icons
@@ -1088,7 +1086,7 @@ void ActivateRow(std::size_t index, HWND window) {
         if (g_refresh &&
             g_launch_failure_refresh.OnLaunchAttempt(false,
                                                      g_refresh->IsRebuildInProgress())) {
-            StartRebuild(window, {std::cbegin(nimblerun::kSources),
+            StartRebuild({std::cbegin(nimblerun::kSources),
                                   std::cend(nimblerun::kSources)});
         }
         if (g_diag) {
@@ -1291,8 +1289,10 @@ void DrawEmptyStateHint(float row_height, bool searching) {
 }
 
 // NR-058: single non-blocking tray balloon for a store-load failure; defined
-// next to ShowHotkeyConflictNotice below.
-void ShowLoadIssueNotice(HWND window, const std::wstring& text);
+// next to ShowHotkeyConflictNotice below, forward-declared for the pin-load
+// path that precedes it. The caller clears the flags after sending, so a
+// process shows at most one such balloon.
+void ShowInfoBalloon(HWND window, const std::wstring& text);
 
 // NR-058: maps one store load result to its notification bit. Loaded and
 // Missing never notify (first run with no files is normal). A switch over every
@@ -1354,7 +1354,7 @@ void HandlePinLoadResult(const nimblerun::CatalogSnapshotAssembler::Result& resu
     if (g_tray_icon_active && g_main_window) {
         const std::wstring text = nimblerun::StoreLoadNoticeText(issue);
         if (!text.empty()) {
-            ShowLoadIssueNotice(g_main_window, text);
+            ShowInfoBalloon(g_main_window, text);
         }
     } else {
         // The first pin load runs before the tray icon exists; the startup send
@@ -1408,7 +1408,7 @@ void OnGenerationCompleteRefresh() {
     }
 }
 
-void StartRebuild(HWND, std::vector<nimblerun::CatalogSource> sources) {
+void StartRebuild(std::vector<nimblerun::CatalogSource> sources) {
     if (g_rebuild_pipeline) {
         g_rebuild_pipeline->Request(std::move(sources), nimblerun::RebuildReason::Explicit);
     }
@@ -1542,10 +1542,6 @@ void Render(HWND window) {
 
     if (g_model) {
         const auto& rows = g_model->Rows();
-        // NR-133: the render target's DIP height is the client height that
-        // drives the clamped FooterTopDip (NR-120) and, via SlotRect, the slot
-        // geometry below.
-        const D2D1_SIZE_F target_size = g_render_target->GetSize();
         if (g_model->Columns() > 1) {
             // NR-029: empty-query icon grid (design-spec §4.2/§4.9). Reuses the
             // model viewport state: visible cells are
@@ -2042,8 +2038,9 @@ void ShowPanel(HWND window) {
     // background; no polling and never a blocking scan on this path. NR-028:
     // "Include Windows apps" off schedules nothing here.
     if (g_refresh && g_settings.include_windows_apps &&
-        g_refresh->ShouldRefreshAppsFolder(MonotonicMs())) {
-        StartRebuild(window, {nimblerun::CatalogSource::AppsFolder});
+        g_refresh->ShouldRefreshAppsFolder(
+            static_cast<std::int64_t>(GetTickCount64()))) {
+        StartRebuild({nimblerun::CatalogSource::AppsFolder});
     }
     if (g_search_edit) {
         SetWindowTextW(g_search_edit, L"");
@@ -2106,13 +2103,6 @@ void ShowHotkeyConflictNotice(HWND window) {
     ShowInfoBalloon(
         window,
         L"Alt+Space is already in use. Open Settings to choose another global hotkey.");
-}
-
-// NR-058: single non-blocking balloon for startup store-load failures
-// (design-spec §10.4/§11). The caller clears the flags after sending, so a
-// process shows at most one such balloon.
-void ShowLoadIssueNotice(HWND window, const std::wstring& text) {
-    ShowInfoBalloon(window, text);
 }
 
 void DispatchTrayCommand(HWND window, UINT command) {
@@ -2580,7 +2570,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
         // NR-011: Ctrl+R / tray "Refresh Apps" forces a full rebuild of every
         // source. A successful launch never triggers this (see ActivateRow).
         if (g_refresh) {
-            StartRebuild(window, {std::cbegin(nimblerun::kSources),
+            StartRebuild({std::cbegin(nimblerun::kSources),
                                   std::cend(nimblerun::kSources)});
         }
         return 0;
@@ -2634,7 +2624,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
                         g_pins ? g_pins->OrderedPins().size() : 0,
                         g_settings.recent_count));
                 }
-                StartRebuild(window, {std::cbegin(nimblerun::kSources),
+                StartRebuild({std::cbegin(nimblerun::kSources),
                                       std::cend(nimblerun::kSources)});
             }
         }
@@ -2944,25 +2934,17 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
         ShowItemMenu(window, cell, cursor);
         return 0;
     }
-    case WM_KILLFOCUS:
-        // Clicking another window moves focus away from the panel; hide it. A
-        // right-click context menu or the launch-failure dialog running its
-        // modal loop is exempt so the panel stays up while a choice is made.
-        if (!g_context_menu_active && !g_dialog_active && g_search_edit &&
-            GetFocus() != g_search_edit) {
-            HidePanel(window);
-        }
-        return 0;
     case WM_ACTIVATE:
         // NR-085: ShowPanel puts focus on the search EDIT (SetFocus on the
-        // child), so the panel itself never holds keyboard focus and the
-        // WM_KILLFOCUS path above only fires for the EDIT -- which does not
-        // tell its parent. "Click outside to hide" (design-spec §4.8) was
-        // therefore dead on the two most common paths: show-then-click and
+        // child), so the panel itself never holds keyboard focus and never
+        // receives WM_KILLFOCUS. "Click outside to hide" (design-spec §4.8)
+        // was dead on the two most common paths: show-then-click and
         // type-then-click. WM_ACTIVATE(WA_INACTIVE) is the single fact that
         // the panel was deactivated and covers every outside click while the
-        // EDIT has focus; the same two modal flags as WM_KILLFOCUS exempt the
-        // context menu and the launch-failure dialog.
+        // EDIT has focus. NR-189: the pre-NR-085 WM_KILLFOCUS auto-hide copy
+        // is folded into this one rule -- the panel never holds keyboard
+        // focus, so that branch could not fire; the two modal flags exempt
+        // the context menu and the launch-failure dialog.
         if (w_param == WA_INACTIVE && !g_context_menu_active && !g_dialog_active) {
             HidePanel(window);
         }
@@ -3426,7 +3408,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     if (g_store_load_issues != 0) {
         const std::wstring text = nimblerun::StoreLoadNoticeText(g_store_load_issues);
         if (!text.empty()) {
-            ShowLoadIssueNotice(window, text);
+            ShowInfoBalloon(window, text);
         }
         g_store_load_issues = 0;
     }
@@ -3434,7 +3416,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     // NR-011: kick off the background full rebuild now that the panel can serve
     // the cached snapshot; the results arrive through kRebuildDoneMessage.
     if (g_refresh) {
-        StartRebuild(window, {std::cbegin(nimblerun::kSources),
+        StartRebuild({std::cbegin(nimblerun::kSources),
                               std::cend(nimblerun::kSources)});
     }
 

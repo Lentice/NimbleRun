@@ -66,8 +66,6 @@ public:
               float panel_right_dip, const wchar_t* name);
     void Hide();
 
-    bool IsVisible() const { return visible_; }
-
 private:
     HWND window_ = nullptr;      // the resident TOOLTIPS_CLASS window
     HWND tool_owner_ = nullptr;  // panel registered in the TOOLINFO (uId/hwnd)

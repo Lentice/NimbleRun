@@ -61,4 +61,20 @@ rg -n "namespace \{|FileName" src/catalog/app_filter.h
 
 ## 交接區
 
-（實作者填寫：九項逐一刪除的確認清單、P-4 合併形狀與理由、P-7 的選擇（bool 或刪包裝）、build／CTest 證據）
+實作（2026-08-12，NR-189 done）── 九項逐一確認清單：
+
+1. **P-1** 已刪：`Render()` grid 分支的 `const D2D1_SIZE_F target_size = g_render_target->GetSize();` 與其 NR-133 註解（該註解描述的 FooterTopDip/SlotRect 依賴在 NR-145 後已不存在）；`:1817` 的 footer 那份保留。這同時是 build 唯一 warning 的來源，清理後 zero warning。
+2. **P-2** 已刪：`ShowLoadIssueNotice` 定義（原 `:2114-2116`）與前置宣告（原 `:1295`）。前置宣告改為 `ShowInfoBalloon`（保留 NR-058 註解與「caller 清旗標、一次至多一個 balloon」語意，合併到前置宣告註解）；兩個呼叫點（`HandlePinLoadResult`、startup store-load 通知）直接呼叫 `ShowInfoBalloon`。
+3. **P-3** 已刪：`StartRebuild` 的 `HWND` 參數（宣告 `:985`、定義 `:1411`），5 個呼叫點（`:1091`、`:2044`、`:2574`、`:2628`、`:3428`）的 `window` 實參一併刪除。
+4. **P-4** 合併形狀與理由：**直接刪除 panel wndproc 的 `WM_KILLFOCUS` 分支（原 `:2938-2946`），`WM_ACTIVATE(WA_INACTIVE)` 成為唯一 outside-click 隱藏規則**。理由：NR-085 之後 panel 本身永不持有鍵盤焦點（ShowPanel 一律 `SetFocus` 到 search EDIT child），所以 panel 收不到 `WM_KILLFOCUS`——該分支不只「two most common paths 上 dead」，是任何路徑都收不到；`g_search_edit && GetFocus() != g_search_edit` 條件正是這個事實的殘跡。WM_ACTIVATE 的 NR-085 註解改寫為單一規則敘述並補 NR-189 說明，兩個 modal 豁免旗標（`g_context_menu_active`／`g_dialog_active`）只留在 WM_ACTIVATE。EDIT subclass 的 `WM_KILLFOCUS`（caret mirror，原 `:2400`）與此無關，保留。
+5. **P-5** 已做：`UpdateTooltipTimer` 前兩行（`g_cell_tooltip.Hide()`＋`KillTimer`）改為 `HideCellTooltip(window)`；因 `HideCellTooltip` 定義在 `UpdateTooltipTimer` 之後，在 `UpdateTooltipTimer` 前加了一行前置宣告（含 NR-178 註解）。
+6. **P-6** 已刪：`cell_tooltip.h:69` 的 `CellTooltip::IsVisible()`；`visible_` 成員保留（`Show`/`Hide` 在 cell_tooltip.cpp 仍讀寫）。
+7. **P-7** 選擇：**保留包裝、縮成單一 bool**（`struct PanelAction { bool launch = false; };`）——刪 `identity` 欄位、`Activate()` 內刪 `action.identity = ...` 一行、測試 `TestEnterLaunchesSelectedOnly` 的 identity 斷言刪除。不選「刪包裝讓 Activate() 回 bool」：那要改 4 個測試呼叫點＋`using`＋`main.cpp` 的 `VK_RETURN` 呼叫端（約 15 行 vs 3 行），diff 較大；單一 bool 包裝成本可忽略，且測試的「Enter on a selection launches」語意不需改寫。header 註解改寫並註記 NR-189。
+8. **P-8** 已做：`app_filter.h` 刪匿名 namespace 的 `namespace {`／`} // namespace` 兩行；`FileName` 已是 `inline`，去掉後為單一定義（外部 linkage），註解補 NR-189 說明。
+9. **P-9** 選擇：**刪 `main.cpp` 的 `MonotonicMs()`（3 行），在唯一呼叫點（`ShowPanel` 的 `ShouldRefreshAppsFolder` 檢查）內聯 `static_cast<std::int64_t>(GetTickCount64())`**。不選放 `catalog_refresh.h` 共用：`MonotonicMs` 只有 1 個呼叫點，內聯是更小 diff；`rebuild_pipeline.cpp` 的 `NowMs()`（3 個呼叫點）保留為唯一一份。grep 驗證：`MonotonicMs` 零命中、`NowMs` 只剩 rebuild_pipeline.cpp 的定義＋3 呼叫。
+
+**Sanity grep 證據**（item Agent checks 兩條命令）：`ShowLoadIssueNotice`、`MonotonicMs`、`IsVisible()` 零命中；`PanelAction::identity` 零命中（`identity` 剩餘命中全是 `AppEntry::launch_identity` 與無關註解）；`NowMs` 只剩 rebuild_pipeline.cpp 一份；`namespace {` 在 app_filter.h 零命中、`FileName` 只剩 inline 定義與兩個內部呼叫端（`FileStem`／`Extension`）。
+
+**build／CTest 證據**：Release x64（LLVM-MinGW + Ninja，`cmake --clean-first` 完整重建）**0 error 0 warning**（P-1 後唯一 warning 消失）；CTest **32/32 Passed**（197.67s），測試目標數不變。行為零變更：CTest 為回歸網，九項全部為刪除或一行收斂。
+
+**Commit**：`NR-189: dead code cleanup lane (P-1..P-9)`，含本文件交接區與 `docs/work-items.md` 狀態 `ready`→`done`。

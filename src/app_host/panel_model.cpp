@@ -254,7 +254,6 @@ PanelAction PanelModel::Activate() const {
     }
     PanelAction action;
     action.launch = true;
-    action.identity = rows_[selected_].launch_identity;
     return action;
 }
 

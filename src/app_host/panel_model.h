@@ -12,11 +12,12 @@
 
 namespace nimblerun {
 
-// Result of activating the current selection. identity is the entry to hand to
-// the Shell; launch is false for an empty result or no selection.
+// Result of activating the current selection: launch is false for an empty
+// result or no selection. NR-189: identity was the entry to hand to the Shell,
+// but no production path read it (ActivateRow re-reads the selected row), so
+// the field is gone; the launch flag is the whole payload.
 struct PanelAction {
     bool launch = false;
-    std::wstring identity;
 };
 
 // Pure interaction model for the list panel (NR-010). No HWND, Shell, or COM

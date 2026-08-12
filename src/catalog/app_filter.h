@@ -16,15 +16,13 @@ inline std::wstring ToLower(std::wstring_view value) {
     return out;
 }
 
-namespace {
-
-// Final path segment, e.g. "C:\A\B.exe" -> "B.exe".
+// Final path segment, e.g. "C:\A\B.exe" -> "B.exe". NR-189: the anonymous
+// namespace was removed -- FileName is already inline, so the namespace only
+// duplicated the definition per TU; the inline keeps it a single definition.
 inline std::wstring_view FileName(std::wstring_view path) {
     const std::size_t slash = path.find_last_of(L"/\\");
     return slash == std::wstring_view::npos ? path : path.substr(slash + 1);
 }
-
-} // namespace
 
 // File name without the final extension, e.g. "Notepad.lnk" -> "Notepad".
 inline std::wstring FileStem(std::wstring_view path) {

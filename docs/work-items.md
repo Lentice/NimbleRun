@@ -225,7 +225,7 @@
 | NR-186 | 輸入契約對齊：滾輪不搬選取、無對應項目時 Alt+digit 不吞鍵、搜尋長度上限、空白查詢 prewarm 判定一致 | 3 | `done` | — | [NR-186](work-items/NR-186-input-contracts-alignment.md) |
 | NR-187 | 錯誤與持久化路徑的兩個缺口：Save 失敗被靜默忽略、ShowInfoBalloon 對 string_view 讀越界 | 3 | `done` | — | [NR-187](work-items/NR-187-save-failure-propagation-and-balloon-nul.md) |
 | NR-188 | 文件漂移同步：測試數 31→32、release evidence 重產、AGENTS.md／README 過時 baseline | 5 | `done` | — | [NR-188](work-items/NR-188-docs-drift-sync.md) |
-| NR-189 | 死碼與重複收斂（第十七次稽核 ponytail 軸，P-1~P-9） | 3 | `ready` | — | [NR-189](work-items/NR-189-dead-code-cleanup-lane.md) |
+| NR-189 | 死碼與重複收斂（第十七次稽核 ponytail 軸，P-1~P-9） | 3 | `done` | — | [NR-189](work-items/NR-189-dead-code-cleanup-lane.md) |
 
 ## Dependency lanes
 
