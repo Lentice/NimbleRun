@@ -110,6 +110,10 @@ public:
     // Sets the stop flag, wakes and joins the thread. Queued-but-unprocessed
     // requests are discarded (a missing icon has no side effects); buffered
     // cache writes get one final best-effort flush before the thread exits.
+    // NR-184: the join is bounded -- a worker stuck inside an uninterruptible
+    // Shell/disk call is detached after ~5 s instead of hanging shutdown
+    // (design-spec §9.4). Stop() is only ever called on the exit path, where
+    // the OS reclaims the detached thread.
     void Stop();
     // Never blocks. visible requests push_front, prewarm requests push_back.
     bool Post(IconRequest request);

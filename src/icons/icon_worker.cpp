@@ -19,6 +19,12 @@ namespace {
 // larger than this is dropped (a lost cache write has no side effects).
 constexpr std::size_t kStopFlushMaxPending = 64;
 
+// NR-184: Stop() waits at most this long for the worker, then gives up the
+// join (design-spec §9.4: "等待有界，超時即繼續退出"). Same value as
+// RebuildPipeline::kJoinTimeoutMs (NR-123/NR-182); the icons module does not
+// include app_host, so the value is restated here.
+constexpr DWORD kStopJoinTimeoutMs = 5000;
+
 std::uint64_t UtcNow() {
     return static_cast<std::uint64_t>(std::time(nullptr));
 }
@@ -85,16 +91,34 @@ void IconWorker::Start() {
 }
 
 void IconWorker::Stop() {
+    std::thread::native_handle_type handle{};
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (!thread_.joinable()) {
             return;
         }
         stop_ = true;
+        handle = thread_.native_handle();
     }
     cv_.notify_all();
-    thread_.join();
+    // NR-184: the worker's loop body calls Shell icon extraction and disk
+    // flushes that cannot be interrupted by stop_, so the join is bounded
+    // (design-spec §9.4). A worker that did not finish within the timeout is
+    // detached, never cleared -- clearing a joinable thread terminates the
+    // process -- and never TerminateThread'd, which is unsafe on a thread
+    // holding Shell/COM locks (NR-123). The timeout branch only happens on
+    // the exit path, where the OS reclaims the thread (NR-123 shape).
+    if (WaitForSingleObject(handle, kStopJoinTimeoutMs) == WAIT_OBJECT_0) {
+        thread_.join();
+    } else {
+        thread_.detach();
+    }
     std::lock_guard<std::mutex> lock(mutex_);
+    // Safe in both branches: once stop_ is set the worker's wait predicate
+    // (stop_ || !queue_.empty()) is always true, so it never pops again -- the
+    // queue can be discarded even while a detached worker is still running
+    // (the worker only touches it under this lock). Resetting the handle
+    // keeps the stopped semantics: later Post() calls drop requests.
     queue_.clear();
     thread_ = std::thread();
 }
