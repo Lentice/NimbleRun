@@ -59,4 +59,77 @@ rg -n "RebuildReason::Explicit|AcceptRebuildStart|kRebuildStartMinIntervalMs" sr
 
 ## 交接區
 
-（實作者填寫：Explicit 分支的最終形狀、被節流時 intent 如何保留（NotifySourceEvent 路徑）、單次 Refresh 行為不變的確認、測試案例、build／CTest 證據）
+### Explicit 分支的最終形狀（`rebuild_pipeline.cpp:68-92`）
+
+```cpp
+if (reason == RebuildReason::Explicit) {
+    bool can_start = true;
+    for (const CatalogSource source : sources) {
+        const auto it = last_rebuild_start_ms_.find(source);
+        const std::int64_t last = it == last_rebuild_start_ms_.end()
+                                      ? kNoRebuildStart
+                                      : it->second;
+        can_start &= AcceptRebuildStart(last, now);
+    }
+    if (can_start) {
+        for (const CatalogSource source : sources) {
+            last_rebuild_start_ms_[source] = now;
+        }
+        Start(std::move(sources));
+        return;
+    }
+    for (const CatalogSource source : sources) {
+        refresh_.NotifySourceEvent(source, now);
+    }
+}
+```
+
+- 三來源全部通過 `AcceptRebuildStart`（1 s per-source gate，NR-147 語意不變）才直接
+  `Start(std::move(sources))` 並對全部來源蓋章；任一來源被節流就整筆合併。
+- 節流判定與 FullRescan／OnDebounceTimer 共用同一個 `AcceptRebuildStart`（`kRebuildStartMinIntervalMs`
+  的 shared single read，grep 可見 Explicit :81 與 FullRescan :99 都呼叫）。
+- `can_start` 為真時的行為與改動前逐字等價（Start 全部來源＋return），單次 Ctrl+R 的
+  產品語意未動；唯一的附帶效果是記錄 `last_rebuild_start_ms_`（改動前 Explicit 不更新它）。
+
+### 被節流時 intent 如何保留（NotifySourceEvent 路徑）
+
+- 任一來源被節流 → 對**全部**來源 `NotifySourceEvent(source, now)`，再落入既有共享尾部
+  （`ShouldStartRebuild(now)` → `Start(DueSources(now))`，否則 `schedule_debounce_()`）。
+- 因此 pending 的全來源完整 rebuild 一定發生：事件先過 500 ms debounce，再由
+  `OnDebounceTimer` 逐來源過 gate（NR-147）──gate 未開就 re-arm，開了就
+  `Start(DueSources)` 啟動全來源重建。「按了沒反應」不會發生，只是合併進下一次受節流
+  的 rebuild。密集 Ctrl+R（≤1 s）在乾淨狀態下實測軌跡：第一下立即 Start；後續全部合併，
+  ~1 s 後經 debounce＋gate 啟動一次完整 rebuild（測試見下）。
+- 本改動不新增 timer／queue；不改 coordinator 的 `ShouldStartRebuild`／`DueSources` 語意
+  （NR-118 守門保留）；`kRefreshMessage` 的 sender 不驗證（§NFR-004 不試圖消除偽造面）。
+- 既有五個 `StartRebuild` call site（Ctrl+R、tray Refresh、空白處右鍵、launch-failure
+  refresh、啟動重建）全部經 `Request(Explicit)`，一起被節流──這是 DoS 面所需的覆蓋，
+  而啟動／設定套用後緊接的 refresh 若在 1 s 內也只會合併、不會遺失。
+
+### 單次 Refresh 行為不變的確認
+
+- 首按（或距上次任一來源 rebuild ≥1 s）：三來源 gate 全開 → 立即 `Start` 全部來源，
+  與改動前一致。測試 `TestExplicitRefreshThrottled` 第一步即驗證「單次 Explicit →
+  三來源各自列舉一次」。
+
+### 測試案例（`tests/unit/rebuild_pipeline_test.cpp`）
+
+- `TestExplicitRefreshThrottled`（新增，沿用既有 shape）：單次 Explicit 全來源立即重建
+  （enumerations == 3）；緊接第二次 Explicit 在 50 ms 內被節流（仍為 3、debounce 被 arm）；
+  排空第一代後經兩次 600 ms debounce tick，gate 開啟後 merged 重建發生（enumerations == 6、
+  3 筆新結果）──證明密集 refresh 合併成一次受節流 rebuild 且 intent 不丟。
+- `TestStartBoundedSupersedeAndFreshCancelFlag`（NR-182 測試改動）：第二次 Explicit 前加
+  `Sleep(1100)` 等 gate 過期──NR-183 節流使原本背靠背的兩次 Explicit 會被合併，
+  要維持 NR-182 的 supersede 場景（stuck worker 換代、bounded join、fresh cancel flag）
+  必須先等 gate 開。`TestShutdownBounded` 等其餘案例未動。
+
+### build／CTest 證據
+
+- Release（LLVM-MinGW＋Ninja）：configure 無誤；build 無 error／新增 warning（
+  `rebuild_pipeline.cpp`、`rebuild_pipeline_test.cpp` 重新編譯通過）。
+- 完整 CTest 32/32 Passed（含 `nimblerun_rebuild_pipeline_test` 與
+  `nimblerun_lifecycle_check`）。一次全量 run 中 lifecycle 曾逾時（panel-show poll 5 s），
+  單獨重跑即過（10.6 s、18.2 s）──判定為該次全量 run 的機器負載所致，非本改動造成
+  （panel-show 路徑不經 `Request`）。NR-182 測試在加 `Sleep(1100)` 後全綠。
+- Agent checks 的 `rg` grep 命中：`RebuildReason::Explicit` :68、`AcceptRebuildStart` :19/81/99/315。
+- `git status` 於提交後僅 `docs/work-items.md` 與 `docs/work-items/NR-183-*.md` 有修改。

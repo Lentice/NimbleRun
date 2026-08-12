@@ -66,10 +66,31 @@ void RebuildPipeline::Request(std::vector<CatalogSource> sources, RebuildReason 
     }
     const std::int64_t now = NowMs();
     if (reason == RebuildReason::Explicit) {
-        Start(std::move(sources));
-        return;
-    }
-    if (reason == RebuildReason::FullRescan) {
+        // NR-183: the explicit refresh (Ctrl+R / tray / empty-area menu) goes
+        // through the same per-source start gate as FullRescan, so a forged
+        // kRefreshMessage storm cannot drive unbounded full scans. When any
+        // source is gated, the whole intent is merged: every source is marked
+        // as an event and the existing ShouldStartRebuild/debounce path starts
+        // the full rebuild once the gate opens, so nothing is dropped.
+        bool can_start = true;
+        for (const CatalogSource source : sources) {
+            const auto it = last_rebuild_start_ms_.find(source);
+            const std::int64_t last = it == last_rebuild_start_ms_.end()
+                                          ? kNoRebuildStart
+                                          : it->second;
+            can_start &= AcceptRebuildStart(last, now);
+        }
+        if (can_start) {
+            for (const CatalogSource source : sources) {
+                last_rebuild_start_ms_[source] = now;
+            }
+            Start(std::move(sources));
+            return;
+        }
+        for (const CatalogSource source : sources) {
+            refresh_.NotifySourceEvent(source, now);
+        }
+    } else if (reason == RebuildReason::FullRescan) {
         const CatalogSource source = sources.front();
         const auto it = last_rebuild_start_ms_.find(source);
         const std::int64_t last = it == last_rebuild_start_ms_.end()

@@ -262,6 +262,55 @@ void TestFullRescanThrottleAndWatchMap() {
     Expect(scheduled == 2, "throttled marker is deferred through debounce");
 }
 
+void TestExplicitRefreshThrottled() {
+    // NR-183: a rapid repeated explicit refresh (Ctrl+R / tray) is throttled
+    // through the same per-source start gate as FullRescan; the intent is not
+    // dropped but merged into the debounce path, which starts the full rebuild
+    // once the gate opens. A single press still starts a full rebuild.
+    CatalogRefreshCoordinator refresh;
+    std::atomic<int> enumerations = 0;
+    std::vector<Posted> posts;
+    std::mutex posts_mutex;
+    int scheduled = 0;
+    RebuildPipeline pipeline(
+        refresh, [] { return Settings{}; }, [&](UINT message, WPARAM w_param, LPARAM l_param) {
+            std::lock_guard<std::mutex> lock(posts_mutex);
+            posts.push_back({message, w_param, l_param});
+            return true;
+        },
+        [&](CatalogSource source, const Settings& settings, std::atomic<bool>* cancel) {
+            ++enumerations;
+            return Enumerate(source, settings, cancel);
+        }, [] {}, [] {}, [&] { ++scheduled; });
+    const std::vector<CatalogSource> all = {CatalogSource::StartMenu,
+                                            CatalogSource::AppsFolder,
+                                            CatalogSource::UserFolder};
+
+    pipeline.Request(all, RebuildReason::Explicit);
+    Expect(WaitForPosts(posts, posts_mutex, 3), "single explicit starts a full rebuild");
+    Expect(enumerations.load() == 3, "single explicit enumerates every source");
+
+    pipeline.Request(all, RebuildReason::Explicit);
+    Sleep(50);
+    Expect(enumerations.load() == 3, "rapid explicit is throttled, not re-started");
+    Expect(scheduled >= 1, "throttled explicit is merged through the debounce path");
+
+    std::vector<Posted> copy;
+    {
+        std::lock_guard<std::mutex> lock(posts_mutex);
+        copy = posts;
+    }
+    for (const Posted& post : copy) pipeline.OnResultMessage(post.w_param, post.l_param);
+    for (int i = 0; i < 100 && refresh.IsRebuildInProgress(); ++i) Sleep(5);
+
+    Sleep(600);
+    pipeline.OnDebounceTimer();
+    Sleep(600);
+    pipeline.OnDebounceTimer();
+    Expect(WaitForPosts(posts, posts_mutex, 6), "merged explicit rebuild starts once the gate opens");
+    Expect(enumerations.load() == 6, "throttled explicit intent is not lost");
+}
+
 void TestChangeThrottle() {
     CatalogRefreshCoordinator refresh;
     std::atomic<int> enumerations = 0;
@@ -395,6 +444,10 @@ void TestStartBoundedSupersedeAndFreshCancelFlag() {
     pipeline.Request({CatalogSource::StartMenu}, RebuildReason::Explicit);
     for (int i = 0; i < 200 && enumerations.load() != 1; ++i) Sleep(5);
     Expect(enumerations.load() == 1, "first generation worker started");
+    // NR-183: a back-to-back explicit request now merges through the 1 s
+    // per-source gate, so the supersede scenario has to wait the gate out
+    // first; the first worker stays stuck on `gate` throughout.
+    Sleep(1100);
     const auto begin = std::chrono::steady_clock::now();
     pipeline.Request({CatalogSource::StartMenu}, RebuildReason::Explicit);
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -427,6 +480,7 @@ int wmain() {
     TestCacheFailureRetention();
     TestForgedDeliveryFailureIgnored();
     TestFullRescanThrottleAndWatchMap();
+    TestExplicitRefreshThrottled();
     TestChangeThrottle();
     TestShutdownBounded();
     TestStartBoundedSupersedeAndFreshCancelFlag();
