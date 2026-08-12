@@ -7,10 +7,11 @@
 #include <cmath>
 #include <cwchar>
 
-// TTM_SETTIPTEXTW (WM_USER + 52) is not in MinGW's commctrl.h (the A/W
-// split for WM_USER+3 is absent); the value matches the Windows SDK.
-#ifndef TTM_SETTIPTEXTW
-#define TTM_SETTIPTEXTW (WM_USER + 52)
+// TTM_UPDATETIPTEXTW (WM_USER + 57) is missing from MinGW's commctrl.h; the
+// value matches the Windows SDK. Note: WM_USER + 52 is TTM_NEWTOOLRECTW, not
+// a text message — TTM_SETTIPTEXTW does not exist in the SDK.
+#ifndef TTM_UPDATETIPTEXTW
+#define TTM_UPDATETIPTEXTW (WM_USER + 57)
 #endif
 
 namespace nimblerun {
@@ -130,8 +131,14 @@ void CellTooltip::Show(HWND panel, float scale, const D2D1_RECT_F& cell_dip,
     }
 
     name_ = name;
-    SendMessageW(window_, TTM_SETTIPTEXTW, 0,
-                 reinterpret_cast<LPARAM>(name_.c_str()));
+    TOOLINFOW tool{};
+    tool.cbSize = sizeof(tool);
+    tool.uFlags = TTF_TRACK | TTF_ABSOLUTE | TTF_TRANSPARENT;
+    tool.hwnd = panel;
+    tool.uId = reinterpret_cast<UINT_PTR>(panel);
+    tool.lpszText = const_cast<wchar_t*>(name_.c_str());
+    SendMessageW(window_, TTM_UPDATETIPTEXTW, 0,
+                 reinterpret_cast<LPARAM>(&tool));
     // Wrap long names inside the panel content width (design-spec §4.9);
     // re-sent per show so a DPI change picks up the new scale lazily.
     const float content_width_dip = panel_right_dip - panel_left_dip;
@@ -139,12 +146,6 @@ void CellTooltip::Show(HWND panel, float scale, const D2D1_RECT_F& cell_dip,
                  static_cast<LPARAM>(std::max(
                      1, static_cast<int>(std::lround(content_width_dip * scale)))));
 
-    TOOLINFOW tool{};
-    tool.cbSize = sizeof(tool);
-    tool.uFlags = TTF_TRACK | TTF_ABSOLUTE | TTF_TRANSPARENT;
-    tool.hwnd = panel;
-    tool.uId = reinterpret_cast<UINT_PTR>(panel);
-    tool.lpszText = const_cast<wchar_t*>(name_.c_str());
     SendMessageW(window_, TTM_TRACKACTIVATE, TRUE,
                  reinterpret_cast<LPARAM>(&tool));
 
