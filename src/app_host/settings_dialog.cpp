@@ -13,6 +13,7 @@
 #include <windows.h>
 #include <shellapi.h>
 #include <shlobj.h>
+#include <shobjidl.h>
 
 #include <algorithm>
 #include <optional>
@@ -55,6 +56,28 @@ void SetStatus(HWND dialog, SettingsString key) {
 
 void SetControlText(HWND dialog, int id, SettingsString key) {
     SetDlgItemTextW(dialog, id, StringText(key).c_str());
+}
+
+void CenterDialogOnScreen(HWND dialog, HWND owner) {
+    RECT dialog_rect{};
+    if (!GetWindowRect(dialog, &dialog_rect)) {
+        return;
+    }
+
+    HMONITOR monitor = MonitorFromWindow(owner ? owner : dialog, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO monitor_info{};
+    monitor_info.cbSize = sizeof(monitor_info);
+    if (!GetMonitorInfoW(monitor, &monitor_info)) {
+        return;
+    }
+
+    const int width = dialog_rect.right - dialog_rect.left;
+    const int height = dialog_rect.bottom - dialog_rect.top;
+    const RECT& work = monitor_info.rcWork;
+    const int x = work.left + ((work.right - work.left) - width) / 2;
+    const int y = work.top + ((work.bottom - work.top) - height) / 2;
+    SetWindowPos(dialog, nullptr, x, y, 0, 0,
+                 SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
 // NR-089: state for the modal hotkey capture dialog. Heap-allocated for the
@@ -354,12 +377,13 @@ INT_PTR CALLBACK SettingsDialogProc(HWND dialog, UINT message, WPARAM w_param, L
     (void)l_param;
     switch (message) {
     case WM_INITDIALOG:
+        CenterDialogOnScreen(dialog, GetWindow(dialog, GW_OWNER));
         InitLabels(dialog);
         Populate(dialog, g_dialog.editor->Working());
         SetDlgItemTextW(dialog, IDC_STATUS, L"");
-        // NR-089: the hotkey field is a read-only display now; give it a
-        // slightly larger, bold font so it reads as a value rather than an
-        // input box. The font lives exactly as long as this dialog (deleted
+        // NR-089: the hotkey field is a static display now; give it a slightly
+        // larger, bold font so it reads as a value. The font lives exactly as
+        // long as this dialog (deleted
         // in WM_DESTROY).
         {
             const HFONT dialog_font = reinterpret_cast<HFONT>(
@@ -514,25 +538,34 @@ INT_PTR CALLBACK SettingsDialogProc(HWND dialog, UINT message, WPARAM w_param, L
             return TRUE;
 
         case IDC_ADD_FOLDER: {
-            const std::wstring title = StringText(SettingsString::BrowseFolderTitle);
-            BROWSEINFOW browse{};
-            browse.hwndOwner = dialog;
-            browse.lpszTitle = title.c_str();
-            browse.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
-            PIDLIST_ABSOLUTE pidl = SHBrowseForFolderW(&browse);
-            if (pidl) {
-                wchar_t path[MAX_PATH];
-                if (SHGetPathFromIDListW(pidl, path)) {
-                    // NR-152: at the cap AddRoot would refuse; name the real reason
-                    // (the limit) instead of the misleading path-invalid notice.
-                    if (g_dialog.editor->Working().catalog_roots.size() >= kMaxCatalogRoots) {
-                        SetStatus(dialog, SettingsString::FolderLimitNotice);
-                    } else if (!g_dialog.editor->AddRoot(path, true)) {
-                        SetStatus(dialog, SettingsString::FolderInvalidNotice);
-                    }
-                    Populate(dialog, g_dialog.editor->Working());
+            IFileOpenDialog* picker = nullptr;
+            if (SUCCEEDED(CoCreateInstance(CLSID_FileOpenDialog, nullptr,
+                                            CLSCTX_INPROC_SERVER,
+                                            IID_PPV_ARGS(&picker)))) {
+                DWORD options = 0;
+                if (SUCCEEDED(picker->GetOptions(&options))) {
+                    picker->SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM);
                 }
-                CoTaskMemFree(pidl);
+
+                if (SUCCEEDED(picker->Show(dialog))) {
+                    IShellItem* item = nullptr;
+                    if (SUCCEEDED(picker->GetResult(&item))) {
+                        PWSTR path = nullptr;
+                        if (SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &path))) {
+                            // NR-152: at the cap AddRoot would refuse; name the real reason
+                            // (the limit) instead of the misleading path-invalid notice.
+                            if (g_dialog.editor->Working().catalog_roots.size() >= kMaxCatalogRoots) {
+                                SetStatus(dialog, SettingsString::FolderLimitNotice);
+                            } else if (!g_dialog.editor->AddRoot(path, true)) {
+                                SetStatus(dialog, SettingsString::FolderInvalidNotice);
+                            }
+                            Populate(dialog, g_dialog.editor->Working());
+                            CoTaskMemFree(path);
+                        }
+                        item->Release();
+                    }
+                }
+                picker->Release();
             }
             return TRUE;
         }
