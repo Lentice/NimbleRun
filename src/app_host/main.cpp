@@ -1,5 +1,6 @@
 #include <windows.h>
 #include <windowsx.h>
+#include <commctrl.h>
 #include <shellapi.h>
 #include <shlobj.h>
 #include <dwmapi.h>
@@ -3073,6 +3074,11 @@ bool RegisterMainWindow(HINSTANCE instance) {
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+
+    // NR-181: explicit common control registration (TOOLTIPS_CLASS is an
+    // ICC_BAR_CLASSES class) — required even with the v6 manifest.
+    INITCOMMONCONTROLSEX icc{sizeof(icc), ICC_BAR_CLASSES};
+    InitCommonControlsEx(&icc);
 
     g_show_panel_message = RegisterWindowMessageW(kShowPanelMessageName);
     if (g_show_panel_message == 0) {

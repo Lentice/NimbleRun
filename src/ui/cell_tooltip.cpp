@@ -86,9 +86,12 @@ bool NameIsTruncated(IDWriteFactory& factory, IDWriteTextFormat& format,
 }
 
 void CellTooltip::EnsureCreated(HWND panel, HWND tooltip_owner) {
-    if (window_) {
+    if (window_ && IsWindow(window_)) {
         return;
     }
+    // NR-181: the resident tooltip window is owned by the panel and dies with
+    // it; a stale HWND must be dropped, not reused.
+    window_ = nullptr;
     if (!panel || !tooltip_owner) {
         return;
     }
@@ -123,7 +126,7 @@ void CellTooltip::Show(HWND panel, float scale, const D2D1_RECT_F& cell_dip,
     if (!panel || scale <= 0.0f || !name || *name == L'\0') {
         return;
     }
-    if (!window_ || tool_owner_ != panel) {
+    if (!window_) {
         EnsureCreated(panel, panel);
     }
     if (!window_) {
