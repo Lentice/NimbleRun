@@ -218,7 +218,7 @@
 | NR-179 | cell tooltip 優先顯示在格子下方＋修復箭頭不可見（NR-178 放置規則覆寫） | 3 | `done` | NR-178 | [NR-179](work-items/NR-179-cell-tooltip-below-and-arrow-fix.md) |
 | NR-180 | cell tooltip 改用 Windows 原生 tooltip（覆寫 NR-178 技術路線與 ADR-0001） | 3 | `done` | NR-178, NR-179 | [NR-180](work-items/NR-180-cell-tooltip-native.md) |
 | NR-181 | 提交 tooltip 修正與 manifest，並補 InitCommonControlsEx（cell tooltip 顯示） | 3 | `done` | — | [NR-181](work-items/NR-181-tooltip-fix-commit-and-common-controls-init.md) |
-| NR-182 | RebuildPipeline::Start() 無界 join 舊 worker：換代時 UI 凍結（§9.4） | 3 | `ready` | NR-123 | [NR-182](work-items/NR-182-rebuild-start-bounded-join.md) |
+| NR-182 | RebuildPipeline::Start() 無界 join 舊 worker：換代時 UI 凍結（§9.4） | 3 | `done` | NR-123 | [NR-182](work-items/NR-182-rebuild-start-bounded-join.md) |
 | NR-183 | Explicit Refresh 繞過重掃節流：Ctrl+R 可被無限重複驅動全來源掃描 | 3 | `planned` | NR-182 | [NR-183](work-items/NR-183-explicit-refresh-throttle.md) |
 | NR-184 | IconWorker::Stop() 無界 join：Shell 圖示擷取卡住即關閉無限延遲 | 3 | `ready` | NR-099 | [NR-184](work-items/NR-184-icon-worker-bounded-stop.md) |
 | NR-185 | 冷啟動 cache 列不可啟動的誤導訊息：換成誠實的準備中提示 | 3 | `ready` | NR-113, NR-116 | [NR-185](work-items/NR-185-cold-start-cache-honest-message.md) |

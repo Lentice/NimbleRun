@@ -42,7 +42,8 @@ RebuildPipeline::RebuildPipeline(CatalogRefreshCoordinator& refresh,
                           : [](std::function<void()> fn) {
                                 return std::thread(std::move(fn));
                             }),
-      failure_event_(CreateEventW(nullptr, TRUE, FALSE, nullptr)) {
+      failure_event_(CreateEventW(nullptr, TRUE, FALSE, nullptr)),
+      cancel_(std::make_shared<std::atomic<bool>>(false)) {
 }
 
 RebuildPipeline::~RebuildPipeline() {
@@ -94,7 +95,16 @@ void RebuildPipeline::Request(std::vector<CatalogSource> sources, RebuildReason 
 }
 
 void RebuildPipeline::Start(std::vector<CatalogSource> sources) {
-    Shutdown();
+    // NR-182: bounded wait for the previous generation, mirroring the
+    // WM_DESTROY path (NR-123): a worker stuck in an uninterruptible Shell
+    // call is detached after kJoinTimeoutMs instead of hanging the UI thread.
+    Shutdown(kJoinTimeoutMs);
+    // NR-182: a shutdown timeout leaves the old cancel flag set (the detached
+    // workers keep reading it and self-cancel). Swap in a fresh flag for this
+    // generation so the new workers never observe it.
+    const std::shared_ptr<std::atomic<bool>> cancel_flag =
+        std::make_shared<std::atomic<bool>>(false);
+    cancel_ = cancel_flag;
     const std::uint64_t generation = refresh_.BeginGeneration(sources);
     Settings snapshot;
     try {
@@ -112,14 +122,15 @@ void RebuildPipeline::Start(std::vector<CatalogSource> sources) {
     }
     for (const CatalogSource source : sources) {
         try {
-            workers_.push_back(thread_factory_([this, generation, source, snapshot]() {
+            workers_.push_back(thread_factory_(
+                [this, generation, source, snapshot, cancel_flag]() {
                 RebuildResult* result = nullptr;
                 try {
                     result = new RebuildResult;
                     result->generation = generation;
                     result->source = source;
                     RebuildEnumeration enumeration =
-                        enumerate_source_(source, snapshot, &cancel_);
+                        enumerate_source_(source, snapshot, cancel_flag.get());
                     result->failed = !enumeration.source_ok;
                     // NR-173: the enumeration result is moved into
                     // RebuildResult; no copy is retained.
@@ -306,7 +317,7 @@ void RebuildPipeline::DrainPending() {
 }
 
 bool RebuildPipeline::Shutdown(DWORD timeout_ms) {
-    cancel_.store(true);
+    cancel_->store(true);
     bool finished = true;
     if (timeout_ms != INFINITE) {
         std::vector<HANDLE> handles;
@@ -321,9 +332,13 @@ bool RebuildPipeline::Shutdown(DWORD timeout_ms) {
     if (finished) {
         for (std::thread& worker : workers_) if (worker.joinable()) worker.join();
         workers_.clear();
-        cancel_.store(false);
+        cancel_->store(false);
     } else {
-        // NR-123: timeout gives up the join; TerminateThread is unsafe for Shell/COM locks.
+        // NR-123: timeout gives up the join; TerminateThread is unsafe for
+        // Shell/COM locks. The cancel flag stays set -- the detached workers
+        // hold their own copy and self-cancel; the next Start() swaps in a
+        // fresh per-generation flag (NR-182), so this generation never
+        // poisons the next one.
         for (std::thread& worker : workers_) if (worker.joinable()) worker.detach();
         workers_.clear();
     }

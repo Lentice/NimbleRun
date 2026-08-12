@@ -44,10 +44,10 @@ enum class RebuildReason { Explicit, FullRescan, Change };
 
 class RebuildPipeline {
 public:
-    // NR-145: join timeout for Shutdown(), so a worker stuck in an
-    // uninterruptible Shell call never hangs shutdown (design-spec §9.4).
-    // Promoted from private so the call site can reference it instead of
-    // hardcoding the same value.
+    // NR-145/NR-182: join timeout for Shutdown(), so a worker stuck in an
+    // uninterruptible Shell call never hangs shutdown or an in-session
+    // generation switch (design-spec §9.4). Promoted from private so the
+    // WM_DESTROY call site can reference it; Start() reuses the same value.
     static constexpr DWORD kJoinTimeoutMs = 5000;
 
     using PostToUi = std::function<bool(UINT, WPARAM, LPARAM)>;
@@ -77,11 +77,13 @@ public:
     LRESULT OnDeliveryFailureMessage(WPARAM w_param, LPARAM l_param);
     void OnDebounceTimer();
     void DrainPending();
-    // NR-146: returns true when the workers joined cleanly, false when the
-    // bounded wait timed out and the workers were detached. A false return
+    // NR-146/NR-182: returns true when the workers joined cleanly, false when
+    // the bounded wait timed out and the workers were detached. A false return
     // means the caller must keep the object alive (detached workers still
-    // touch members); the destructor and Start() call with INFINITE, which
-    // never detaches, and ignore the result.
+    // touch members). The destructor calls with INFINITE, which never detaches;
+    // Start() calls with kJoinTimeoutMs (NR-182) and ignores the result -- the
+    // object outlives Start, and each generation captures its own cancel flag,
+    // so a detached worker's stale flag never cancels the next generation.
     bool Shutdown(DWORD timeout_ms = INFINITE);
 
     HANDLE FailureEvent() const { return failure_event_; }
@@ -118,7 +120,11 @@ private:
     std::vector<std::pair<std::uint64_t, CatalogSource>> failures_;
     HANDLE failure_event_ = nullptr;
     std::vector<std::thread> workers_;
-    std::atomic<bool> cancel_{false};
+    // NR-182: per-generation cancel flag. Start() swaps in a fresh flag for
+    // every generation; workers capture the flag at spawn time, so a detached
+    // worker keeps cancelling against its own flag while the next generation
+    // always reads false.
+    std::shared_ptr<std::atomic<bool>> cancel_;
     std::unordered_map<CatalogSource, std::int64_t> last_rebuild_start_ms_;
     std::vector<RebuildWatchSource> watch_sources_;
     std::uint64_t completed_generation_ = 0;

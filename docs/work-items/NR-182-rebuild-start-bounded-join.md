@@ -65,6 +65,80 @@ rg -n "cancel_|kJoinTimeoutMs|Shutdown\(|TerminateThread" src/app_host/rebuild_p
 
 驗證：build 無 error／新增 warning；CTest 全 Passed；`cancel_` 為 per-generation 旗標且新 generation 重新建旗標；`TerminateThread` 零命中；bounded wait 只在 `Start()`／`Shutdown()` 內。
 
-## 交接區
+## 交接區（2026-08-12，實作完成）
 
-（實作者填寫：bounded-wait 形狀與逾時值、per-generation 旗標的型別與生命週期、detach 後新 worker 不受舊旗標影響的證據、header 註解 diff、build／CTest 證據）
+### bounded-wait 形狀與逾時值
+
+`Start()`（`src/app_host/rebuild_pipeline.cpp:99-101`）改用 `Shutdown(kJoinTimeoutMs)`，與
+WM_DESTROY（NR-123）共用同一常數 `kJoinTimeoutMs = 5000`（`rebuild_pipeline.h:51`，5 秒）。
+形狀完全沿用 NR-123：`Shutdown` 先 `cancel_->store(true)`，收集 joinable worker 的
+`native_handle()`，`WaitForMultipleObjects(handles, TRUE, timeout_ms)`；逾時 → 逐一
+`detach()` 再 `clear()`（不可直接 clear joinable thread，會 `std::terminate`）；全部完成 →
+逐一 `join()`。`Start()` 忽略回傳值（物件在 `Start()` 之後仍活著，detached worker 的
+`this` 存取安全，與 NR-146 分析相同）。唯一保留 INFINITE 的路徑是解構子（NR-146：
+解構子不得 detach，detached worker 的物件存活由 main.cpp 的 leak 分支負責）。
+
+### per-generation 旗標的型別與生命週期
+
+- 型別：`std::shared_ptr<std::atomic<bool>> cancel_`（`rebuild_pipeline.h:127`），建構子
+  初始化為 `false`（`.cpp:46`）。
+- `Start()` 在 `Shutdown(kJoinTimeoutMs)` **之後**換新旗標（`.cpp:104-107`）：順序是刻意
+  的——若在 Shutdown 之前換，Shutdown 會取消到新旗標。
+- worker lambda 以值捕獲 `cancel_flag`（`.cpp:126,133`），列舉時傳 `cancel_flag.get()`。
+  因此 detached 的舊 worker 永遠讀自己的舊旗標（shared_ptr 保活），新 generation 的
+  worker 讀新旗標；`Start()` 重新指派 `cancel_` 只丟掉 member 的參考，不影響 worker。
+- detach 分支不回存旗標（NR-123 語意不變，`.cpp:337` 一帶），舊旗標停在 `true` 讓
+  detached worker 自我取消。
+
+### 證據：新 worker 讀 false、舊 worker 讀自己的舊旗標
+
+新增 focused 測試 `TestStartBoundedSupersedeAndFreshCancelFlag`（`tests/unit/rebuild_pipeline_test.cpp`）：
+第一代 worker 卡在 gate 上（模擬不可中斷 Shell call），第二代 Explicit Request 觸發
+supersede：
+
+- `Start()` 的 join 等了約 5 s（`elapsed >= 4000` 斷言）後 detach 繼續——有界等待生效。
+- 第二代 worker 的 enumerate 斷言 `!cancel->load()`（`new_worker_saw_false`）——新旗標
+  是 fresh false，沒被上一代的 detach 毒害。
+- 釋放 gate 後，舊 worker 讀自己的旗標斷言為 `true`（`old_worker_saw_own_flag`）——
+  detach 沒把舊 worker 的旗標換成新旗標。
+- 舊 worker 的遲到結果（舊 generation）經 `OnResultMessage` 被
+  `IsActiveGenerationSource` 擋掉：`completed == 1`、snapshot 保持第二代內容。
+- 若旗標不是 per-generation（回退到單一 member atomic），第二代 worker 會讀到 detach
+  後殘留的 `true`，測試立即失敗——該測試即「毒害」bug 的回歸網。
+
+### header 註解 diff
+
+- `rebuild_pipeline.h:47-51`（kJoinTimeoutMs）：「Promoted from private so the call site
+  can reference it」改寫為 WM_DESTROY call site ＋ `Start()` 同值重用，並補 NR-182。
+- `rebuild_pipeline.h:80-87`（Shutdown）：原文「the destructor and Start() call with
+  INFINITE, which never detaches」改寫為——解構子用 INFINITE 永不 detach；`Start()` 用
+  `kJoinTimeoutMs` 且忽略回傳值（物件活過 Start，per-generation 旗標使舊 worker 的
+  殘留旗標不會取消下一代）。
+- member 註解（`.h:124-127`）宣告 per-generation 語意。
+
+### 未動的部分（non-goals 確認）
+
+- WM_DESTROY 的 bounded 關機（`main.cpp:3026-3029`）與 `g_rebuild_shutdown_timed_out`
+  leak 分支（`:3442-3451`）完全未動。
+- 未動 debounce／`AcceptRebuildStart` 節流（NR-183）、未用 `TerminateThread`（零命中，
+  僅註解提及其危險）。
+- 未動 `docs/design-spec.md`（§9.4 條文已含 NR-123 的補句，無需再改）。
+
+### build／CTest 證據
+
+- `cmake -S . -B build -G Ninja -D"CMAKE_TOOLCHAIN_FILE=cmake/llvm-mingw.cmake" -DCMAKE_BUILD_TYPE=Release`
+  → configure 成功。
+- `cmake --build build` → 成功。唯一 warning 是 `main.cpp:1518` 的既有
+  `unused variable 'target_size'`（以 `git stash` 還原基準後重建，基準同樣警告——非本
+  item 新增；本 item 未改 main.cpp）。
+- `ctest --test-dir build --output-on-failure` → **32/32 全 Passed**，含
+  `nimblerun_rebuild_pipeline_test`（9.43 s，內含新測試的 5 s 有界等待）
+  與 `nimblerun_lifecycle_check`（2.90 s）。
+- sanity grep（`rg -n "cancel_|kJoinTimeoutMs|Shutdown\(|TerminateThread" src/app_host/rebuild_pipeline.*`）：
+  `cancel_` 為 per-generation 旗標（建構 1＋換新 1＋worker 捕獲 1＋Shutdown deref 2）；
+  bounded wait 只在 `Start()`（:101）與 `Shutdown()`（:319）內；`TerminateThread`
+  **零命中**（僅註解）。
+
+### 偏差
+
+- 無。未動 `docs/work-items.md` 其他列（NR-183 保持 `planned`）、未動其他 src 檔案。

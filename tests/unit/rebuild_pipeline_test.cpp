@@ -350,6 +350,75 @@ void TestShutdownBounded() {
     CloseHandle(finished);
 }
 
+void TestStartBoundedSupersedeAndFreshCancelFlag() {
+    // NR-182: a second Explicit request while the first generation's worker is
+    // stuck (uninterruptible Shell call) must wait at most kJoinTimeoutMs, then
+    // detach the old worker and start the new generation with a fresh cancel
+    // flag. The old worker keeps reading its own (set) flag and its late result
+    // is dropped by the generation check; the new worker reads false.
+    CatalogRefreshCoordinator refresh;
+    HANDLE gate = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    std::atomic<int> enumerations = 0;
+    std::atomic<bool> new_worker_saw_false = false;
+    std::atomic<bool> old_worker_saw_own_flag = false;
+    std::vector<Posted> posts;
+    std::mutex posts_mutex;
+    int completed = 0;
+    RebuildPipeline pipeline(
+        refresh, [] { return Settings{}; },
+        [&](UINT message, WPARAM w_param, LPARAM l_param) {
+            std::lock_guard<std::mutex> lock(posts_mutex);
+            posts.push_back({message, w_param, l_param});
+            return true;
+        },
+        [&](CatalogSource, const Settings&, std::atomic<bool>* cancel) {
+            const int n = enumerations.fetch_add(1) + 1;
+            if (n == 1) {
+                // Simulates a worker stuck inside a single uninterruptible
+                // Shell call: it never re-checks the cancel flag while blocked.
+                WaitForSingleObject(gate, INFINITE);
+                old_worker_saw_own_flag.store(cancel->load());
+            } else {
+                new_worker_saw_false.store(!cancel->load());
+            }
+            RebuildEnumeration result;
+            AppEntry entry;
+            entry.display_name = n == 1 ? L"stale-generation" : L"fresh-generation";
+            entry.stable_id = L"start";
+            entry.source = AppSource::UserStartMenu;
+            entry.launch_verified = true;
+            result.entries.push_back(entry);
+            result.source_ok = true;
+            return result;
+        },
+        [&] { ++completed; }, [] {}, [] {});
+    pipeline.Request({CatalogSource::StartMenu}, RebuildReason::Explicit);
+    for (int i = 0; i < 200 && enumerations.load() != 1; ++i) Sleep(5);
+    Expect(enumerations.load() == 1, "first generation worker started");
+    const auto begin = std::chrono::steady_clock::now();
+    pipeline.Request({CatalogSource::StartMenu}, RebuildReason::Explicit);
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - begin).count();
+    Expect(elapsed >= 4000, "Start() waits at most kJoinTimeoutMs for the stuck worker");
+    Expect(WaitForPosts(posts, posts_mutex, 1), "superseded generation posted a result");
+    Expect(enumerations.load() == 2, "superseded generation started new workers");
+    Expect(new_worker_saw_false.load(), "new generation worker reads a fresh cancel flag");
+    SetEvent(gate);
+    Expect(WaitForPosts(posts, posts_mutex, 2), "detached old worker posted its stale result");
+    std::vector<Posted> copy;
+    {
+        std::lock_guard<std::mutex> lock(posts_mutex);
+        copy = posts;
+    }
+    for (const Posted& post : copy) pipeline.OnResultMessage(post.w_param, post.l_param);
+    Expect(completed == 1, "stale generation never completes the pipeline twice");
+    Expect(refresh.Snapshot().front().display_name == L"fresh-generation",
+           "stale detached worker's result is dropped by the generation check");
+    Expect(old_worker_saw_own_flag.load(),
+           "detached old worker kept reading its own set flag");
+    CloseHandle(gate);
+}
+
 } // namespace
 
 int wmain() {
@@ -360,5 +429,6 @@ int wmain() {
     TestFullRescanThrottleAndWatchMap();
     TestChangeThrottle();
     TestShutdownBounded();
+    TestStartBoundedSupersedeAndFreshCancelFlag();
     return 0;
 }
