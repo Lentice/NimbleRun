@@ -217,6 +217,15 @@
 | NR-178 | 格狀 hover 的 cell tooltip：截斷名稱顯示完整名稱（bootstrap 樣式自繪浮動視窗） | 3 | `done` | NR-029, NR-015, NR-133 | [NR-178](work-items/NR-178-cell-tooltip.md) |
 | NR-179 | cell tooltip 優先顯示在格子下方＋修復箭頭不可見（NR-178 放置規則覆寫） | 3 | `done` | NR-178 | [NR-179](work-items/NR-179-cell-tooltip-below-and-arrow-fix.md) |
 | NR-180 | cell tooltip 改用 Windows 原生 tooltip（覆寫 NR-178 技術路線與 ADR-0001） | 3 | `done` | NR-178, NR-179 | [NR-180](work-items/NR-180-cell-tooltip-native.md) |
+| NR-181 | 提交 tooltip 修正與 manifest，並補 InitCommonControlsEx（cell tooltip 顯示） | 3 | `ready` | — | [NR-181](work-items/NR-181-tooltip-fix-commit-and-common-controls-init.md) |
+| NR-182 | RebuildPipeline::Start() 無界 join 舊 worker：換代時 UI 凍結（§9.4） | 3 | `ready` | NR-123 | [NR-182](work-items/NR-182-rebuild-start-bounded-join.md) |
+| NR-183 | Explicit Refresh 繞過重掃節流：Ctrl+R 可被無限重複驅動全來源掃描 | 3 | `planned` | NR-182 | [NR-183](work-items/NR-183-explicit-refresh-throttle.md) |
+| NR-184 | IconWorker::Stop() 無界 join：Shell 圖示擷取卡住即關閉無限延遲 | 3 | `ready` | NR-099 | [NR-184](work-items/NR-184-icon-worker-bounded-stop.md) |
+| NR-185 | 冷啟動 cache 列不可啟動的誤導訊息：換成誠實的準備中提示 | 3 | `ready` | NR-113, NR-116 | [NR-185](work-items/NR-185-cold-start-cache-honest-message.md) |
+| NR-186 | 輸入契約對齊：滾輪不搬選取、無對應項目時 Alt+digit 不吞鍵、搜尋長度上限、空白查詢 prewarm 判定一致 | 3 | `ready` | — | [NR-186](work-items/NR-186-input-contracts-alignment.md) |
+| NR-187 | 錯誤與持久化路徑的兩個缺口：Save 失敗被靜默忽略、ShowInfoBalloon 對 string_view 讀越界 | 3 | `ready` | — | [NR-187](work-items/NR-187-save-failure-propagation-and-balloon-nul.md) |
+| NR-188 | 文件漂移同步：測試數 31→32、release evidence 重產、AGENTS.md／README 過時 baseline | 5 | `ready` | — | [NR-188](work-items/NR-188-docs-drift-sync.md) |
+| NR-189 | 死碼與重複收斂（第十七次稽核 ponytail 軸，P-1~P-9） | 3 | `ready` | — | [NR-189](work-items/NR-189-dead-code-cleanup-lane.md) |
 
 ## Dependency lanes
 
@@ -552,6 +561,27 @@ NR-156（main.cpp 生命週期）── 無依賴；與 NR-157 同檔不同區
 NR-157（main.cpp UI chrome）── 無依賴
 NR-158（dedup 桶內上限）── 無依賴
 NR-159（spec 措辭）── 純文件，最後做
+```
+
+## 稽核修補 lane 17（NR-181～NR-189，2026-08-12 第十七次全 repo 稽核產出）
+
+2026-08-12 以 herdr 開 claude 與 codex 兩個 agent 平行對全 repo 做唯讀稽核（ponytail／重要問題／主要使用者流程三軸），
+報告存於 `docs/audit-herdr-claude.md` 與 `docs/audit-herdr-codex.md`。兩份報告結論一致：無結構性過度設計
+（§已否決的方向 已擋掉六條抽象化衝動），主要風險在生命週期（無界 join ×3）與訊息驅動邊界（tooltip 訊息常數錯、
+Explicit 無節流）。主 Agent 逐項對原始碼驗證後收斂成 9 個 item。**排序依「先修壞掉的 HEAD、再生命週期有界、
+再使用者可見契約、再失敗可見性、最後清理」**：
+
+```
+NR-181（tooltip 訊息常數＋manifest＋InitCommonControlsEx，CRITICAL）── 無依賴，最先做；
+        HEAD 功能失效＋越界讀，且工作樹修正必須先 commit 才不會被後續 item 捲走
+NR-182（Start() 無界 join＋per-generation cancel）── 依賴 NR-123（先例）；HIGH
+NR-183（Explicit refresh 節流）── 依賴 NR-182（同檔不同函式，先換代再節流）
+NR-184（IconWorker Stop() 無界 join）── 依賴 NR-099（先例）；HIGH；與 NR-182 同型可平行
+NR-185（冷啟動 cache 誤導訊息）── 依賴 NR-113/NR-116（安全 gate 不動）；HIGH
+NR-186（輸入契約對齊：滾輪選取/Alt+digit/EM_LIMITTEXT/prewarm）── 無依賴；MEDIUM
+NR-187（Save 失敗診斷＋ShowInfoBalloon NUL）── 無依賴；MEDIUM
+NR-188（文件漂移：31→32、release evidence、AGENTS/README baseline）── 無依賴；LOW
+NR-189（死碼收斂 P-1~P-9）── 最後做；所有其他 item 完成後行號不再移動
 ```
 
 ## 計畫決策紀錄
