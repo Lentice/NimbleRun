@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cwctype>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -158,7 +159,7 @@ std::wstring_view SettingsStringText(SettingsString key) {
     case SettingsString::HotkeyRejectedNotice:
         return L"The hotkey is invalid or already in use. The previous hotkey was kept.";
     case SettingsString::RecentCountNotice:
-        return L"Recent apps must be between 8 and 40. The previous value was kept.";
+        return L"Recent apps must be between 1 and 1000. The previous value was kept.";
     case SettingsString::SaveFailedNotice:
         return L"Could not save settings. The previous values were kept.";
     case SettingsString::FolderInvalidNotice:
@@ -309,6 +310,22 @@ std::wstring FormatHotkey(const HotkeyBinding& binding) {
 
 SettingsEditor::SettingsEditor(const Settings& current)
     : original_(current), working_(current) {
+}
+
+std::optional<int> ClampRecentCountText(std::wstring_view text) {
+    // Shares ParseCountText's parser (ParseInt in atomic_text_file.h), so the
+    // blur clamp and the Save/OK path agree on what "parseable" means.
+    int value = 0;
+    if (!ParseInt(text, value)) {
+        return std::nullopt;  // empty / non-numeric / overflow: leave as-is
+    }
+    if (value < kMinRecentCount) {
+        return kMinRecentCount;
+    }
+    if (value > kMaxRecentCount) {
+        return kMaxRecentCount;
+    }
+    return value;
 }
 
 bool SettingsEditor::SetRecentCount(int count) {

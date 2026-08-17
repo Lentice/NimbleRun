@@ -249,7 +249,7 @@ void TestEscaping(const std::wstring& dir) {
 
 void TestValidation(const std::wstring& dir) {
     WriteBytes(dir + L"\\settings.ini",
-        "schema=1\nrecent_count=1000\ntheme=bogus\nauto_start=banana\n"
+        "schema=1\nrecent_count=1001\ntheme=bogus\nauto_start=banana\n"
         "hide_after_launch=maybe\nhotkey=\n");
     SettingsStore store(dir);
     Settings loaded;
@@ -259,6 +259,37 @@ void TestValidation(const std::wstring& dir) {
     Expect(loaded.auto_start == false, "bogus auto_start defaults");
     Expect(loaded.hide_after_launch == true, "bogus hide_after_launch defaults");
     Expect(loaded.hotkey == L"Alt+Space", "empty hotkey defaults");
+}
+
+// NR-191: the recent_count range is now inclusive 1..1000. In-range endpoints
+// load from a hand-written file and round-trip through Save/Load; out-of-range
+// values (0, negative, 1001) fall back to the default 20 without polluting the
+// loaded settings (no migration, schema stays 1).
+void TestRecentCountBoundaries(const std::wstring& dir) {
+    SettingsStore store(dir);
+    for (const int endpoint : {1, 1000}) {
+        WriteBytes(dir + L"\\settings.ini",
+            "schema=1\nrecent_count=" + std::to_string(endpoint) + "\n");
+        Settings loaded;
+        Expect(store.Load(loaded) == SettingsLoadResult::Loaded, "endpoint file loads");
+        Expect(loaded.recent_count == endpoint, "endpoint value loaded");
+    }
+    for (const int value : {1, 1000}) {
+        Settings expected;
+        expected.recent_count = value;
+        Expect(store.Save(expected), "save recent_count endpoint");
+        Settings loaded;
+        Expect(store.Load(loaded) == SettingsLoadResult::Loaded, "endpoint round-trip load");
+        Expect(loaded.recent_count == value, "endpoint round-trips");
+    }
+    for (const std::string bad : {"0", "-5", "1001"}) {
+        WriteBytes(dir + L"\\settings.ini",
+            "schema=1\nrecent_count=" + bad + "\n");
+        Settings loaded;
+        Expect(store.Load(loaded) == SettingsLoadResult::Loaded, "out-of-range file loads");
+        Expect(loaded.recent_count == 20,
+               "out-of-range recent_count falls back to the default 20");
+    }
 }
 
 void TestCorrupt(const std::wstring& dir) {
@@ -640,6 +671,7 @@ int wmain() {
     TestEnglishInputOnShowRoundTrip(MakeTempDir("english_roundtrip"));
     TestEscaping(MakeTempDir("escaping"));
     TestValidation(MakeTempDir("validation"));
+    TestRecentCountBoundaries(MakeTempDir("recentcount"));
     TestCatalogRootsRoundTrip(MakeTempDir("catalogroots"));
     TestIsAcceptableDriveType();
     TestIsLocalAbsolutePathRejectsVolumeRoot();

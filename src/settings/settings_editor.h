@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <functional>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -70,6 +71,13 @@ std::wstring_view SettingsStringText(SettingsString key);
 bool ParseHotkey(std::wstring_view text, HotkeyBinding& out);
 std::wstring FormatHotkey(const HotkeyBinding& binding);
 
+// NR-191: blur-time clamp for the recent-count field. Returns the clamped
+// value for parseable text (snapped to kMinRecentCount / kMaxRecentCount);
+// returns nullopt for empty, non-numeric, or overflowing text, which the
+// dialog must leave unchanged on blur (Save/OK keeps validating it). Pure, so
+// the boundary table is testable without an HWND.
+std::optional<int> ClampRecentCountText(std::wstring_view text);
+
 // Seam for the running global-hotkey swap. The host passes a functor wrapping
 // GlobalHotkey::Swap; tests inject a fake so the model stays HWND-free.
 using HotkeySwapper = std::function<HotkeyResult(const HotkeyBinding&)>;
@@ -95,7 +103,7 @@ public:
 
     // Typed setters with validation. False means the input was rejected and
     // the working value is left unchanged.
-    bool SetRecentCount(int count);             // only 8..40 (default 20)
+    bool SetRecentCount(int count);             // only 1..1000 (default 20)
     bool SetTheme(Theme theme);
     bool SetHideAfterLaunch(bool hide);
     bool SetIncludeWindowsApps(bool enabled);

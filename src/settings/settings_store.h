@@ -28,9 +28,10 @@ struct CatalogRoot {
 std::vector<std::wstring> DefaultExtensions();
 
 // Recent-apps count bounds (design-spec §FR-013). One definition shared by
-// SettingsStore::Load (range check) and SettingsEditor::SetRecentCount.
-inline constexpr int kMinRecentCount = 8;
-inline constexpr int kMaxRecentCount = 40;
+// SettingsStore::Load (range check), the blur clamp, and
+// SettingsEditor::SetRecentCount. Inclusive endpoints; default 20.
+inline constexpr int kMinRecentCount = 1;
+inline constexpr int kMaxRecentCount = 1000;
 
 // True when value is a local drive-letter absolute path (e.g. C:\Tools).
 // UNC, network, URI and device paths are rejected (design-spec §FR-005).
@@ -58,7 +59,7 @@ struct Settings {
     std::wstring hotkey = L"Alt+Space";
     bool auto_start = false;
     Theme theme = Theme::System;
-    int recent_count = 20;  // visible apps, validated to 8..40 on load
+    int recent_count = 20;  // visible apps, validated to 1..1000 on load
     bool hide_after_launch = true;
     bool include_windows_apps = true;  // AppsFolder source (design-spec §FR-013)
     // NR-190: switch the search box's IME to English/alphanumeric mode on a

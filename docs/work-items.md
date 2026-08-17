@@ -227,7 +227,7 @@
 | NR-188 | 文件漂移同步：測試數 31→32、release evidence 重產、AGENTS.md／README 過時 baseline | 5 | `done` | — | [NR-188](work-items/NR-188-docs-drift-sync.md) |
 | NR-189 | 死碼與重複收斂（第十七次稽核 ponytail 軸，P-1~P-9） | 3 | `done` | — | [NR-189](work-items/NR-189-dead-code-cleanup-lane.md) |
 | NR-190 | Optional English input mode on panel show | 5 | `done` | NR-004, NR-010, NR-013 | [NR-190](work-items/NR-190-input-english-on-panel-show.md) |
-| NR-191 | recent_count 範圍擴至 1～1000，並在 blur 自動夾限越界輸入 | 5 | `ready` | NR-004, NR-013 | [NR-191](work-items/NR-191-recent-count-range-and-blur-clamp.md) |
+| NR-191 | recent_count 範圍擴至 1～1000，並在 blur 自動夾限越界輸入 | 5 | `done` | NR-004, NR-013 | [NR-191](work-items/NR-191-recent-count-range-and-blur-clamp.md) |
 
 ## Dependency lanes
 

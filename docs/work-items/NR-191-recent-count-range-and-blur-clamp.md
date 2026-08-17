@@ -141,3 +141,25 @@ Focused runnable coverage 必須包含：
 - settings store／editor／UI focused tests、完整 CTest、Release build 的命令與結果。
 - `UsageStore::Recent`、`SnapshotAssembler`、`IconCacheCapacityFor` 的 trace 與是否需要修改（預期不修改）。
 - 手動設定頁矩陣的實測結果；若 Agent 無法操作桌面，必須標記未完成，不得宣稱通過。
+
+## 交接區
+
+實作（2026-08-17，NR-191 done）── 範圍 1～1000 與 blur clamp 逐項完成：
+
+1. **shared constants 唯一位置**：`kMinRecentCount`／`kMaxRecentCount` 改為 `1`／`1000`（包含端點），仍在 `src/settings/settings_store.h:33-34` 單一定義。全部 callers 經 grep 確認：`settings_store.cpp:222`（Load range check）、`settings_editor.cpp:322-332`（blur clamp 與 `SetRecentCount`）、`settings_editor.h:106`（setter 註解）、`settings_store.h:62`（`Settings::recent_count` 註解），無第二份 8/40 或 1/1000 定義。`docs/design-spec.md`、`docs/testing.md`、`docs/settings-concepts.html` 的現行範圍文案已全部改為 1～1000；仍顯示 8–40／8～40 的只剩歷史文件（NR-004／NR-013／NR-071／NR-127／NR-152、`work-items.md` 決策紀錄、NR-191 文件本身引用的舊 binding constraint），依規則不回頭修改。
+2. **blur clamp**：入口為既有 `SettingsDialogProc` `WM_COMMAND` 內新增 `IDC_RECENT_COUNT_EDIT` case（`src/app_host/settings_dialog.cpp:482-500`），以 `HIWORD(w_param) == EN_KILLFOCUS` 為條件。判定函式 `ClampRecentCountText(std::wstring_view)`（`settings_editor.{h,cpp}`，純值、無 HWND）共用 `ParseCountText`／`ParseInt` 的 parser：可解析且越界值夾至端點（`0`／負數／`<1` → `1`，`>1000` → `1000`）；恰好 `1`／`1000` 原樣回傳（dialog 的 `parsed != *clamped` 比較保證不改寫）；空值／非數字／解析溢位回 `nullopt`，dialog 不改文字。blur 只呼叫 `SetDlgItemTextW` 改欄位文字：不呼叫 `Apply`、不碰 editor working copy、不碰 `SettingsStore::Save`／`settings.ini`（blur 路徑內無任何 store／file 呼叫；唯一寫檔入口仍是 IDOK 的 `Apply`），故 Cancel 不會把 blur 造成的文字變更持久化。
+3. **SettingsEditor**：`SetRecentCount` 接受 `1`／`1000`、拒絕 `0`／`-1`／`1001` 且不改 working value；`RecentCountNotice` 英文文案改為「Recent apps must be between 1 and 1000. The previous value was kept.」。預設 20 未動；`SettingsStore::Save` clamp 政策、`usage.tsv` schema、搜尋結果上限、`UsageStore::Recent` newest-first 排序、icon LRU 公式皆未動。
+4. **測試**：
+   - `nimblerun_settings_ui_test`（`settings_editor_test.cpp`）：`TestRecentCountValidation` 改用 1／1000 邊界（0／-1／1001 拒絕、1／1000 接受、default 20 保留）；新增 `TestBlurClampRecentCountText` 以 `Expect` 覆蓋「空值／非數字／超 int 溢位 → 無夾限、-1／0 → 1、1001／5000 → 1000、1／1000 → 原樣、500 → 原樣」。blur clamp 因此是測試過的純值 predicate（Release 組態仍可執行，非 `assert`）。
+   - `nimblerun_settings_test`（`settings_store_test.cpp`）：`TestValidation` 的越界案例改為 `recent_count=1001`；新增 `TestRecentCountBoundaries`：手寫檔 `recent_count=1`／`1000` 可 Load，Save→Load round-trip 1／1000，`0`／`-5`／`1001` 仍 fallback 到 default 20、不污染設定（schema 仍 1，無 migration）。
+   - `nimblerun_icons_cache_test`：`TestCapacityFor` 新增 `IconCacheCapacityFor(0, 1000) == 1024` 一行，證明 1000 被 LRU 容量公式安全消費（scope 4 的 sanity check）。
+5. **衍生消費者 trace（未修改 policy）**：
+   - `UsageStore::Recent(int cap)`（`usage_store.cpp:204-220`）：cap≤0 回空、newest-first sort＋deterministic stable_id tie-breaker、`result.size() > cap` 才 resize。cap=1000 只是更大的視窗截斷，records 數上限 20000（`kMaxRows`），無整數溢位或截斷 bug。
+   - `SnapshotAssembler::Refresh`（`snapshot_assembler.cpp:83`）：`usage_.Recent(settings_.recent_count)` 後依 catalog snapshot index 過濾成 `recent_entries`，交給 panel model 的 `SetRecent`。1000 只是更大的候選集，面板仍只顯示可見容量，無 crash／截斷／溢位。
+   - `IconCacheCapacityFor(pinned, recent)`（`icon_cache.cpp:20-22`）= `pinned + recent + 24`；main.cpp 三處呼叫端（`ShowPanel`、pin 變更、settings apply）都以 int `recent_count`（≤1000）隱式轉 `size_t`，sum 有界（33+1000+24）無溢位。Lazy loading 使「上限 ~1024」不觸發同時抓 1000 顆圖示（只載可見頁＋一頁預熱），無第二個 cap、無分頁、無 cache policy 變更——與 non-goal 一致。
+   - 上述三處皆**不修改**。
+6. **.rc 欄位寬度**：未改 `NimbleRun.rc` 的 `IDC_RECENT_COUNT_EDIT`（382, 30, 40 DLU, ES_NUMBER）。40 DLU 在 8pt MS Shell Dlg ≈ 70px，「1000」四碼 ≈ 36px（含 edit 邊距），以字型度量估算不會被裁切；本項的視覺確認併入手動矩陣（見下）。
+7. **手動設定頁矩陣：未完成（NOT done）**。本環境無法操作桌面（無 UI 自動化），不得宣稱通過。驗收 §4 的 blur 文字行為已由 `TestBlurClampRecentCountText` 覆蓋純值對應表，但「欄位實際顯示、Save/OK revert、Cancel 不持久化」須由人依 `docs/testing.md` 新增的「Recent count manual verification (NR-191)」六步執行。剩餘可能待修的只有：若 1000 在實際 DPI 下真的被裁切，調整 `.rc` 該 EDIT 寬度（目前估算不需）。
+8. **Agent checks 結果**：`cmake --build build`（Release x64 LLVM-MinGW＋Ninja，既有已設定組態）成功 0 error 0 warning；`ctest --test-dir build -R "settings|icons_cache"` 3/3 Passed；完整 `ctest --test-dir build --output-on-failure` 33/33 Passed（含 lifetime check）。兩條 sanity grep 皆符合預期，`git status` 只含 10 個預期檔。NR-190 的 `english_input_on_show`／`input_mode` 全程未動（grep 確認 intact）。
+
+**Commit 建議**：`NR-191: recent count range 1..1000 with blur clamp`，含本文件交接區與 `docs/work-items.md` Item 總覽 NR-191 狀態 `ready`→`done`。

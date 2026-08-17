@@ -26,6 +26,17 @@ ctest --test-dir build --output-on-failure
 
 When testing a conflicting or Windows-reserved shortcut, confirm that NimbleRun rejects it, leaves the native shortcut unchanged, keeps any previous working shortcut, and shows only one non-blocking reminder with a settings entry.
 
+## Recent count manual verification (NR-191)
+
+The recent-count field accepts values in the inclusive range 1–1000 (default 20). Verify the blur clamp and the Save path:
+
+1. **Boundary 1**: type `1`, click away (blur). Expected: the text stays `1`; Save → OK persists it; reopen Settings and the field shows `1`.
+2. **Boundary 1000**: type `1000`, blur. Expected: the text stays `1000` and is fully visible (not clipped by the field); Save → OK persists it; reopen shows `1000`.
+3. **Below range**: type `0` (and once type a negative if your test IME permits; the field is digit-only so `-` normally cannot be typed), blur. Expected: the field snaps to `1`. Cancel does not persist `1`; reopening after Cancel shows the previous saved value.
+4. **Above range**: type `1001`, blur. Expected: the field snaps to `1000`. Save → OK persists `1000`; Cancel leaves the stored value untouched.
+5. **Empty**: clear the field, blur. Expected: the text stays empty (blur does not silently replace it). Press Save/OK: the existing validation runs and the field reverts to the previous valid value with the notice.
+6. **Non-numeric / overflow**: the field is digit-only so paste or type a very long run of digits, blur. Expected: nothing is silently rewritten; Save/OK still validates and reverts.
+
 ## English input mode manual verification (NR-190)
 
 The setting "Switch input to English on show" (`english_input_on_show`, default off) switches the **IME input mode** (composing/English) of NimbleRun's own search box — it does **not** change the Windows keyboard layout. Verify the distinction: pressing `Win+Space` or `Alt+Shift` changes the keyboard layout in every app and is outside NimbleRun's behavior; switching the IME input mode here must not move the layout for other apps.

@@ -479,6 +479,25 @@ INT_PTR CALLBACK SettingsDialogProc(HWND dialog, UINT message, WPARAM w_param, L
             EndDialog(dialog, IDCANCEL);
             return TRUE;
 
+        case IDC_RECENT_COUNT_EDIT:
+            // NR-191: on leaving the field, snap a parseable out-of-range
+            // value to the nearest endpoint (1 / 1000). The editor working
+            // copy and settings.ini are never touched here; Save/OK still
+            // validates the current field text through SetRecentCount. Empty,
+            // non-numeric, or overflowing text is left unchanged.
+            if (HIWORD(w_param) == EN_KILLFOCUS) {
+                wchar_t buffer[256];
+                GetDlgItemTextW(dialog, IDC_RECENT_COUNT_EDIT, buffer, 256);
+                if (const auto clamped = ClampRecentCountText(buffer)) {
+                    const int parsed = ParseCountText(buffer);
+                    if (parsed != *clamped) {
+                        SetDlgItemTextW(dialog, IDC_RECENT_COUNT_EDIT,
+                                        std::to_wstring(*clamped).c_str());
+                    }
+                }
+            }
+            return TRUE;
+
         case IDC_HOTKEY_CHANGE:
             // NR-089: the capture dialog writes the new combo into the working
             // copy; the field is refreshed whether the user confirmed or

@@ -98,6 +98,8 @@ void TestCapacityFor() {
     Expect(nimblerun::IconCacheCapacityFor(0, 20) == 44, "capacity (0,20) == 44");
     Expect(nimblerun::IconCacheCapacityFor(12, 20) == 56, "capacity (12,20) == 56");
     Expect(nimblerun::IconCacheCapacityFor(0, 8) == 32, "capacity (0,8) == 32");
+    Expect(nimblerun::IconCacheCapacityFor(0, 1000) == 1024,
+           "capacity (0,1000) == 1024 (NR-191 range consumes 1000 without overflow)");
     Expect(nimblerun::IconCacheCapacityFor(0, 8) <= nimblerun::IconCacheCapacityFor(0, 20),
            "capacity is monotonic in recent_count");
     Expect(nimblerun::IconCacheCapacityFor(0, 20) <= nimblerun::IconCacheCapacityFor(12, 20),

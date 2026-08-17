@@ -22,12 +22,14 @@
 #include <fstream>
 #include <iterator>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
 namespace fs = std::filesystem;
 
 using nimblerun::CatalogRoot;
+using nimblerun::ClampRecentCountText;
 using nimblerun::DefaultSettings;
 using nimblerun::FormatHotkey;
 using nimblerun::HotkeyBinding;
@@ -111,14 +113,33 @@ void TestRecentCountValidation() {
     SettingsEditor editor(DefaultSettings());
     Expect(!editor.Dirty(), "fresh editor is not dirty");
     Expect(editor.Working().recent_count == 20, "default recent_count is 20");
-    Expect(editor.SetRecentCount(7) == false, "below 8 rejected");
-    Expect(editor.SetRecentCount(41) == false, "above 40 rejected");
+    Expect(editor.SetRecentCount(0) == false, "below 1 rejected");
+    Expect(editor.SetRecentCount(-1) == false, "negative rejected");
+    Expect(editor.SetRecentCount(1001) == false, "above 1000 rejected");
     Expect(editor.Working().recent_count == 20, "rejected values leave the default");
-    Expect(editor.SetRecentCount(8) == true, "8 accepted (boundary)");
-    Expect(editor.SetRecentCount(40) == true, "40 accepted (boundary)");
-    Expect(editor.SetRecentCount(30) == true, "30 accepted");
-    Expect(editor.Working().recent_count == 30, "accepted value applied");
+    Expect(editor.SetRecentCount(1) == true, "1 accepted (boundary)");
+    Expect(editor.SetRecentCount(1000) == true, "1000 accepted (boundary)");
+    Expect(editor.SetRecentCount(500) == true, "500 accepted");
+    Expect(editor.Working().recent_count == 500, "accepted value applied");
     Expect(editor.Dirty(), "edit marks the editor dirty");
+}
+
+// NR-191: the blur clamp is a pure predicate the settings dialog calls on
+// EN_KILLFOCUS. Parseable out-of-range values snap to the endpoints; 1 and
+// 1000 pass through unchanged; empty / non-numeric / overflowing text has no
+// clamped value so the dialog leaves the field text untouched.
+void TestBlurClampRecentCountText() {
+    Expect(ClampRecentCountText(L"") == std::nullopt, "empty text has no clamped value");
+    Expect(ClampRecentCountText(L"abc") == std::nullopt, "non-numeric text has no clamped value");
+    Expect(ClampRecentCountText(L"999999999999999") == std::nullopt,
+           "over-int text has no clamped value");
+    Expect(ClampRecentCountText(L"-1") == 1, "negative clamps to 1");
+    Expect(ClampRecentCountText(L"0") == 1, "0 clamps to 1 (endpoint)");
+    Expect(ClampRecentCountText(L"1") == 1, "exact min passes through");
+    Expect(ClampRecentCountText(L"1000") == 1000, "exact max passes through");
+    Expect(ClampRecentCountText(L"1001") == 1000, "1001 clamps to 1000");
+    Expect(ClampRecentCountText(L"5000") == 1000, "far out-of-range clamps to 1000");
+    Expect(ClampRecentCountText(L"500") == 500, "mid-range value passes through");
 }
 
 void TestExtensionAllowlist() {
@@ -515,6 +536,7 @@ void TestStringKeysCentralized() {
 
 int wmain() {
     TestRecentCountValidation();
+    TestBlurClampRecentCountText();
     TestExtensionAllowlist();
     TestDirtyTrackingAndPersist();
     TestApplyRollbackOnSaveFailure();
