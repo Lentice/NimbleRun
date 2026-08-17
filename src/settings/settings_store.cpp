@@ -230,6 +230,10 @@ SettingsLoadResult SettingsStore::Load(Settings& out) const {
             if (const auto parsed = ParseBool(value)) {
                 out.include_windows_apps = *parsed;
             }
+        } else if (key == L"english_input_on_show") {
+            if (const auto parsed = ParseBool(value)) {
+                out.english_input_on_show = *parsed;
+            }
         } else if (key == L"catalog_root") {
             // NR-140: each root becomes a watcher thread at startup
             // (main.cpp StartWatchers), so the row cap is a startup-DoS guard.
@@ -290,6 +294,7 @@ bool SettingsStore::Save(const Settings& settings) const {
     text += L"recent_count=" + std::to_wstring(settings.recent_count) + L"\n";
     text += L"hide_after_launch=" + std::wstring(settings.hide_after_launch ? L"true" : L"false") + L"\n";
     text += L"include_windows_apps=" + std::wstring(settings.include_windows_apps ? L"true" : L"false") + L"\n";
+    text += L"english_input_on_show=" + std::wstring(settings.english_input_on_show ? L"true" : L"false") + L"\n";
     for (const CatalogRoot& root : settings.catalog_roots) {
         text += L"catalog_root=" + EscapeText(root.path) + L"|" +
                 std::wstring(root.recursive ? L"true" : L"false") + L"\n";

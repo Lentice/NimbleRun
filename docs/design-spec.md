@@ -130,6 +130,8 @@ MVP 必須證明以下三件事：
 6. 使用者點擊清單項目，或開始輸入搜尋。
 7. 成功啟動 App 後，NimbleRun 隱藏並更新本機使用紀錄。
 
+若設定「Switch input to English on show」（§FR-013 的 `english_input_on_show`）已啟用，面板只有在「隱藏 → 可見」的轉換中、且搜尋欄取得焦點後，才嘗試以 TSF／IMM32 標準 API 把目前 IME 的輸入模式切換為英文／英數模式（§4.9）。此切換只作用於 NimbleRun 自己的搜尋欄，不切換 Windows keyboard layout、不改變其他程式的輸入狀態；面板已可見時再次收到顯示請求不會重複切換。
+
 `Alt+Space` 可能與其他 Launcher 衝突。首次註冊失敗時不得攔截或覆寫其他程式；應顯示一次非阻擋提示，要求使用者在設定中選擇其他組合。不得靜默改用候選鍵；設定頁可提供 `Ctrl+Alt+Space` 作為建議值。
 
 MVP 不覆寫其他程式的系統快捷鍵，但含 Win 鍵的組合不在此限：Win 鍵組合可解析並註冊（`MOD_WIN`）。與其他程式或作業系統衝突時，設定介面顯示警告，使用者可確認套用（衝突由使用者自行承擔）；註冊當下 `RegisterHotKey` 失敗（OS 層）時仍拒絕該設定、保留舊快捷鍵並提醒使用者。`Alt+Tab`／`Alt+Esc`／`Ctrl+Esc` 三組 shell 保留組合維持硬拒絕，不得設定。
@@ -272,6 +274,7 @@ Tab 順序只包含搜尋欄、結果清單及必要按鈕。面板顯示後不�
 - 數字快選指引顯示於對應項目上：清單狀態在列最右方，寬度固定且常駐佔位，App 名稱與第二行文字的可用寬度不因指引有無而變動。格狀狀態在格子右上角，僅在按住 `Alt` 時顯示；未按住時 footer 右側以一句灰色說明文字取代 `Alt+1~N` 指引群組。格狀狀態的 footer 快選盒固定顯示完整鍵序 `Alt+0~9`（§4.7 指派前 10 格，不隨可見列數縮減）；清單狀態的 `Alt+1~N` 依當前可見列數組出。修飾鍵 `Alt` 仍只在 footer 說明一次，不在每個方塊上重複。
 - 搜尋欄外觀：距面板左右各 16 DIP、上緣 16 DIP，高 48 DIP，圓角半徑 6 DIP；填色與 1 DIP 邊框由主題色盤提供，與面板底色可分辨，高對比模式下改用系統語意色並保持實心可見。
 - 搜尋輸入沿用原生 EDIT 控制項（caret、選取、IME、剪貼簿為系統行為），文字左內距 12 DIP、字級 24 DIP。搜尋欄的圓角框由面板繪製，EDIT 內縮於框內。
+- 啟用「Switch input to English on show」時，面板 hidden→visible 且搜尋框取得焦點後，以原生 TSF（thread-manager keyboard-input conversion compartment，`TF_CONVERSIONMODE_ALPHANUMERIC`）嘗試切換目前 IME 為英文／英數模式，TSF 不可用時回退 IMM32（`ImmGetContext`／`ImmSetOpenStatus`／`ImmSetConversionStatus`）。切換為 best-effort：不使用輸入法廠商私有 API、不切換 keyboard layout，對不遵守公開 TSF／IMM32 行為的第三方輸入法失敗時為安全 no-op（面板照常顯示）。
 - 使用系統字型與系統色彩語意。搜尋欄字型取系統 message font，只覆寫字級。
 - 跟隨 Windows 淺色／深色模式。
 - cell tooltip 使用 Windows 原生 tooltip 外觀（Win11 小圓角、Win10 方角，允許平台外觀差異）：系統主題底色與文字色、最寬不超過面板內容寬度、過長自動換行、無箭頭。tooltip 控制項常駐（約數 KB），顯示時依格子幾何定位於格子下方或上方；不計入待機資源預算（§NFR-001）。
@@ -463,6 +466,7 @@ MVP 設定：
 - 跟隨系統／淺色／深色。
 - 常用 App 顯示數量：8～40，預設 20。
 - 啟動 App 後是否隱藏：預設開啟。
+- 顯示面板時切換為英文輸入模式（`english_input_on_show`）：預設關閉。啟用時只在面板 hidden→visible 且搜尋框取得焦點後，嘗試以標準 TSF→IMM32 路徑切換目前 IME 為英文／英數模式（§4.9）；不切換鍵盤配置、不影響其他程式的輸入狀態、不保證非標準第三方輸入法可用，失敗時安全 no-op。
 - 清除使用紀錄。
 - 重設設定。
 - 包含 Windows apps（Start Menu 與已安裝 App）：預設開啟。關閉時跳過 AppsFolder 列舉。
@@ -752,6 +756,7 @@ flowchart TD
 
 - `settings.ini`：少量 key/value，使用 Win32 profile API 或受測試的自有 reader/writer。
 - `settings.ini` 保存 `catalog_roots`（多個本機絕對路徑及各自的 recursive flag）與 `catalog_extensions`（受支援副檔名清單）；每個值都要經過格式與安全邊界驗證。
+- `settings.ini` 的 `english_input_on_show` key 接受 `true`／`false`（預設 `false`）。缺少此 key 的舊版 `settings.ini` 為 backward-compatible default `false`；非法值一律回退 `false`；schema 維持 1，不做 migration。
 - `favorites.txt`：版本化 UTF-8 TSV（schema=2）。第一行為 `schema=2`；其後每行三欄、以 tab 分隔：`<escaped stable_id>`、`<last_seen_utc epoch 秒>`、`<escaped display_name>`，行序即 pin 順序。欄位值一律經 escaping（反斜線跳脫 `\`、`=`、`\n`、`\r`、`\t`），確保值內的 tab／換行不會破壞欄位或列結構。display_name 欄（NR-062）讓 catalog 中已消失的 pin 仍能依名稱顯示；schema=1（兩欄）舊檔仍可讀取，下次存檔時升級為 schema=2。讀取容許同一 schema 的尾端額外欄位（NR-087）。
 - `usage.tsv`：版本化 UTF-8 TSV（schema=1）；欄位為 stable ID、lifetime total launch count、最後啟動 UTC，以 tab 分隔；同一 stable ID 重複時最後一行取勝（Save 以 stable ID 升冪寫出，重複存檔位元組一致）。
 - `catalog.cache`：可選的版本化 UTF-8 文字 TSV cache，只用於加速，不是真實來源；讀取錯誤可直接刪除並重建。

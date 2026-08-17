@@ -26,6 +26,17 @@ ctest --test-dir build --output-on-failure
 
 When testing a conflicting or Windows-reserved shortcut, confirm that NimbleRun rejects it, leaves the native shortcut unchanged, keeps any previous working shortcut, and shows only one non-blocking reminder with a settings entry.
 
+## English input mode manual verification (NR-190)
+
+The setting "Switch input to English on show" (`english_input_on_show`, default off) switches the **IME input mode** (composing/English) of NimbleRun's own search box — it does **not** change the Windows keyboard layout. Verify the distinction: pressing `Win+Space` or `Alt+Shift` changes the keyboard layout in every app and is outside NimbleRun's behavior; switching the IME input mode here must not move the layout for other apps.
+
+1. **Setting off**: with the setting unchecked, warm-start with a Chinese IME active. Press `Alt+Space`; the search box stays in the IME's previous Chinese mode and typed Latin letters compose as usual.
+2. **Setting on, hidden→visible**: check the setting, open Settings → OK (no restart needed). Switch the search IME to Chinese, hide the panel, then press `Alt+Space`. Expected: the box first gets focus, then switches to English/alphanumeric, and Latin letters enter directly.
+3. **Repeated show while visible**: with the panel visible and English mode active, switch back to Chinese manually, then trigger another show request (hotkey while visible hides; use tray Open or a second instance). Expected: the visible panel is not switched back to English by the repeat show; only a real hide→show switches again.
+4. **Entry points**: repeat step 2 with each of (a) the global hotkey, (b) tray left-click, (c) tray menu Open, (d) launching a second instance. All must switch once on the hide→show transition.
+5. **Two IMEs**: run step 2 with Microsoft New Phonetic (Chinese) and at least one other locally installed window IME. An IME that ignores the public TSF/IMM32 mode switch must not crash or block the panel (safe no-op).
+6. **No active IME context** (English-only system, or an IME-less session): enabling the setting must not change any keyboard layout, show no error dialog, and the panel must still appear normally.
+
 ## MVP acceptance checklist
 
 - [ ] Hotkey focuses the search field and does not leak input to the previous foreground app.

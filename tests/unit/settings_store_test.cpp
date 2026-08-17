@@ -73,6 +73,7 @@ void TestDefaults(const std::wstring& dir) {
     Expect(loaded.recent_count == 20, "default recent_count");
     Expect(loaded.hide_after_launch == true, "default hide_after_launch");
     Expect(loaded.include_windows_apps == true, "default include_windows_apps");
+    Expect(loaded.english_input_on_show == false, "default english_input_on_show");
     Expect(loaded.catalog_roots.empty(), "default catalog_roots is empty");
     Expect(loaded.catalog_extensions == nimblerun::DefaultExtensions(),
            "default catalog_extensions is the full allowlist");
@@ -87,6 +88,7 @@ void TestRoundTrip(const std::wstring& dir) {
     expected.recent_count = 32;
     expected.hide_after_launch = false;
     expected.include_windows_apps = false;
+    expected.english_input_on_show = true;
     Expect(store.Save(expected), "save settings");
 
     Settings loaded;
@@ -98,6 +100,8 @@ void TestRoundTrip(const std::wstring& dir) {
     Expect(loaded.hide_after_launch == expected.hide_after_launch, "round-trip hide_after_launch");
     Expect(loaded.include_windows_apps == expected.include_windows_apps,
            "round-trip include_windows_apps");
+    Expect(loaded.english_input_on_show == expected.english_input_on_show,
+           "round-trip english_input_on_show");
 }
 
 void TestIncludeWindowsAppsOldFormat(const std::wstring& dir) {
@@ -112,6 +116,50 @@ void TestIncludeWindowsAppsOldFormat(const std::wstring& dir) {
     Settings loaded;
     Expect(store.Load(loaded) == SettingsLoadResult::Loaded, "old-format load");
     Expect(loaded.include_windows_apps == true, "missing key loads the default true");
+}
+
+// NR-190: a settings.ini written before english_input_on_show existed has no
+// such key; it must load disabled (backward-compatible default false), with
+// schema unchanged.
+void TestEnglishInputOnShowMissingKey(const std::wstring& dir) {
+    WriteBytes(dir + L"\\settings.ini",
+        "schema=1\n"
+        "hotkey=Alt+Space\n"
+        "recent_count=20\n");
+    SettingsStore store(dir);
+    Settings loaded;
+    Expect(store.Load(loaded) == SettingsLoadResult::Loaded, "old-format load");
+    Expect(loaded.english_input_on_show == false,
+           "missing english_input_on_show loads the default false");
+}
+
+// NR-190: an unparseable value must fall back to the default false, never make
+// the setting unexpectedly enabled.
+void TestEnglishInputOnShowInvalidValue(const std::wstring& dir) {
+    WriteBytes(dir + L"\\settings.ini",
+        "schema=1\n"
+        "english_input_on_show=banana\n");
+    SettingsStore store(dir);
+    Settings loaded;
+    Expect(store.Load(loaded) == SettingsLoadResult::Loaded, "invalid-value load");
+    Expect(loaded.english_input_on_show == false,
+           "invalid english_input_on_show value loads false");
+}
+
+// NR-190: explicit true and false both round-trip through Save/Load.
+void TestEnglishInputOnShowRoundTrip(const std::wstring& dir) {
+    SettingsStore store(dir);
+    Settings expected;
+    expected.english_input_on_show = true;
+    Expect(store.Save(expected), "save english_input_on_show=true");
+    Settings loaded;
+    Expect(store.Load(loaded) == SettingsLoadResult::Loaded, "true round-trip load");
+    Expect(loaded.english_input_on_show == true, "english_input_on_show=true round-trips");
+
+    expected.english_input_on_show = false;
+    Expect(store.Save(expected), "save english_input_on_show=false");
+    Expect(store.Load(loaded) == SettingsLoadResult::Loaded, "false round-trip load");
+    Expect(loaded.english_input_on_show == false, "english_input_on_show=false round-trips");
 }
 
 void TestCatalogRootsRoundTrip(const std::wstring& dir) {
@@ -587,6 +635,9 @@ int wmain() {
     TestDefaults(MakeTempDir("defaults"));
     TestRoundTrip(MakeTempDir("roundtrip"));
     TestIncludeWindowsAppsOldFormat(MakeTempDir("oldformat"));
+    TestEnglishInputOnShowMissingKey(MakeTempDir("english_missing"));
+    TestEnglishInputOnShowInvalidValue(MakeTempDir("english_invalid"));
+    TestEnglishInputOnShowRoundTrip(MakeTempDir("english_roundtrip"));
     TestEscaping(MakeTempDir("escaping"));
     TestValidation(MakeTempDir("validation"));
     TestCatalogRootsRoundTrip(MakeTempDir("catalogroots"));

@@ -125,6 +125,8 @@ std::wstring_view SettingsStringText(SettingsString key) {
         return L"Light";
     case SettingsString::ThemeDark:
         return L"Dark";
+    case SettingsString::EnglishInputOnShowLabel:
+        return L"Switch input to English on show";
     case SettingsString::CatalogSourcesGroup:
         return L"CATALOG SOURCES";
     case SettingsString::IncludeWindowsAppsLabel:
@@ -339,6 +341,14 @@ bool SettingsEditor::SetHideAfterLaunch(bool hide) {
 bool SettingsEditor::SetIncludeWindowsApps(bool enabled) {
     if (enabled != working_.include_windows_apps) {
         working_.include_windows_apps = enabled;
+        dirty_ = true;
+    }
+    return true;
+}
+
+bool SettingsEditor::SetEnglishInputOnShow(bool enabled) {
+    if (enabled != working_.english_input_on_show) {
+        working_.english_input_on_show = enabled;
         dirty_ = true;
     }
     return true;

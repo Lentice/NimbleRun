@@ -61,6 +61,9 @@ struct Settings {
     int recent_count = 20;  // visible apps, validated to 8..40 on load
     bool hide_after_launch = true;
     bool include_windows_apps = true;  // AppsFolder source (design-spec §FR-013)
+    // NR-190: switch the search box's IME to English/alphanumeric mode on a
+    // hidden->visible panel show. Default off.
+    bool english_input_on_show = false;
     std::vector<CatalogRoot> catalog_roots;
     std::vector<std::wstring> catalog_extensions = DefaultExtensions();
 };

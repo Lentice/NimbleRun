@@ -15,3 +15,15 @@ _Avoid_: short name, ellipsized name
 **hover**:
 The state where the pointer rests on a grid cell with no mouse button pressed. Hover changes only that cell's light fill and the footer path bar content, never the keyboard selection.
 _Avoid_: mouse-over, active
+
+## Input terms
+
+**English input mode**:
+The search field's input state in which an IME does not compose or convert Chinese text, so typed Latin letters enter directly; it does not select a particular English keyboard layout.
+_Avoid_: English keyboard layout, language switch
+
+## Settings terms
+
+**recent count**:
+The configured number of recent app items shown in the empty-query state after pinned items. It limits displayed recent rows; it does not limit usage-history records or search results.
+_Avoid_: recent item count when referring to persisted usage records

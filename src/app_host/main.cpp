@@ -38,6 +38,7 @@
 #include "ui/pin_drag_state.h"
 #include "ui/quick_select.h"
 #include "ui/cell_tooltip.h"
+#include "ui/input_mode.h"
 #include "win/com.h"
 #include "win/handoff_registry.h"
 #include "win/handle_guard.h"
@@ -1948,6 +1949,10 @@ void Render(HWND window) {
 }
 
 void ShowPanel(HWND window) {
+    // NR-190: capture the visibility state before the first SetWindowPos;
+    // once the panel is shown the distinction is gone.
+    const bool was_visible = IsWindowVisible(window) != FALSE;
+
     POINT cursor{};
     GetCursorPos(&cursor);
 
@@ -1991,6 +1996,10 @@ void ShowPanel(HWND window) {
         // catalog-source fields are deliberately not copied here: they are read
         // by rebuild workers and only change through a rebuild.
         g_settings.recent_count = current.recent_count;
+        // NR-190: the input-mode switch is a show-time action; the field is
+        // copied here so an Apply (or a hand-edited settings.ini) affects the
+        // next hidden->visible show without a restart.
+        g_settings.english_input_on_show = current.english_input_on_show;
     }
     // Clear the retained query first: the empty-query row build is a short pin
     // and recent walk, so the model refreshes below cost nothing, whereas with a
@@ -2045,6 +2054,15 @@ void ShowPanel(HWND window) {
     if (g_search_edit) {
         SetWindowTextW(g_search_edit, L"");
         SetFocus(g_search_edit);
+        // NR-190: optional switch of the search box's IME to English/alphanumeric
+        // mode. Gated on the live setting and the captured hidden->visible
+        // transition, so a re-show while the panel is already visible never
+        // repeats the switch and a disabled setting never calls the IME APIs.
+        // Runs after SetFocus; TSF/IMM operate on the focused input context.
+        if (nimblerun::ShouldSetEnglishInputMode(
+                g_settings.english_input_on_show, was_visible)) {
+            nimblerun::SetEnglishInputMode(g_search_edit);
+        }
     }
     // NR-020/NR-029: the visible row count derives from the actual client rect
     // at this monitor's DPI and the active layout state (Columns() after the

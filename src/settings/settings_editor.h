@@ -27,6 +27,7 @@ enum class SettingsString {
     ThemeSystem,
     ThemeLight,
     ThemeDark,
+    EnglishInputOnShowLabel,  // NR-190: checkbox in the LAUNCHER group
     CatalogSourcesGroup,
     IncludeWindowsAppsLabel,
     UserFoldersLabel,
@@ -98,6 +99,7 @@ public:
     bool SetTheme(Theme theme);
     bool SetHideAfterLaunch(bool hide);
     bool SetIncludeWindowsApps(bool enabled);
+    bool SetEnglishInputOnShow(bool enabled);    // NR-190
     bool SetAutoStart(bool enabled);
     bool SetHotkey(std::wstring_view combo);    // empty/invalid/Win-key rejected
     bool SetExtensionEnabled(std::wstring_view extension, bool enabled);

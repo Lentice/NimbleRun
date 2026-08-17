@@ -77,6 +77,7 @@ bool SameSettings(const Settings& a, const Settings& b) {
     if (a.hotkey != b.hotkey || a.auto_start != b.auto_start || a.theme != b.theme ||
         a.recent_count != b.recent_count || a.hide_after_launch != b.hide_after_launch ||
         a.include_windows_apps != b.include_windows_apps ||
+        a.english_input_on_show != b.english_input_on_show ||
         a.catalog_roots.size() != b.catalog_roots.size() ||
         a.catalog_extensions != b.catalog_extensions) {
         return false;
@@ -385,6 +386,7 @@ void TestResetRestoresDefaults() {
     SettingsEditor editor(custom);
     Expect(editor.SetRecentCount(9) == true, "edit before reset");
     Expect(editor.AddRoot(L"E:\\Apps", true) == true, "add a root before reset");
+    Expect(editor.SetEnglishInputOnShow(true) == true, "set english input mode before reset");
     editor.ResetToDefaults();
     Expect(editor.Dirty(), "reset marks dirty");
     Expect(SameSettings(editor.Working(), DefaultSettings()),
@@ -452,6 +454,42 @@ void TestClearUsageFailureRestoresRecords() {
     fs::remove_all(dir);
 }
 
+// NR-190: the new setter follows the same dirty/apply/persist path as its
+// siblings, Reset restores the default false, and the English label is a
+// centralized non-empty English string.
+void TestEnglishInputOnShow() {
+    SettingsEditor editor(DefaultSettings());
+    Expect(!editor.Dirty(), "fresh editor is not dirty");
+    Expect(editor.Working().english_input_on_show == false,
+           "default english_input_on_show is false");
+    Expect(editor.SetEnglishInputOnShow(true) == true, "set english_input_on_show");
+    Expect(editor.Working().english_input_on_show == true, "working value updated");
+    Expect(editor.Dirty(), "setter marks the editor dirty");
+    Expect(editor.SetEnglishInputOnShow(false) == true, "clear english_input_on_show");
+    Expect(!editor.Working().english_input_on_show, "working value cleared");
+
+    const std::wstring dir = MakeTempDir("english_editor");
+    SettingsStore store(dir);
+    SettingsEditor persisted(DefaultSettings());
+    Expect(persisted.SetEnglishInputOnShow(true) == true, "set before apply");
+    FakeSwapper swapper;
+    Expect(persisted.Apply(store, swapper).ok, "english_input_on_show applies");
+    Settings loaded;
+    store.Load(loaded);
+    Expect(loaded.english_input_on_show == true, "english_input_on_show persisted");
+
+    persisted.ResetToDefaults();
+    Expect(persisted.Working().english_input_on_show == false,
+           "reset restores english_input_on_show to false");
+    fs::remove_all(dir);
+
+    Expect(SettingsStringText(SettingsString::EnglishInputOnShowLabel) ==
+               L"Switch input to English on show",
+           "english input label string key");
+    Expect(!SettingsStringText(SettingsString::EnglishInputOnShowLabel).empty(),
+           "english input label is non-empty English text");
+}
+
 void TestStringKeysCentralized() {
     Expect(SettingsStringText(SettingsString::DialogTitle) == L"NimbleRun Settings",
            "dialog title key");
@@ -490,6 +528,7 @@ int wmain() {
     TestResetRestoresDefaults();
     TestClearUsageOnly();
     TestClearUsageFailureRestoresRecords();
+    TestEnglishInputOnShow();
     TestStringKeysCentralized();
     std::printf("NR-013 settings editor check PASSED\n");
     return 0;

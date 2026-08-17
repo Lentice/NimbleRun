@@ -239,6 +239,7 @@ add_library(nimblerun_ui STATIC
     src/ui/panel_palette.cpp
     src/ui/pin_drag_state.cpp
     src/ui/cell_tooltip.cpp
+    src/ui/input_mode.cpp
 )
 
 target_include_directories(nimblerun_ui
@@ -260,6 +261,11 @@ target_link_libraries(nimblerun_ui
     PUBLIC
         nimblerun_settings
         oleacc
+        # NR-190: input_mode.cpp -- TSF (ole32/uuid, CoCreateInstance +
+        # IID/CLSID definitions) with the IMM32 fallback (imm32).
+        imm32
+        ole32
+        uuid
 )
 
 add_library(nimblerun_panel_model STATIC

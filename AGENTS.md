@@ -50,7 +50,7 @@ The repository is mid-MVP, in Phase 5 (release gate) — `docs/roadmap.md` is th
 - Lazy Shell icon store with bounded LRU cache and `icons.cache` persistence.
 - Search, usage scoring, pinning, settings dialog, tray menu, and native cell tooltips.
 - Atomic persistence under `%LOCALAPPDATA%\NimbleRun`; startup can show a cached catalog while the first rebuild runs.
-- 32 CTest-registered checks plus a release-evidence runner (`docs/testing.md`). Pre-release: NFR-001 resource gates are not yet measured.
+- 33 CTest-registered checks plus a release-evidence runner (`docs/testing.md`). Pre-release: NFR-001 resource gates are not yet measured.
 
 ## Validation
 

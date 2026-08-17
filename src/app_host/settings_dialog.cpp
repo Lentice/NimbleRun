@@ -294,6 +294,7 @@ void InitLabels(HWND dialog) {
     SetControlText(dialog, IDC_RECENT_LABEL, SettingsString::RecentCountLabel);
     SetControlText(dialog, IDC_HIDE_AFTER_LAUNCH, SettingsString::HideAfterLaunchLabel);
     SetControlText(dialog, IDC_AUTO_START, SettingsString::StartupAutoStartLabel);
+    SetControlText(dialog, IDC_ENGLISH_INPUT_ON_SHOW, SettingsString::EnglishInputOnShowLabel);
     SetControlText(dialog, IDC_THEME_LABEL, SettingsString::ThemeLabel);
     SetControlText(dialog, IDC_CATALOG_SOURCES_GROUP, SettingsString::CatalogSourcesGroup);
     SetControlText(dialog, IDC_INCLUDE_WINDOWS_APPS, SettingsString::IncludeWindowsAppsLabel);
@@ -336,6 +337,8 @@ void Populate(HWND dialog, const Settings& settings) {
                    settings.include_windows_apps ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(dialog, IDC_AUTO_START,
                    settings.auto_start ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(dialog, IDC_ENGLISH_INPUT_ON_SHOW,
+                   settings.english_input_on_show ? BST_CHECKED : BST_UNCHECKED);
 
     HWND theme = GetDlgItem(dialog, IDC_THEME_COMBO);
     SendMessageW(theme, CB_RESETCONTENT, 0, 0);
@@ -499,6 +502,11 @@ INT_PTR CALLBACK SettingsDialogProc(HWND dialog, UINT message, WPARAM w_param, L
         case IDC_AUTO_START:
             g_dialog.editor->SetAutoStart(
                 IsDlgButtonChecked(dialog, IDC_AUTO_START) == BST_CHECKED);
+            return TRUE;
+
+        case IDC_ENGLISH_INPUT_ON_SHOW:
+            g_dialog.editor->SetEnglishInputOnShow(
+                IsDlgButtonChecked(dialog, IDC_ENGLISH_INPUT_ON_SHOW) == BST_CHECKED);
             return TRUE;
 
         case IDC_THEME_COMBO:
