@@ -4,6 +4,14 @@
 
 namespace nimblerun {
 
+namespace input_mode_detail {
+
+// TSF's documented alphanumeric conversion value; kept visible to the
+// focused contract check because zero is easy to confuse with the soft-keyboard flag.
+inline constexpr LONG kTsfConversionModeAlphanumeric = 0x00000000;
+
+} // namespace input_mode_detail
+
 // NR-190: optional "switch the search box to English/alphanumeric on show".
 // True only for a genuine hidden->visible panel show with the setting enabled,
 // so a re-show while the panel is already visible never repeats the switch.

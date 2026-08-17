@@ -16,6 +16,11 @@ namespace {
 using nimblerun::SetEnglishInputMode;
 using nimblerun::ShouldSetEnglishInputMode;
 
+void TestTsfConversionModeContract() {
+    Expect(nimblerun::input_mode_detail::kTsfConversionModeAlphanumeric == 0x00000000,
+           "TSF alphanumeric mode must be zero, not the soft-keyboard flag");
+}
+
 void TestPredicateTruthTable() {
     Expect(!ShouldSetEnglishInputMode(false, false),
            "disabled + hidden: no switch (setting is the gate)");
@@ -38,6 +43,7 @@ void TestSetEnglishInputModeFailureSafe() {
 } // namespace
 
 int wmain() {
+    TestTsfConversionModeContract();
     TestPredicateTruthTable();
     TestSetEnglishInputModeFailureSafe();
     std::printf("NR-190 input mode check PASSED\n");
