@@ -92,6 +92,129 @@ void TestBackgroundPriorityAttemptIsNonFatal() {
            "a background priority failure does not fail the generation");
 }
 
+void TestStartupTwoPhaseGenerationOrder() {
+    CatalogRefreshCoordinator refresh;
+    std::vector<Posted> posts;
+    std::mutex posts_mutex;
+    std::vector<CatalogSource> enumerated;
+    std::mutex enumerated_mutex;
+    int completed = 0;
+    bool startup_pending = true;
+    bool deferred_posted = false;
+    bool fast_diagnostics_seen = false;
+
+    RebuildPipeline pipeline(
+        refresh, [] { return Settings{}; },
+        [&](UINT message, WPARAM w_param, LPARAM l_param) {
+            std::lock_guard<std::mutex> lock(posts_mutex);
+            posts.push_back({message, w_param, l_param});
+            return true;
+        },
+        [&](CatalogSource source, const Settings&, std::atomic<bool>*) {
+            {
+                std::lock_guard<std::mutex> lock(enumerated_mutex);
+                enumerated.push_back(source);
+            }
+            RebuildEnumeration result;
+            AppEntry entry;
+            switch (source) {
+            case CatalogSource::StartMenu:
+                entry.display_name = L"Start";
+                entry.stable_id = L"startup-start";
+                entry.source = AppSource::UserStartMenu;
+                break;
+            case CatalogSource::AppsFolder:
+                entry.display_name = L"Apps";
+                entry.stable_id = L"startup-apps";
+                entry.source = AppSource::AppsFolder;
+                break;
+            case CatalogSource::UserFolder:
+                entry.display_name = L"User";
+                entry.stable_id = L"startup-user";
+                entry.source = AppSource::UserFolder;
+                break;
+            }
+            entry.launch_verified = true;
+            result.entries.push_back(std::move(entry));
+            return result;
+        },
+        [&] {
+            ++completed;
+            if (startup_pending) {
+                startup_pending = false;
+                deferred_posted = true;
+                const GenerationDiagnostics& diagnostics =
+                    refresh.LastGenerationDiagnostics();
+                fast_diagnostics_seen = diagnostics.start_menu_ms >= 0 &&
+                                        diagnostics.apps_folder_ms >= 0;
+            }
+        },
+        [] {}, [] {});
+
+    // This is the startup request. The deferred message is represented by the
+    // completion callback; its Request is delivered below as the next UI turn.
+    pipeline.Request({CatalogSource::StartMenu, CatalogSource::AppsFolder},
+                     RebuildReason::Explicit);
+    Expect(WaitForPosts(posts, posts_mutex, 2),
+           "fast startup sources post both results");
+    std::vector<Posted> first_posts;
+    {
+        std::lock_guard<std::mutex> lock(posts_mutex);
+        first_posts = posts;
+    }
+    for (const Posted& post : first_posts) {
+        pipeline.OnResultMessage(post.w_param, post.l_param);
+    }
+    Expect(completed == 1, "fast startup generation completes once");
+    Expect(deferred_posted, "fast completion posts the deferred UserFolder turn");
+    Expect(fast_diagnostics_seen,
+           "fast-source diagnostics are visible before the next generation");
+    Expect(!refresh.IsRebuildInProgress(), "fast startup generation is complete");
+    Expect(refresh.Snapshot().size() == 2,
+           "fast generation publishes both verified source entries");
+    for (const AppEntry& entry : refresh.Snapshot()) {
+        Expect(entry.launch_verified,
+               "fast generation entries are launch verified immediately");
+    }
+    {
+        std::lock_guard<std::mutex> lock(enumerated_mutex);
+        bool saw_user_folder = false;
+        for (const CatalogSource source : enumerated) {
+            saw_user_folder |= source == CatalogSource::UserFolder;
+        }
+        Expect(!saw_user_folder,
+               "UserFolder is not enumerated before the deferred UI turn");
+    }
+
+    // This call models handling kStartupUserFolderMessage after the callback
+    // returns. It must be a new turn, rather than a nested Start() call.
+    pipeline.Request({CatalogSource::UserFolder}, RebuildReason::Explicit);
+    Expect(WaitForPosts(posts, posts_mutex, 3),
+           "deferred UserFolder request posts its result");
+    std::vector<Posted> all_posts;
+    {
+        std::lock_guard<std::mutex> lock(posts_mutex);
+        all_posts = posts;
+    }
+    for (std::size_t i = first_posts.size(); i < all_posts.size(); ++i) {
+        pipeline.OnResultMessage(all_posts[i].w_param, all_posts[i].l_param);
+    }
+    Expect(completed == 2, "deferred UserFolder generation completes once");
+    Expect(!refresh.IsRebuildInProgress(), "deferred UserFolder generation is complete");
+    Expect(refresh.Snapshot().size() == 3,
+           "second generation keeps the fast entries and adds UserFolder");
+    {
+        std::lock_guard<std::mutex> lock(enumerated_mutex);
+        Expect(enumerated.size() == 3, "two phases enumerate exactly three sources");
+        Expect(enumerated.back() == CatalogSource::UserFolder,
+               "UserFolder is the second generation source");
+    }
+    const GenerationDiagnostics& user_diagnostics = refresh.LastGenerationDiagnostics();
+    Expect(user_diagnostics.start_menu_ms < 0 && user_diagnostics.apps_folder_ms < 0 &&
+               user_diagnostics.user_folder_ms >= 0,
+           "second generation resets diagnostics to its UserFolder source");
+}
+
 void TestDeliveryFailureCompletesOnce() {
     CatalogRefreshCoordinator refresh;
     std::vector<Posted> posts;
@@ -518,6 +641,7 @@ void TestStartBoundedSupersedeAndFreshCancelFlag() {
 
 int wmain() {
     TestBackgroundPriorityAttemptIsNonFatal();
+    TestStartupTwoPhaseGenerationOrder();
     TestDeliveryFailureCompletesOnce();
     TestThreadCreationFailureCompletes();
     TestCacheFailureRetention();

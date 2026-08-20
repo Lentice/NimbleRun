@@ -94,6 +94,9 @@ constexpr UINT kIconReadyMessage = WM_APP + 9;
 // failures and the generation can still complete. The non-zero wParam/lParam
 // form is a no-allocation fallback for recording a failure.
 constexpr UINT kRebuildDeliveryFailedMessage = WM_APP + 10;
+// NR-195: posted after the fast startup generation completes; the next UI
+// turn starts the deferred UserFolder generation without re-entering Start().
+constexpr UINT kStartupUserFolderMessage = WM_APP + 11;
 // NR-011: debounce timer id (500 ms, see FR-008).
 constexpr UINT_PTR kRebuildTimerId = 2;
 // NR-178: one-shot cell-tooltip hover timer (design-spec §4.8). It exists only
@@ -237,6 +240,9 @@ bool g_dialog_active = false;
 // failure. A failure schedules at most one full rebuild; a rebuild already
 // running is merged instead.
 nimblerun::LaunchFailureRefreshGate g_launch_failure_refresh;
+// NR-195: the startup fast-source generation posts one deferred UserFolder
+// generation after its normal completion cleanup.
+bool g_startup_userfolder_pending = false;
 // Live settings store, owned by wWinMain; the tray Settings dialog persists
 // through it (NR-013).
 nimblerun::SettingsStore* g_settings_store = nullptr;
@@ -1406,6 +1412,10 @@ void OnGenerationCompleteRefresh() {
             g_diag) {
             g_diag->Write(L"catalog_cache", L"save failed");
         }
+    }
+    if (g_startup_userfolder_pending) {
+        g_startup_userfolder_pending = false;
+        PostMessageW(g_main_window, kStartupUserFolderMessage, 0, 0);
     }
 }
 
@@ -2607,6 +2617,11 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
         return g_rebuild_pipeline ? g_rebuild_pipeline->OnResultMessage(w_param, l_param) : 0;
     case kRebuildDeliveryFailedMessage:
         return g_rebuild_pipeline ? g_rebuild_pipeline->OnDeliveryFailureMessage(w_param, l_param) : 0;
+    case kStartupUserFolderMessage:
+        if (g_rebuild_pipeline) {
+            StartRebuild({nimblerun::CatalogSource::UserFolder});
+        }
+        return 0;
     case WM_TIMER:
         if (w_param == kRebuildTimerId) {
             KillTimer(window, kRebuildTimerId);
@@ -3435,8 +3450,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     // NR-011: kick off the background full rebuild now that the panel can serve
     // the cached snapshot; the results arrive through kRebuildDoneMessage.
     if (g_refresh) {
-        StartRebuild({std::cbegin(nimblerun::kSources),
-                              std::cend(nimblerun::kSources)});
+        g_startup_userfolder_pending = true;
+        StartRebuild({nimblerun::CatalogSource::StartMenu,
+                      nimblerun::CatalogSource::AppsFolder});
     }
 
     MSG message{};

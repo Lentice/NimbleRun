@@ -129,3 +129,25 @@ Focused runnable coverage 必須包含：一個測試或 self-check 證明「兩
 - `OnGenerationCompleteRefresh()` 內新邏輯放置的精確位置，與「診斷寫入在 `BeginGeneration({UserFolder})` 之前完成」的驗證證據。
 - 同步重入風險的驗證方式（例如：確認 `Start()` 的例外路徑不會在旗標為真時觸發同步 `StartRebuild`）。
 - Agent checks 的完整命令與結果。
+
+## 交接區（2026-08-20，實作完成）
+
+1. **旗標與訊息位置**：`src/app_host/main.cpp:99` 新增未使用的 `kStartupUserFolderMessage = WM_APP + 11`；`:245` 新增檔案範圍 `g_startup_userfolder_pending = false`。開機路徑 `:3453-3455` 先將旗標設為 true，再以 `{StartMenu, AppsFolder}` 呼叫 `StartRebuild`。`WindowProc` `:2620-2625` 處理新訊息，只有在下一個 UI turn 才呼叫 `StartRebuild({UserFolder})`。
+
+2. **完成收尾順序與診斷證據**：`OnGenerationCompleteRefresh()` `src/app_host/main.cpp:1396-1421` 的新邏輯位於既有 `RebuildDiagnosticLines` 寫入、`OnRefreshComplete`、`RefreshPanelSnapshot`、`SaveCatalogCache` 全部完成之後，才清旗標並 `PostMessageW(g_main_window, kStartupUserFolderMessage, 0, 0)`。`CatalogRefreshCoordinator::BeginGeneration()` `src/catalog/catalog_refresh.cpp:76-82` 會重設 diagnostics；`tests/unit/rebuild_pipeline_test.cpp:95-213` 的 `TestStartupTwoPhaseGenerationOrder` 在 gen1 completion callback 中先讀到 StartMenu／AppsFolder duration，等 callback 返回後才送出 UserFolder request，並在 gen2 驗證快來源 duration 已被重設、UserFolder duration 存在。這證明 gen1 的 `rebuild-ms startmenu`／`appsfolder` 在 gen2 開始前已可被完成 callback 消費。
+
+3. **同步重入風險**：`RebuildPipeline::Start()` 的 settings／reserve 例外路徑在 `src/app_host/rebuild_pipeline.cpp:118-142` 會同步 `CompleteIfReady()`，既有 `tests/unit/rebuild_pipeline_test.cpp:266-282` 的 `TestThreadCreationFailureCompletes` 覆蓋該路徑。新 `OnGenerationCompleteRefresh` 函式 body 的 source sanity check 確認沒有 `StartRebuild` 或 `.Request(`，只有 `PostMessageW`；`TestStartupTwoPhaseGenerationOrder` 也只在 completion callback 記錄 deferred 狀態，將第二次 Request 放在 callback 返回後執行，因此不會從 `on_complete_` 重入 `Start()`。
+
+4. **範圍與節流**：`rg` 顯示其他三個全來源呼叫點 `main.cpp:1096`（launch-failure）、`:2602`（Ctrl+R/tray）與 `:2661`（settings apply）仍使用原本的 `std::cbegin(nimblerun::kSources)`／`std::cend(...)`，只有 startup `:3454` 改為兩個快來源。第二次 UserFolder 是第一 generation 未請求過的 source；測試能立即取得第三個 result，證明沿用既有 Explicit per-source gate，沒有新增節流或 debounce。
+
+5. **測試覆蓋**：`TestStartupTwoPhaseGenerationOrder` 斷言 gen1 只發布兩個 `launch_verified` entries、尚未列舉 UserFolder；deferred request 後 generation 完成、snapshot 保留兩個快來源並加入 UserFolder，且 diagnostics 只剩第二代 UserFolder duration。既有 `TestThreadCreationFailureCompletes` 仍通過，保留 Start 同步例外完成路徑的 coverage。
+
+6. **Agent checks**：
+   - `cmake -S . -B build -G Ninja -D"CMAKE_TOOLCHAIN_FILE=cmake/llvm-mingw.cmake" -DCMAKE_BUILD_TYPE=Release`：成功。
+   - `cmake --build build`：成功；最終 configure 後為 `ninja: no work to do.`，程式碼變更後的增量 build 亦成功且無新增 warning。
+   - `ctest --test-dir build -R "rebuild_pipeline|catalog_refresh" --output-on-failure`：2/2 passed。
+   - `ctest --test-dir build --output-on-failure`：32/33 passed；唯一失敗為既知、與本 item 無關的 `nimblerun_startup_option_test`（`FAILED: enable writes the entry` registry-write）。`nimblerun_catalog_refresh_test`、`nimblerun_rebuild_pipeline_test`、lifecycle 與其餘 30 項通過，未嘗試修理該既知失敗。
+   - `rg -n "g_startup_userfolder_pending|kStartupUserFolderMessage" src/app_host/main.cpp`：命中常數、旗標、post、WindowProc case 與 startup set；`rg -n "OnGenerationCompleteRefresh" src/app_host/main.cpp`：命中 definition 與 pipeline callback injection；OnGenerationComplete body source check 無同步 `StartRebuild`／`Request`。
+   - `git diff --check`：無輸出。
+
+7. **未完成事項**：沒有程式範圍遺留，也沒有修改 `docs/design-spec.md`。本環境曾嘗試直接啟動 Release `NimbleRun.exe` 但遇到 `0xc0000142`，因此沒有宣稱桌面上的冷啟動／Alt+3 手動驗收；自動化 pipeline、lifecycle 與完整測試證據如上。其餘全來源 rebuild、coordinator generation 語意與 NR-113 cache trust model 均依 non-goal 未動。
