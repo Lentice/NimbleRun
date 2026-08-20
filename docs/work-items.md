@@ -228,6 +228,10 @@
 | NR-189 | 死碼與重複收斂（第十七次稽核 ponytail 軸，P-1~P-9） | 3 | `done` | — | [NR-189](work-items/NR-189-dead-code-cleanup-lane.md) |
 | NR-190 | Optional English input mode on panel show | 5 | `done` | NR-004, NR-010, NR-013 | [NR-190](work-items/NR-190-input-english-on-panel-show.md) |
 | NR-191 | recent_count 範圍擴至 1～1000，並在 blur 自動夾限越界輸入 | 5 | `done` | NR-004, NR-013 | [NR-191](work-items/NR-191-recent-count-range-and-blur-clamp.md) |
+| NR-192 | Catalog rebuild worker 執行緒改為 background priority | 3 | `ready` | NR-132 | [NR-192](work-items/NR-192-rebuild-worker-background-priority.md) |
+| NR-193 | 自訂資料夾遞迴深度改為有限整數上限（拿掉 recursive bool、無無限制選項） | 2 | `ready` | NR-004, NR-013, NR-019, NR-096 | [NR-193](work-items/NR-193-user-folder-max-depth.md) |
+| NR-194 | UserFolder 掃描拿掉同步開檔可讀性檢查（實測唯一瓶頸，122 倍） | 2 | `ready` | NR-019, NR-137, NR-022 | [NR-194](work-items/NR-194-user-folder-drop-readability-probe.md) |
+| NR-195 | 開機重建先跑 StartMenu/AppsFolder，UserFolder 延後成第二階段 generation | 3 | `ready` | NR-132, NR-081, NR-116, NR-118 | [NR-195](work-items/NR-195-startup-rebuild-fast-sources-first.md) |
 
 ## Dependency lanes
 
@@ -585,6 +589,39 @@ NR-187（Save 失敗診斷＋ShowInfoBalloon NUL）── 無依賴；MEDIUM
 NR-188（文件漂移：31→32、release evidence、AGENTS/README baseline）── 無依賴；LOW
 NR-189（死碼收斂 P-1~P-9）── 最後做；所有其他 item 完成後行號不再移動
 ```
+
+## 稽核修補 lane 18（NR-192～NR-195，2026-08-20 rebuild 效能調查產出）
+
+使用者回報冷開機後透過 hotkey 叫出面板、Alt+3 啟動 pin 項目（Obsidian）出現「還在準備中」訊息。先加入 per-source
+rebuild 耗時診斷（`rebuild-ms <source> <ms>`），實測冷開機數字：`startmenu 3954ms`、`appsfolder 938ms`、
+`userfolder 21641ms`——推翻了「AppsFolder 較慢」的原始猜測，UserFolder（使用者自訂 root `D:\Program files`，
+遞迴）才是瓶頸，且拖住整個 generation（`GenerationComplete` 要求全部來源回報才發布 merged snapshot）。以
+`/herdr` 平行請 opencode 與 codex 獨立評估優化方案，並由 codex 對真實 `D:\Program files` 樹跑三段式 benchmark
+驗證根因：`WalkDirectory()` 本身（208ms）與最簡陽春 walker（204ms）幾乎同速，`IsReadableRegularFile()` 的同步
+`CreateFileW`+`CloseHandle` probe 才是唯一瓶頸（含 probe 25,371ms，122 倍），且這棵樹的 302 次 probe 全數成功、
+沒換到任何過濾效果。`grill-with-docs`／domain-modeling 逐輪確認後收斂成 4 個技術上互不依賴的 item：
+
+```
+NR-192（rebuild worker background priority）── 依賴 NR-132（done）；MEDIUM；
+        關閉一個 §FR-008 已明文要求（AppsFolder on-demand refresh「背景低優先序」）但從未實作的缺口，
+        擴大套用到 RebuildPipeline 全部三個來源的 worker
+NR-193（自訂資料夾 max depth）── 依賴 NR-004/NR-013/NR-019/NR-096（done）；MEDIUM；
+        recursive: bool 合併成有限整數深度（0..50，預設 20，無無限制 sentinel）；關鍵風險是
+        settings_store.cpp 的 kSchemaVersion 必須先補 OlderSchema 遷移分支（比照 pin_store.cpp
+        NR-062 的既有模式）才能 bump，否則既有使用者的 settings.ini 會被整檔判定 Corrupt 並清空
+NR-194（UserFolder 拿掉開檔 probe）── 依賴 NR-019/NR-137/NR-022（done）；HIGH；實測證實的唯一瓶頸，
+        拿掉後從 ~21-25 秒降到 ~0.2 秒；覆寫 §FR-005「必須是可讀取的普通檔案」，改為與 .lnk/.appref-ms
+        一致，交給 Shell 在啟動時判斷、不做使用者可切換的 toggle
+NR-195（開機重建拆兩階段 generation）── 依賴 NR-132/NR-081/NR-116/NR-118（done）；HIGH；直接對應使用者
+        回報的原始症狀根因；只改開機這一個呼叫點（其餘三個全來源呼叫點不動），靠一次性旗標＋既有
+        WM_APP 訊息模式串接 on_complete_，避免同步重入 RebuildPipeline::Start()；診斷寫入順序必須排在
+        BeginGeneration({UserFolder}) 重設 generation_diagnostics_ 之前
+```
+
+四項彼此獨立、可分開落地；NR-194／NR-192 對 NR-195 的第二階段 UserFolder 掃描有加成但非阻塞依賴。
+`grill-with-docs` 過程中額外確認：Windows Search 索引與 NTFS USN Journal 都不適用（前者預設不索引
+Program Files 類路徑且非同步、後者需要系統管理員權限，違反 `AGENTS.md` 的 no-admin 紅線），現有
+`FindFirstFileW`/`FindNextFileW` 遞迴走法已是限制下對的做法。
 
 ## 計畫決策紀錄
 
