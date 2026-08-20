@@ -150,8 +150,10 @@ void RebuildPipeline::Start(std::vector<CatalogSource> sources) {
                     result = new RebuildResult;
                     result->generation = generation;
                     result->source = source;
+                    const std::int64_t started_ms = NowMs();
                     RebuildEnumeration enumeration =
                         enumerate_source_(source, snapshot, cancel_flag.get());
+                    result->duration_ms = NowMs() - started_ms;
                     result->failed = !enumeration.source_ok;
                     // NR-173: the enumeration result is moved into
                     // RebuildResult; no copy is retained.
@@ -266,11 +268,13 @@ LRESULT RebuildPipeline::OnResultMessage(WPARAM, LPARAM l_param) {
     if (!result) return 0;
     bool applied = false;
     if (result->failed) {
-        applied = refresh_.ApplySourceFailure(result->generation, result->source);
+        applied = refresh_.ApplySourceFailure(result->generation, result->source,
+                                              result->duration_ms);
     } else {
         applied = refresh_.ApplySourceResult(result->generation, result->source,
                                              std::move(result->entries),
-                                             result->diagnostics);
+                                             result->diagnostics,
+                                             result->duration_ms);
         if (applied && result->source == CatalogSource::AppsFolder) {
             refresh_.RecordAppsFolderSuccess(NowMs());
         }

@@ -919,6 +919,18 @@ void TestRebuildDiagnosticLines() {
            "three lines cover all four counts");
 }
 
+void TestGenerationDiagnosticsDuration() {
+    CatalogRefreshCoordinator c;
+    const auto gen = c.BeginGeneration({CatalogSource::AppsFolder});
+    c.ApplySourceFailure(gen, CatalogSource::AppsFolder, 42);
+    Expect(c.LastGenerationDiagnostics().apps_folder_ms == 42,
+           "source failure records AppsFolder duration");
+    const auto lines = RebuildDiagnosticLines(c.LastGenerationDiagnostics());
+    Expect(std::find(lines.begin(), lines.end(), L"rebuild-ms appsfolder 42") !=
+               lines.end(),
+           "diagnostic lines include AppsFolder duration");
+}
+
 // NR-124: ApplySourceResult folds the enumerator's per-source counts into the
 // generation's diagnostics as sources report; a source that failed (or was
 // cancelled) never contributes.
@@ -1024,6 +1036,7 @@ int wmain() {
     TestSuccessNeverTriggers();
     TestSettingsCopyIsIndependent();
     TestRebuildDiagnosticLines();
+    TestGenerationDiagnosticsDuration();
     TestGenerationDiagnosticsAggregation();
     TestGenerationDiagnosticsIncludesDedupCounts();
     std::printf("NR-011/NR-022 catalog refresh check PASSED\n");

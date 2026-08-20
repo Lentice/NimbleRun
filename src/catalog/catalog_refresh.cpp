@@ -110,9 +110,17 @@ void CatalogRefreshCoordinator::ClearPendingIfEventUnchanged(
 bool CatalogRefreshCoordinator::ApplySourceResult(std::uint64_t generation,
                                                   CatalogSource source,
                                                   std::vector<AppEntry> entries,
-                                                  const GenerationDiagnostics& diagnostics) {
+                                                  const GenerationDiagnostics& diagnostics,
+                                                  std::int64_t duration_ms) {
     if (!IsActiveGenerationSource(generation, source)) {
         return false;
+    }
+    if (duration_ms >= 0) {
+        switch (source) {
+            case CatalogSource::StartMenu: generation_diagnostics_.start_menu_ms = duration_ms; break;
+            case CatalogSource::AppsFolder: generation_diagnostics_.apps_folder_ms = duration_ms; break;
+            case CatalogSource::UserFolder: generation_diagnostics_.user_folder_ms = duration_ms; break;
+        }
     }
     // NR-124: fold the enumerator's counts into the generation diagnostics. A
     // source that failed never reaches this path, so a partial/failed walk's
@@ -129,9 +137,17 @@ bool CatalogRefreshCoordinator::ApplySourceResult(std::uint64_t generation,
 }
 
 bool CatalogRefreshCoordinator::ApplySourceFailure(std::uint64_t generation,
-                                                   CatalogSource source) {
+                                                   CatalogSource source,
+                                                   std::int64_t duration_ms) {
     if (!IsActiveGenerationSource(generation, source)) {
         return false;
+    }
+    if (duration_ms >= 0) {
+        switch (source) {
+            case CatalogSource::StartMenu: generation_diagnostics_.start_menu_ms = duration_ms; break;
+            case CatalogSource::AppsFolder: generation_diagnostics_.apps_folder_ms = duration_ms; break;
+            case CatalogSource::UserFolder: generation_diagnostics_.user_folder_ms = duration_ms; break;
+        }
     }
     ClearPendingIfEventUnchanged(source, generation_event_snapshot_.at(source));
     received_[source] = true;  // the source's old entries stay; others still apply
@@ -246,6 +262,19 @@ std::vector<std::wstring> RebuildDiagnosticLines(const GenerationDiagnostics& d)
     if (d.ambiguous_kept != 0 || d.removed_duplicates != 0) {
         lines.push_back(L"dedup ambiguous " + std::to_wstring(d.ambiguous_kept) +
                         L" removed " + std::to_wstring(d.removed_duplicates));
+    }
+    for (const CatalogSource source : kSources) {
+        std::int64_t duration_ms = -1;
+        const wchar_t* token = L"";
+        switch (source) {
+            case CatalogSource::StartMenu: duration_ms = d.start_menu_ms; token = L"startmenu"; break;
+            case CatalogSource::AppsFolder: duration_ms = d.apps_folder_ms; token = L"appsfolder"; break;
+            case CatalogSource::UserFolder: duration_ms = d.user_folder_ms; token = L"userfolder"; break;
+        }
+        if (duration_ms >= 0) {
+            lines.push_back(L"rebuild-ms " + std::wstring(token) + L" " +
+                            std::to_wstring(duration_ms));
+        }
     }
     return lines;
 }

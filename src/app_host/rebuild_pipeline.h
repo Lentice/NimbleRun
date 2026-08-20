@@ -23,6 +23,7 @@ namespace nimblerun {
 struct RebuildResult {
     std::uint64_t generation = 0;
     CatalogSource source = CatalogSource::StartMenu;
+    std::int64_t duration_ms = -1;
     bool failed = false;
     std::vector<AppEntry> entries;
     GenerationDiagnostics diagnostics;

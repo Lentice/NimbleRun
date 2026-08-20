@@ -34,6 +34,9 @@ struct GenerationDiagnostics {
     std::size_t skipped_directories = 0;  // UserFolder: unopenable dirs skipped
     std::size_t ambiguous_kept = 0;       // dedup: kept unjudgeable name peers
     std::size_t removed_duplicates = 0;   // dedup: collapsed exact duplicates
+    std::int64_t start_menu_ms = -1;
+    std::int64_t apps_folder_ms = -1;
+    std::int64_t user_folder_ms = -1;
 };
 
 // Pure refresh coordinator (NR-011, design-spec §FR-008): owns per-source
@@ -89,11 +92,13 @@ public:
     // LastGenerationDiagnostics() for this generation.
     bool ApplySourceResult(std::uint64_t generation, CatalogSource source,
                            std::vector<AppEntry> entries,
-                           const GenerationDiagnostics& diagnostics = {});
+                           const GenerationDiagnostics& diagnostics = {},
+                           std::int64_t duration_ms = -1);
 
     // Records one source's failure for `generation`: the source keeps its old
     // entries, other sources' results still apply (design-spec §FR-008).
-    bool ApplySourceFailure(std::uint64_t generation, CatalogSource source);
+    bool ApplySourceFailure(std::uint64_t generation, CatalogSource source,
+                            std::int64_t duration_ms = -1);
 
     // Records a successful AppsFolder enumeration: the staleness clock restarts
     // from `now_ms` and the "never succeeded" state is cleared (NR-095).
