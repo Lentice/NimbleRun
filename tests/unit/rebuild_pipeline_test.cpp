@@ -50,6 +50,48 @@ RebuildEnumeration Enumerate(CatalogSource source, const Settings&,
     return result;
 }
 
+void TestBackgroundPriorityAttemptIsNonFatal() {
+    CatalogRefreshCoordinator refresh;
+    std::vector<Posted> posts;
+    std::mutex posts_mutex;
+    std::atomic<bool> enumerated = false;
+    RebuildPipeline pipeline(
+        refresh, [] { return Settings{}; },
+        [&](UINT message, WPARAM w_param, LPARAM l_param) {
+            std::lock_guard<std::mutex> lock(posts_mutex);
+            posts.push_back({message, w_param, l_param});
+            return true;
+        },
+        [&](CatalogSource source, const Settings& settings, std::atomic<bool>* cancel) {
+            enumerated.store(true);
+            return Enumerate(source, settings, cancel);
+        },
+        [] {}, [] {}, [] {}, {},
+        [](std::function<void()> fn) {
+            return std::thread([fn = std::move(fn)]() mutable {
+                // Seed background mode so the pipeline's second best-effort
+                // request exercises a non-fatal priority-setting path.
+                (void)SetThreadPriority(GetCurrentThread(),
+                                        THREAD_MODE_BACKGROUND_BEGIN);
+                fn();
+            });
+        });
+
+    pipeline.Request({CatalogSource::StartMenu}, RebuildReason::Explicit);
+    Expect(WaitForPosts(posts, posts_mutex, 1),
+           "background priority attempt still posts the source result");
+    Posted result{};
+    {
+        std::lock_guard<std::mutex> lock(posts_mutex);
+        result = posts.front();
+    }
+    pipeline.OnResultMessage(result.w_param, result.l_param);
+    Expect(enumerated.load(),
+           "a background priority failure does not skip enumeration");
+    Expect(!refresh.IsRebuildInProgress(),
+           "a background priority failure does not fail the generation");
+}
+
 void TestDeliveryFailureCompletesOnce() {
     CatalogRefreshCoordinator refresh;
     std::vector<Posted> posts;
@@ -475,6 +517,7 @@ void TestStartBoundedSupersedeAndFreshCancelFlag() {
 } // namespace
 
 int wmain() {
+    TestBackgroundPriorityAttemptIsNonFatal();
     TestDeliveryFailureCompletesOnce();
     TestThreadCreationFailureCompletes();
     TestCacheFailureRetention();

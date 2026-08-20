@@ -94,3 +94,60 @@ Focused runnable coverage必須包含：驗證 worker lambda 在呼叫 `enumerat
 - `kJoinTimeoutMs`／`Shutdown()`／NR-123／NR-182 行為未變的證據（grep 或既有測試通過紀錄）。
 - `docs/design-spec.md` §9.2 的修改內容與行號。
 - Agent checks 的完整命令與結果。
+
+## 交接區（2026-08-20，實作完成）
+
+### 實作與 caller 覆蓋
+
+- `src/app_host/rebuild_pipeline.cpp:156-157` 的 worker lambda 在
+  `enumerate_source_`（`:159`）前呼叫
+  `SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN)`；回傳值以
+  `(void)` 明確忽略。這是 best-effort scheduling hint，失敗不呼叫 `on_exception_`、不改
+  `result->failed`，列舉仍會繼續。
+- 沒有修改 `ThreadFactory` 簽名、`Start()`／`Shutdown()` 的 join、detach、generation 或
+  cancel 旗標。三個來源都共用同一個 worker lambda：`main.cpp:3274-3288` 的
+  StartMenu、AppsFolder、UserFolder enumeration callback 會經同一條 pipeline。
+- 四個既有使用者入口均間接走到該 lambda：冷啟動 `main.cpp:3437`、Ctrl+R／tray 的
+  `kRefreshMessage` `main.cpp:2591`、設定套用 `main.cpp:2645`；Ctrl+R 與 tray 共用同一
+  個 Refresh handler。額外的 launch-failure refresh `main.cpp:1090` 與 AppsFolder
+  on-demand `main.cpp:2052` 也走同一 `StartRebuild`，沒有旁路。
+
+### focused coverage 與不變行為
+
+- `tests/unit/rebuild_pipeline_test.cpp:50-92` 新增
+  `TestBackgroundPriorityAttemptIsNonFatal`。既有 `ThreadFactory` 注入的 worker 先嘗試
+  進入 background mode，再執行 pipeline 的第二次 best-effort priority attempt；測試以
+  真實 worker 結果斷言 enumeration 仍被呼叫、result 仍 post、generation 仍完成。這個
+  測試不新增 priority seam；呼叫順序由 source grep 確認，API 回傳值由 production code
+  忽略，因此 kernel-side priority failure 不會變成 catalog failure。
+- `src/app_host/rebuild_pipeline.h:48-88` 與 `.cpp:119-123,348-371` 的
+  `kJoinTimeoutMs=5000`、`Shutdown()`、NR-123 detach fallback、NR-182 per-generation
+  cancel flag 均未改動；sanity grep 仍只看到既有 bounded-wait 路徑，`TerminateThread`
+  沒有新增命中。
+- `docs/design-spec.md:704-705` 的 §9.2 現在寫明 Scan worker 在來源列舉前進入低優先序
+  background mode，降低 CPU、I/O 與記憶體優先權；§FR-008 未改動。
+
+### Agent checks
+
+- `cmake -S . -B build -G Ninja -D"CMAKE_TOOLCHAIN_FILE=cmake/llvm-mingw.cmake" -DCMAKE_BUILD_TYPE=Release`
+  → configure 成功。
+- 第一次 `cmake --build build` 已完成所有本項編譯與測試 target，但最後重連
+  `NimbleRun.exe` 因既有 PID 20556 鎖定檔案而回傳 Permission denied；確認該 PID 的完整路徑
+  是 `E:\GitHub\NimbleRun\build\NimbleRun.exe` 後停止該程序，重跑相同命令 → 成功，最後輸出
+  `[1/1] Linking CXX executable NimbleRun.exe`。
+- `ctest --test-dir build -R "rebuild_pipeline" --output-on-failure`
+  → **1/1 Passed**（`nimblerun_rebuild_pipeline_test`，11.84 s）。
+- `ctest --test-dir build --output-on-failure`
+  → **32/33 Passed**；唯一失敗為已知、與本 item 無關的
+  `nimblerun_startup_option_test`（`FAILED: enable writes the entry`，registry-write
+  permission failure）。`nimblerun_rebuild_pipeline_test`（11.64 s）與
+  `nimblerun_lifecycle_check`（5.04 s）均 Passed；沒有修補或放寬該既有測試。
+- `rg -n "THREAD_MODE_BACKGROUND_BEGIN|SetThreadPriority" src/app_host/rebuild_pipeline.cpp`
+  → `156-157`；`rg -n "低優先序|THREAD_MODE_BACKGROUND" docs/design-spec.md` →
+  `413`（既有 FR-008）、`704-706`（本項 §9.2／既有 Icon worker）。`git diff --check`
+  → 通過。
+
+### 未完成
+
+- 無。此 item 沒有新增需要桌面人工確認的 UI 行為；完整測試的既有 registry-write failure
+  已如上記錄，未由本項造成。

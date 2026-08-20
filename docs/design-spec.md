@@ -701,7 +701,8 @@ flowchart TD
 ### 9.2 執行緒模型
 
 - UI thread：Win32 message loop、HWND、Direct2D、輸入、Catalog snapshot 交換。
-- Scan worker：只在啟動、目錄變更或手動刷新時存在。
+- Scan worker：只在啟動、目錄變更或手動刷新時存在；來源列舉前進入低優先序
+  background mode，降低 CPU、I/O 與記憶體優先權。
 - Icon worker：單一低優先序 worker，依可見項目載入；queue 有上限並可取消過期請求。
 - Directory watcher：優先使用 overlapped I/O 與 UI／worker wait integration；若使用專用 thread，必須長時間阻塞等待事件，不得以固定週期輪詢。
 

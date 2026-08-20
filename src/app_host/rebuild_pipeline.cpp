@@ -151,6 +151,10 @@ void RebuildPipeline::Start(std::vector<CatalogSource> sources) {
                     result->generation = generation;
                     result->source = source;
                     const std::int64_t started_ms = NowMs();
+                    // NR-192: catalog scans are best-effort background work;
+                    // a priority-setting failure must not fail the source.
+                    (void)SetThreadPriority(GetCurrentThread(),
+                                            THREAD_MODE_BACKGROUND_BEGIN);
                     RebuildEnumeration enumeration =
                         enumerate_source_(source, snapshot, cancel_flag.get());
                     result->duration_ms = NowMs() - started_ms;
