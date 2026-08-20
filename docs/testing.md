@@ -15,8 +15,10 @@ ctest --test-dir build --output-on-failure
 - **Release evidence** (`tests/release/release_evidence.ps1`): builds, runs the full suite, records process smoke context, and regenerates `docs/release-evidence.md`. The report has one row for every NFR-001 blocking metric; any row that is not measured with its required profile makes the result `INCOMPLETE` and the runner exits non-zero. Run manually before a release with `pwsh -NoProfile -File tests/release/release_evidence.ps1`; it is not registered as a `ctest` test.
 
 The startup-option test performs an isolated HKCU registry write. A restricted
-sandbox may report that test as skipped with a clear capability message; rerun
-the suite in an elevated context before treating it as release evidence.
+sandbox may report that test as skipped with a clear capability message. The
+release-evidence runner marks skipped CTest tests as incomplete and exits
+non-zero; rerun the suite outside the restricted sandbox before treating it as
+release evidence.
 
 ## Manual smoke test
 

@@ -107,11 +107,25 @@ $ctest = Invoke-Capture 'ctest full suite' {
 # mark the report STALE when it does not match the registered count -- so a
 # future registration change cannot silently produce a stale report again.
 $executedTests = $null
+$skippedTestNames = @()
+$hasSkippedOutput = $false
 foreach ($line in $ctest.Lines) {
     if ($line -match 'out of\s+(\d+)(?:\s*tests?)?') { $executedTests = [int]$matches[1] }
+    if ($line -match '^\s*\d+\s+-\s+(.+?)\s+\(Skipped\)\s*$') {
+        $skippedTestNames += $matches[1]
+    }
+    if ($line -match '\*\*\*Skipped') { $hasSkippedOutput = $true }
 }
 $stale = ($null -eq $executedTests) -or ($executedTests -ne $registeredTests)
 $executedDisplay = if ($null -eq $executedTests) { 'unparsed' } else { $executedTests }
+$ctestSkipped = $hasSkippedOutput -or ($skippedTestNames.Count -gt 0)
+$skippedTestsDisplay = if ($skippedTestNames.Count -gt 0) {
+    $skippedTestNames -join ', '
+} elseif ($ctestSkipped) {
+    'detected (test name unavailable)'
+} else {
+    'none'
+}
 
 # ---- Process smoke + soak + measurements ---------------------------------
 # A resident instance's idle thread count and working set, measured while the
@@ -230,7 +244,13 @@ $gate += "CTest is a separate release gate; its registration count comes from li
 $gate += ""
 $gate += "| Metric | Threshold | Measurement source | Measured | Value | Verdict |"
 $gate += "|---|---|---|---|---|---|"
-$gate += "| CTest registration vs executed | registered == executed | live ctest -N vs full-suite output | measured | registered $registeredTests vs executed $executedDisplay | $(if ($stale) { 'STALE' } else { 'PASS' }) |"
+$ctestVerdict = if ($stale) { 'STALE' } elseif ($ctestSkipped) { 'INCOMPLETE' } else { 'PASS' }
+$gate += "| CTest registration vs executed | registered == executed | live ctest -N vs full-suite output | measured | registered $registeredTests vs executed $executedDisplay | $ctestVerdict |"
+$gate += "| CTest skipped tests | 0 | full-suite output | measured | $skippedTestsDisplay | $(if ($ctestSkipped) { 'INCOMPLETE' } else { 'PASS' }) |"
+if ($ctestSkipped) {
+    $gate += ""
+    $gate += "CTest skipped tests are not release evidence; rerun outside the restricted sandbox."
+}
 
 # Sub-threshold items that are not hard gates are recorded as known issues.
 $gate += ""
@@ -265,7 +285,7 @@ foreach ($item in @($configure, $build, $ctest)) {
 $sections += $process
 $sections += $gate
 
-$gateFailure = $stale -or ($metricFailures.Count -gt 0)
+$gateFailure = $stale -or $ctestSkipped -or ($metricFailures.Count -gt 0)
 $incomplete = $metricIncomplete.Count -gt 0
 $exitFailures = $configure.Exit -or $build.Exit -or $ctest.Exit -or ($smokeFailures -gt 0) -or ($soakFailures -gt 0) -or $gateFailure
 
@@ -273,6 +293,8 @@ $sections += "## Result"
 $sections += ""
 $result = if ($incomplete) {
     if ($exitFailures) { 'INCOMPLETE (blocking NFR-001 metrics are not measured; another gate also failed)' } else { 'INCOMPLETE (one or more blocking NFR-001 metrics are not measured)' }
+} elseif ($ctestSkipped) {
+    'INCOMPLETE (one or more CTest tests were skipped)'
 } elseif ($exitFailures) {
     'FAILED (build/test/process/threshold gate failed)'
 } else {
@@ -287,6 +309,9 @@ Write-Output "Evidence written to $OutPath"
 if ($exitFailures) {
     if ($stale) {
         Write-Output "STALE: registered CTest count ($registeredTests) differs from the executed count ($executedDisplay). Regenerate after a clean build + ctest run."
+    }
+    if ($ctestSkipped) {
+        Write-Output "CTest skipped tests: $skippedTestsDisplay. Rerun outside the restricted sandbox before treating evidence as release-ready."
     }
     if ($incomplete) {
         Write-Output 'Evidence is incomplete: one or more blocking NFR-001 metrics are not measured.'
