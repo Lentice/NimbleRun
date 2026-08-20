@@ -134,6 +134,14 @@ foreach(entry IN LISTS NIMBLERUN_TESTS_TAIL)
     add_test(NAME ${test_name} COMMAND ${test_name})
 endforeach()
 
+# HKCU registry writes are a host capability. A sandbox may deny the isolated
+# test key even though the startup option code is correct; the test prints the
+# reason and returns 77, which CTest reports as skipped. Other registry errors
+# remain hard failures.
+set_tests_properties(nimblerun_startup_option_test PROPERTIES
+    SKIP_RETURN_CODE 77
+)
+
 if(CMAKE_HOST_WIN32)
     find_program(PWSH_EXECUTABLE pwsh)
     if(PWSH_EXECUTABLE)

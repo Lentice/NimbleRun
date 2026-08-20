@@ -39,6 +39,8 @@ using nimblerun::StartupOptionRegistry;
 
 namespace {
 
+constexpr int kEnvironmentSkipped = 77;
+
 std::wstring TestSubkey() {
     return L"Software\\NimbleRunTest\\" + std::to_wstring(GetCurrentProcessId());
 }
@@ -56,6 +58,55 @@ StartupOptionRegistry TestRegistry() {
 void RemoveTestKey() {
     RegDeleteTreeW(HKEY_CURRENT_USER, TestSubkey().c_str());
     RegDeleteKeyW(HKEY_CURRENT_USER, L"Software\\NimbleRunTest");
+}
+
+bool IsRegistryAccessBlocked(LONG status) {
+    return status == ERROR_ACCESS_DENIED || status == ERROR_PRIVILEGE_NOT_HELD;
+}
+
+int RegistryWritePreflight() {
+    RemoveTestKey();
+    HKEY key = nullptr;
+    LONG status = RegCreateKeyExW(HKEY_CURRENT_USER, TestSubkey().c_str(), 0,
+                                  nullptr, REG_OPTION_NON_VOLATILE,
+                                  KEY_SET_VALUE, nullptr, &key, nullptr);
+    if (status != ERROR_SUCCESS) {
+        if (IsRegistryAccessBlocked(status)) {
+            std::printf("SKIPPED: HKCU registry write unavailable (Win32 error %ld); "
+                        "rerun this test elevated.\n", status);
+            return kEnvironmentSkipped;
+        }
+        std::printf("FAILED: HKCU registry preflight could not create the test key "
+                    "(Win32 error %ld)\n", status);
+        return 1;
+    }
+
+    constexpr wchar_t kProbeName[] = L"__NimbleRunRegistryProbe";
+    constexpr wchar_t kProbeValue[] = L"probe";
+    status = RegSetValueExW(
+        key, kProbeName, 0, REG_SZ,
+        reinterpret_cast<const BYTE*>(kProbeValue),
+        static_cast<DWORD>(sizeof(kProbeValue)));
+    const LONG cleanup_status = RegDeleteValueW(key, kProbeName);
+    RegCloseKey(key);
+    RemoveTestKey();
+
+    if (status != ERROR_SUCCESS) {
+        if (IsRegistryAccessBlocked(status)) {
+            std::printf("SKIPPED: HKCU registry write unavailable (Win32 error %ld); "
+                        "rerun this test elevated.\n", status);
+            return kEnvironmentSkipped;
+        }
+        std::printf("FAILED: HKCU registry preflight could not write the test value "
+                    "(Win32 error %ld)\n", status);
+        return 1;
+    }
+    if (cleanup_status != ERROR_SUCCESS && cleanup_status != ERROR_FILE_NOT_FOUND) {
+        std::printf("FAILED: HKCU registry preflight could not clean up "
+                    "(Win32 error %ld)\n", cleanup_status);
+        return 1;
+    }
+    return 0;
 }
 
 std::wstring ModulePath() {
@@ -250,6 +301,10 @@ void TestStartupStringsCentralized() {
 } // namespace
 
 int wmain() {
+    const int preflight = RegistryWritePreflight();
+    if (preflight != 0) {
+        return preflight;
+    }
     TestEnableCreatesEntry();
     TestDisableRemovesOnlyOwnValue();
     TestDisableIsNoopWhenAbsent();
