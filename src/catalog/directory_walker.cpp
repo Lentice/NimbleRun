@@ -12,7 +12,9 @@ bool WalkDirectoryAtDepth(const std::wstring& directory, const WalkOptions& opti
     }
     const std::wstring pattern = directory + L"\\*";
     WIN32_FIND_DATAW find_data{};
-    const HANDLE find = FindFirstFileW(pattern.c_str(), &find_data);
+    const HANDLE find = FindFirstFileExW(
+        pattern.c_str(), FindExInfoBasic, &find_data, FindExSearchNameMatch,
+        nullptr, 0);
     if (find == INVALID_HANDLE_VALUE) {
         if (on_directory_unavailable) {
             on_directory_unavailable();
