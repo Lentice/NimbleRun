@@ -9,7 +9,7 @@
 namespace nimblerun {
 
 struct WalkOptions {
-    bool recursive = true;
+    int max_depth = 20;
     std::atomic<bool>* cancel = nullptr;
 };
 

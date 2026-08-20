@@ -136,8 +136,8 @@ void TestMergeAndAllowlist() {
     WriteBytes(root_b + L"\\Sub\\AppI.exe", "dummy");
 
     Settings settings;
-    settings.catalog_roots.push_back({root_a, true});
-    settings.catalog_roots.push_back({root_b, false});
+    settings.catalog_roots.push_back({root_a, 20});
+    settings.catalog_roots.push_back({root_b, 0});
     settings.catalog_extensions = DefaultExtensions();
 
     const nimblerun::UserFolderEnumerateResult result = EnumerateUserFolderCatalog(settings);
@@ -179,15 +179,15 @@ void TestMergeAndAllowlist() {
     RemoveTreeBestEffort(base);
 }
 
-void TestRecursiveFlag() {
-    const std::wstring base = MakeTempDir("recursive");
+void TestMaxDepth() {
+    const std::wstring base = MakeTempDir("max_depth");
     const std::wstring root = base + L"\\Root";
     WriteBytes(root + L"\\Top.exe", "dummy");
     WriteBytes(root + L"\\Sub\\Deep.exe", "dummy");
     WriteBytes(root + L"\\Sub\\Inner\\Deeper.exe", "dummy");
 
     Settings flat;
-    flat.catalog_roots.push_back({root, false});
+    flat.catalog_roots.push_back({root, 0});
     flat.catalog_extensions = DefaultExtensions();
     const std::vector<AppEntry> flat_entries = EnumerateUserFolderCatalog(flat).entries;
     Expect(FindByName(flat_entries, L"Top") != nullptr, "flat lists first level");
@@ -196,7 +196,7 @@ void TestRecursiveFlag() {
     Expect(flat_entries.size() == 1, "flat count");
 
     Settings deep;
-    deep.catalog_roots.push_back({root, true});
+    deep.catalog_roots.push_back({root, 2});
     deep.catalog_extensions = DefaultExtensions();
     const std::vector<AppEntry> deep_entries = EnumerateUserFolderCatalog(deep).entries;
     Expect(FindByName(deep_entries, L"Top") != nullptr, "recursive lists first level");
@@ -216,7 +216,7 @@ void TestCaseInsensitiveExtensionsAndUnicode() {
     WriteBytes(root + L"\\深層\\App 工具.exe", "dummy");
 
     Settings settings;
-    settings.catalog_roots.push_back({root, true});
+    settings.catalog_roots.push_back({root, 20});
     // Mixed-case allowlist: the enumerator matches case-insensitively.
     settings.catalog_extensions = {L".EXE", L".cmd"};
 
@@ -256,11 +256,11 @@ void TestDuplicateRootsAndErrorIsolation() {
     WriteBytes(file_as_root, "not a directory");
 
     Settings settings;
-    settings.catalog_roots.push_back({good, true});
-    settings.catalog_roots.push_back({good, true});                    // duplicate root
-    settings.catalog_roots.push_back({base + L"\\missing", true});     // non-existent root
-    settings.catalog_roots.push_back({file_as_root, false});           // unreadable root
-    settings.catalog_roots.push_back({L"\\\\server\\share", true});    // UNC rejected defensively
+    settings.catalog_roots.push_back({good, 20});
+    settings.catalog_roots.push_back({good, 20});                    // duplicate root
+    settings.catalog_roots.push_back({base + L"\\missing", 20});     // non-existent root
+    settings.catalog_roots.push_back({file_as_root, 0});              // unreadable root
+    settings.catalog_roots.push_back({L"\\\\server\\share", 20}); // UNC rejected defensively
     settings.catalog_extensions = DefaultExtensions();
 
     const nimblerun::UserFolderEnumerateResult result = EnumerateUserFolderCatalog(settings);
@@ -298,7 +298,7 @@ void TestSourceSanityCheck() {
 
 int wmain() {
     TestMergeAndAllowlist();
-    TestRecursiveFlag();
+    TestMaxDepth();
     TestCaseInsensitiveExtensionsAndUnicode();
     TestDuplicateRootsAndErrorIsolation();
     TestSourceSanityCheck();

@@ -16,6 +16,7 @@
 
 #include <string>
 #include <string_view>
+#include <limits>
 #include <utility>
 
 namespace nimblerun {
@@ -258,7 +259,7 @@ bool EnumerateProgramsDirectory(const std::wstring& root, AppSource source,
     }
     std::size_t count = 0;
     const bool ok = WalkDirectory(
-        root, {true, cancel},
+        root, {std::numeric_limits<int>::max(), cancel},
         [&](const std::wstring& path, DWORD) {
             if (AcceptExtension(path)) {
                 ProcessFile(path, source, out, count);

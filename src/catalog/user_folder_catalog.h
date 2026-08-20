@@ -27,8 +27,8 @@ struct UserFolderEnumerateResult {
 };
 
 // Enumerates launchable apps from every user-configured local folder in
-// `settings` (design-spec §FR-005). Each CatalogRoot's `recursive` flag
-// controls subfolder scanning; only files whose extension is in
+// `settings` (design-spec §FR-005). Each CatalogRoot's `max_depth` controls
+// subfolder scanning; only files whose extension is in
 // `settings.catalog_extensions` (matched case-insensitively, falling back to
 // the full allowlist when empty) enter the catalog. Returns plain copyable
 // AppEntry values with source UserFolder, a display name of the file name

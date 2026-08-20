@@ -850,8 +850,8 @@ void TestCacheAtRowCapLoads() {
 // buffers (AGENTS.md), which is the whole basis of the fix in main.cpp.
 void TestSettingsCopyIsIndependent() {
     nimblerun::Settings original;
-    original.catalog_roots.push_back({L"C:\\Tools", /*recursive=*/true});
-    original.catalog_roots.push_back({L"D:\\Games", /*recursive=*/false});
+    original.catalog_roots.push_back({L"C:\\Tools", /*max_depth=*/20});
+    original.catalog_roots.push_back({L"D:\\Games", /*max_depth=*/0});
     original.catalog_extensions = {L".exe", L".lnk"};
     original.include_windows_apps = true;
 
@@ -863,10 +863,10 @@ void TestSettingsCopyIsIndependent() {
     Expect(copy.include_windows_apps, "copied Settings keeps include_windows_apps");
     Expect(copy.catalog_roots.size() == 2, "copied Settings keeps catalog_roots");
     Expect(copy.catalog_roots[0].path == L"C:\\Tools" &&
-               copy.catalog_roots[0].recursive,
+               copy.catalog_roots[0].max_depth == 20,
            "copied root path content survives a mutation of the original");
     Expect(copy.catalog_roots[1].path == L"D:\\Games" &&
-               !copy.catalog_roots[1].recursive,
+               copy.catalog_roots[1].max_depth == 0,
            "second copied root survives too");
     Expect(copy.catalog_extensions.size() == 2 &&
                copy.catalog_extensions[0] == L".exe" &&

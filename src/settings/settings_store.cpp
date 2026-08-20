@@ -18,7 +18,7 @@ namespace nimblerun {
 namespace {
 
 constexpr std::wstring_view kFileName = L"settings.ini";
-constexpr int kSchemaVersion = 1;
+constexpr int kSchemaVersion = 2;
 
 std::optional<bool> ParseBool(std::wstring_view text) {
     const std::wstring value = ToLower(Trim(text));
@@ -97,7 +97,7 @@ bool IsLocalAbsolutePath(std::wstring_view value) {
     if (!IsAcceptableDriveType(DriveTypeOfRoot(trimmed))) {
         return false;
     }
-    // A bare volume root would make the recursive scan walk the whole drive
+    // A bare volume root would make the deep scan walk the whole drive
     // (design-spec §19.5). After the shape check, exactly three characters can
     // only be "X:\" or "X:/"; "C:\Tools\" is longer and stays acceptable.
     if (trimmed.size() == 3) {
@@ -169,7 +169,9 @@ SettingsLoadResult SettingsStore::Load(Settings& out) const {
     case VersionedReadStatus::NewerSchema:
         write_protected_ = true;
         return SettingsLoadResult::NewerSchema;  // original untouched (design-spec §10.4)
-    default:  // Unreadable / Malformed / OlderSchema
+    case VersionedReadStatus::OlderSchema:
+        break;  // NR-193: schema=1 catalog_root booleans migrate below; Save upgrades to 2.
+    default:  // Unreadable / Malformed
         PreserveCorrupt(directory_, kFileName);
         out = DefaultSettings();  // NR-080: honor "non-Loaded out holds DefaultSettings"
         return SettingsLoadResult::Corrupt;
@@ -243,18 +245,26 @@ SettingsLoadResult SettingsStore::Load(Settings& out) const {
                 out = DefaultSettings();
                 return SettingsLoadResult::Corrupt;
             }
-            // Format: <escaped path>|<recursive 0/1>. '|' cannot appear in a
-            // Windows path, so it is a safe separator.
+            // Format: <escaped path>|<max_depth>. Schema=1 booleans are
+            // accepted below for migration; '|' cannot appear in a Windows
+            // path, so it remains a safe separator.
             const std::size_t bar = value.find(L'|');
             const std::wstring raw_path = bar == std::wstring::npos ? value : value.substr(0, bar);
-            const std::wstring raw_recursive =
+            const std::wstring raw_depth =
                 bar == std::wstring::npos ? std::wstring{} : value.substr(bar + 1);
             const std::wstring path = Trim(raw_path);
             if (IsLocalAbsolutePath(path)) {
                 CatalogRoot root;
                 root.path = path;
-                if (const auto parsed = ParseBool(raw_recursive)) {
-                    root.recursive = *parsed;
+                if (const auto parsed = ParseBool(raw_depth)) {
+                    root.max_depth = *parsed ? root.max_depth : kMinCatalogDepth;
+                } else {
+                    int depth = 0;
+                    if (!ParseInt(raw_depth, depth) ||
+                        depth < kMinCatalogDepth || depth > kMaxCatalogDepth) {
+                        continue;
+                    }
+                    root.max_depth = depth;
                 }
                 out.catalog_roots.push_back(std::move(root));
             }
@@ -297,7 +307,7 @@ bool SettingsStore::Save(const Settings& settings) const {
     text += L"english_input_on_show=" + std::wstring(settings.english_input_on_show ? L"true" : L"false") + L"\n";
     for (const CatalogRoot& root : settings.catalog_roots) {
         text += L"catalog_root=" + EscapeText(root.path) + L"|" +
-                std::wstring(root.recursive ? L"true" : L"false") + L"\n";
+                std::to_wstring(root.max_depth) + L"\n";
     }
     for (const std::wstring& ext : settings.catalog_extensions) {
         text += L"catalog_extension=" + EscapeText(ext) + L"\n";

@@ -85,7 +85,7 @@ UserFolderEnumerateResult EnumerateUserFolderCatalog(const Settings& settings,
         // ponytail: duplicate roots are scanned once each, so a root listed
         // twice yields duplicate entries; NR-007 dedups across sources.
         const bool ok = WalkDirectory(
-            root.path, {root.recursive, cancel},
+            root.path, {root.max_depth, cancel},
             [&](const std::wstring& path, DWORD attributes) {
                 if (ExtensionAllowed(path, extensions)) {
                     ProcessFile(path, attributes, result.entries);

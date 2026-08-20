@@ -376,9 +376,9 @@ Start Menu 與 AppsFolder **共用同一份判準**，集中於單一純值模�
 ### FR-005 使用者自訂資料夾
 
 - 使用者可從設定頁逐一加入或移除多個本機資料夾；設定保存正規化後的絕對路徑。
-- 每個資料夾項目都有獨立的「包含子資料夾」選項；新增時預設勾選，使用者可取消。
+- 每個資料夾項目都有獨立的最大子資料夾深度（0～50，含端點）；新增時預設為 20，0 表示只掃描該資料夾第一層。
 - 只接受本機磁碟路徑；拒絕 UNC、網路磁碟、URI、裝置路徑及命令列內容。
-- 「包含子資料夾」開啟時遞迴掃描；關閉時只掃描該資料夾第一層，不追蹤目錄 symbolic link／reparse point。
+- 依最大深度遞迴掃描，不追蹤目錄 symbolic link／reparse point；深度 0 時不展開子資料夾。
 - 副檔名採大小寫不敏感比對。MVP 由使用者從受支援清單勾選：`.exe`、`.cmd`、`.bat`、`.lnk`、`.appref-ms`；不接受任意副檔名文字。
 - `.exe`、`.cmd`、`.bat` 必須是可讀取的普通檔案；`.lnk` 與 `.appref-ms` 交由 Shell 驗證及啟動。
 - 只建立設定來源中的檔案項目，不搜尋一般文件、資料夾名稱或檔案內容。
@@ -404,7 +404,7 @@ Start Menu 與 AppsFolder **共用同一份判準**，集中於單一純值模�
 ### FR-008 Catalog 更新
 
 - 啟動時先載入有效的 Catalog cache，立即提供舊結果；再背景完整建立一次最新 Catalog。
-- 以 `ReadDirectoryChangesW` 非同步監看兩個 Programs 資料夾及所有已設定的本機資料夾；每個 user-folder watcher 依該路徑的遞迴選項設定 `bWatchSubtree`。
+- 以 `ReadDirectoryChangesW` 非同步監看兩個 Programs 資料夾及所有已設定的本機資料夾；每個 user-folder watcher 依該路徑的 `max_depth > 0` 設定 `bWatchSubtree`，不按深度逐層縮小監看範圍。
 - `ReadDirectoryChangesW` 不支援以副檔名過濾；只要求檔名、目錄名與最後寫入時間等必要通知，收到事件後在 worker 依路徑與副檔名 allowlist 過濾。
 - 收到密集事件時 debounce 500 ms，合併成一次受影響來源的重掃；不因每個檔案事件各建立一次工作。
 - 若通知 buffer 溢位或收到 `ERROR_NOTIFY_ENUM_DIR`，標記來源需要完整重掃；不得假設事件清單仍完整。
@@ -756,7 +756,7 @@ flowchart TD
 ### 10.2 格式選擇
 
 - `settings.ini`：少量 key/value，使用 Win32 profile API 或受測試的自有 reader/writer。
-- `settings.ini` 保存 `catalog_roots`（多個本機絕對路徑及各自的 recursive flag）與 `catalog_extensions`（受支援副檔名清單）；每個值都要經過格式與安全邊界驗證。
+- `settings.ini` 保存 `catalog_roots`（多個本機絕對路徑及各自的 `max_depth` 整數上限）與 `catalog_extensions`（受支援副檔名清單）；每個值都要經過格式與安全邊界驗證。
 - `settings.ini` 的 `english_input_on_show` key 接受 `true`／`false`（預設 `false`）。缺少此 key 的舊版 `settings.ini` 為 backward-compatible default `false`；非法值一律回退 `false`；schema 維持 1，不做 migration。
 - `favorites.txt`：版本化 UTF-8 TSV（schema=2）。第一行為 `schema=2`；其後每行三欄、以 tab 分隔：`<escaped stable_id>`、`<last_seen_utc epoch 秒>`、`<escaped display_name>`，行序即 pin 順序。欄位值一律經 escaping（反斜線跳脫 `\`、`=`、`\n`、`\r`、`\t`），確保值內的 tab／換行不會破壞欄位或列結構。display_name 欄（NR-062）讓 catalog 中已消失的 pin 仍能依名稱顯示；schema=1（兩欄）舊檔仍可讀取，下次存檔時升級為 schema=2。讀取容許同一 schema 的尾端額外欄位（NR-087）。
 - `usage.tsv`：版本化 UTF-8 TSV（schema=1）；欄位為 stable ID、lifetime total launch count、最後啟動 UTC，以 tab 分隔；同一 stable ID 重複時最後一行取勝（Save 以 stable ID 升冪寫出，重複存檔位元組一致）。

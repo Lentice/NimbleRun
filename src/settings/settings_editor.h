@@ -35,7 +35,7 @@ enum class SettingsString {
     AddFolderButton,
     RemoveFolderButton,
     BrowseFolderTitle,
-    IncludeSubfolders,
+    MaxSubfolderDepthLabel,
     ExtensionsLabel,
     ClearUsageButton,
     ResetSettingsButton,
@@ -47,6 +47,7 @@ enum class SettingsString {
     RecentCountNotice,
     SaveFailedNotice,
     FolderInvalidNotice,
+    FolderDepthNotice,
     FolderLimitNotice,  // NR-152: at kMaxCatalogRoots, AddRoot refuses (write/read symmetry)
     ExtensionsNotice,
     ClearUsageDoneNotice,
@@ -77,6 +78,11 @@ std::wstring FormatHotkey(const HotkeyBinding& binding);
 // dialog must leave unchanged on blur (Save/OK keeps validating it). Pure, so
 // the boundary table is testable without an HWND.
 std::optional<int> ClampRecentCountText(std::wstring_view text);
+
+// NR-193: blur-time clamp for the max-subfolder-depth field. Empty,
+// non-numeric, and overflowing text returns nullopt so the dialog leaves it
+// untouched until Save/OK validation.
+std::optional<int> ClampCatalogDepthText(std::wstring_view text);
 
 // Seam for the running global-hotkey swap. The host passes a functor wrapping
 // GlobalHotkey::Swap; tests inject a fake so the model stays HWND-free.
@@ -111,9 +117,9 @@ public:
     bool SetAutoStart(bool enabled);
     bool SetHotkey(std::wstring_view combo);    // empty/invalid/Win-key rejected
     bool SetExtensionEnabled(std::wstring_view extension, bool enabled);
-    bool AddRoot(std::wstring_view path, bool recursive);   // local absolute paths only; at most kMaxCatalogRoots
+    bool AddRoot(std::wstring_view path, int max_depth);    // local absolute paths only; 0..50; at most kMaxCatalogRoots
     bool RemoveRoot(std::size_t index);
-    bool SetRootRecursive(std::size_t index, bool recursive);
+    bool SetRootMaxDepth(std::size_t index, int max_depth);
 
     // Working copy becomes DefaultSettings() (including clearing catalog_roots)
     // and is marked dirty; Apply() persists it. "Reset settings" restores

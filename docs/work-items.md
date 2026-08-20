@@ -229,7 +229,7 @@
 | NR-190 | Optional English input mode on panel show | 5 | `done` | NR-004, NR-010, NR-013 | [NR-190](work-items/NR-190-input-english-on-panel-show.md) |
 | NR-191 | recent_count 範圍擴至 1～1000，並在 blur 自動夾限越界輸入 | 5 | `done` | NR-004, NR-013 | [NR-191](work-items/NR-191-recent-count-range-and-blur-clamp.md) |
 | NR-192 | Catalog rebuild worker 執行緒改為 background priority | 3 | `done` | NR-132 | [NR-192](work-items/NR-192-rebuild-worker-background-priority.md) |
-| NR-193 | 自訂資料夾遞迴深度改為有限整數上限（拿掉 recursive bool、無無限制選項） | 2 | `ready` | NR-004, NR-013, NR-019, NR-096 | [NR-193](work-items/NR-193-user-folder-max-depth.md) |
+| NR-193 | 自訂資料夾遞迴深度改為有限整數上限（拿掉 recursive bool、無無限制選項） | 2 | `done` | NR-004, NR-013, NR-019, NR-096 | [NR-193](work-items/NR-193-user-folder-max-depth.md) |
 | NR-194 | UserFolder 掃描拿掉同步開檔可讀性檢查（實測唯一瓶頸，122 倍） | 2 | `ready` | NR-019, NR-137, NR-022 | [NR-194](work-items/NR-194-user-folder-drop-readability-probe.md) |
 | NR-195 | 開機重建先跑 StartMenu/AppsFolder，UserFolder 延後成第二階段 generation | 3 | `ready` | NR-132, NR-081, NR-116, NR-118 | [NR-195](work-items/NR-195-startup-rebuild-fast-sources-first.md) |
 

@@ -29,6 +29,7 @@
 namespace fs = std::filesystem;
 
 using nimblerun::CatalogRoot;
+using nimblerun::ClampCatalogDepthText;
 using nimblerun::ClampRecentCountText;
 using nimblerun::DefaultSettings;
 using nimblerun::FormatHotkey;
@@ -43,7 +44,9 @@ using nimblerun::SettingsString;
 using nimblerun::SettingsStringText;
 using nimblerun::Theme;
 using nimblerun::UsageStore;
+using nimblerun::kMaxCatalogDepth;
 using nimblerun::kMaxCatalogRoots;
+using nimblerun::kMinCatalogDepth;
 
 namespace {
 
@@ -72,7 +75,7 @@ bool SameBinding(const HotkeyBinding& a, const HotkeyBinding& b) {
 }
 
 bool SameRoot(const CatalogRoot& a, const CatalogRoot& b) {
-    return a.path == b.path && a.recursive == b.recursive;
+    return a.path == b.path && a.max_depth == b.max_depth;
 }
 
 bool SameSettings(const Settings& a, const Settings& b) {
@@ -140,6 +143,42 @@ void TestBlurClampRecentCountText() {
     Expect(ClampRecentCountText(L"1001") == 1000, "1001 clamps to 1000");
     Expect(ClampRecentCountText(L"5000") == 1000, "far out-of-range clamps to 1000");
     Expect(ClampRecentCountText(L"500") == 500, "mid-range value passes through");
+}
+
+void TestCatalogDepthValidation() {
+    SettingsEditor editor(DefaultSettings());
+    Expect(editor.AddRoot(L"C:\\Tools", 20), "default catalog depth accepted");
+    Expect(editor.Working().catalog_roots[0].max_depth == 20,
+           "new root stores the default depth");
+    Expect(!editor.SetRootMaxDepth(0, -1), "depth below 0 rejected");
+    Expect(editor.Working().catalog_roots[0].max_depth == 20,
+           "rejected low depth leaves working value");
+    Expect(editor.SetRootMaxDepth(0, kMinCatalogDepth), "depth 0 accepted");
+    Expect(editor.SetRootMaxDepth(0, kMaxCatalogDepth), "depth 50 accepted");
+    Expect(!editor.SetRootMaxDepth(0, kMaxCatalogDepth + 1), "depth above 50 rejected");
+    Expect(editor.Working().catalog_roots[0].max_depth == kMaxCatalogDepth,
+           "rejected high depth leaves working value");
+    Expect(!editor.SetRootMaxDepth(1, 20), "missing root index rejected");
+    Expect(!editor.AddRoot(L"D:\\Tools", -1), "invalid depth rejected on AddRoot");
+}
+
+void TestBlurClampCatalogDepthText() {
+    Expect(ClampCatalogDepthText(L"") == std::nullopt,
+           "empty depth text has no clamped value");
+    Expect(ClampCatalogDepthText(L"abc") == std::nullopt,
+           "non-numeric depth text has no clamped value");
+    Expect(ClampCatalogDepthText(L"999999999999999") == std::nullopt,
+           "overflowing depth text has no clamped value");
+    Expect(ClampCatalogDepthText(L"-1") == kMinCatalogDepth,
+           "negative depth clamps to 0");
+    Expect(ClampCatalogDepthText(L"0") == kMinCatalogDepth,
+           "exact minimum depth passes through");
+    Expect(ClampCatalogDepthText(L"50") == kMaxCatalogDepth,
+           "exact maximum depth passes through");
+    Expect(ClampCatalogDepthText(L"51") == kMaxCatalogDepth,
+           "depth above 50 clamps to 50");
+    Expect(ClampCatalogDepthText(L"20") == 20,
+           "in-range depth passes through");
 }
 
 void TestExtensionAllowlist() {
@@ -379,15 +418,15 @@ void TestHotkeyParseAcceptsWinModifier() {
 void TestAddRootCap() {
     SettingsEditor editor(DefaultSettings());
     for (std::size_t i = 0; i < kMaxCatalogRoots; ++i) {
-        Expect(editor.AddRoot(L"C:\\Tools" + std::to_wstring(i), true),
+        Expect(editor.AddRoot(L"C:\\Tools" + std::to_wstring(i), 20),
                "roots up to the cap are accepted");
     }
     Expect(editor.Working().catalog_roots.size() == kMaxCatalogRoots,
            "32 roots in the working copy");
-    Expect(editor.AddRoot(L"D:\\Extra", true) == false, "33rd root refused");
+    Expect(editor.AddRoot(L"D:\\Extra", 20) == false, "33rd root refused");
     Expect(editor.Working().catalog_roots.size() == kMaxCatalogRoots,
            "refused root leaves the list at the cap");
-    Expect(editor.AddRoot(L"C:\\Tools0", true) == false, "duplicate still refused");
+    Expect(editor.AddRoot(L"C:\\Tools0", 20) == false, "duplicate still refused");
     Expect(editor.Working().catalog_roots.size() == kMaxCatalogRoots,
            "duplicate refusal keeps the list at the cap");
 }
@@ -400,13 +439,13 @@ void TestResetRestoresDefaults() {
     custom.theme = Theme::Light;
     custom.recent_count = 35;
     custom.hide_after_launch = false;
-    custom.catalog_roots = {{L"C:\\Tools", true}, {L"D:\\Games", false}};
+    custom.catalog_roots = {{L"C:\\Tools", 20}, {L"D:\\Games", 0}};
     custom.catalog_extensions = {L".exe", L".lnk"};
     Expect(store.Save(custom), "persist custom settings");
 
     SettingsEditor editor(custom);
     Expect(editor.SetRecentCount(9) == true, "edit before reset");
-    Expect(editor.AddRoot(L"E:\\Apps", true) == true, "add a root before reset");
+    Expect(editor.AddRoot(L"E:\\Apps", 20) == true, "add a root before reset");
     Expect(editor.SetEnglishInputOnShow(true) == true, "set english input mode before reset");
     editor.ResetToDefaults();
     Expect(editor.Dirty(), "reset marks dirty");
@@ -537,6 +576,8 @@ void TestStringKeysCentralized() {
 int wmain() {
     TestRecentCountValidation();
     TestBlurClampRecentCountText();
+    TestCatalogDepthValidation();
+    TestBlurClampCatalogDepthText();
     TestExtensionAllowlist();
     TestDirtyTrackingAndPersist();
     TestApplyRollbackOnSaveFailure();

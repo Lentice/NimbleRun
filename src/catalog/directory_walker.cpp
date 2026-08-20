@@ -1,9 +1,12 @@
 #include "catalog/directory_walker.h"
 
 namespace nimblerun {
-bool WalkDirectory(const std::wstring& directory, const WalkOptions& options,
-                   const FileVisitor& on_file,
-                   const DirectoryUnavailableHook& on_directory_unavailable) {
+namespace {
+
+bool WalkDirectoryAtDepth(const std::wstring& directory, const WalkOptions& options,
+                          const FileVisitor& on_file,
+                          const DirectoryUnavailableHook& on_directory_unavailable,
+                          int depth) {
     if (options.cancel && options.cancel->load()) {
         return false;  // NR-098: cancelled before this subtree: report failure
     }
@@ -29,11 +32,12 @@ bool WalkDirectory(const std::wstring& directory, const WalkOptions& options,
         }
         const std::wstring full = directory + L"\\" + name;
         if ((find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
-            if (options.recursive &&
+            if (depth < options.max_depth &&
                 (find_data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0) {
                 // ponytail: junctions/symlinks are not followed so a loop cannot
                 // recurse forever; reparse-point app dirs are not a real source.
-                if (!WalkDirectory(full, options, on_file, on_directory_unavailable)) {
+                if (!WalkDirectoryAtDepth(full, options, on_file,
+                                          on_directory_unavailable, depth + 1)) {
                     failed = true;  // NR-091/092: child failure reaches caller
                 }
             }
@@ -49,6 +53,15 @@ bool WalkDirectory(const std::wstring& directory, const WalkOptions& options,
     }
     FindClose(find);
     return !failed;
+}
+
+} // namespace
+
+bool WalkDirectory(const std::wstring& directory, const WalkOptions& options,
+                   const FileVisitor& on_file,
+                   const DirectoryUnavailableHook& on_directory_unavailable) {
+    return WalkDirectoryAtDepth(directory, options, on_file,
+                                 on_directory_unavailable, 0);
 }
 
 } // namespace nimblerun

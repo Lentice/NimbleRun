@@ -1442,7 +1442,8 @@ void StartWatchers(HWND window) {
     }
     if (common_programs) CoTaskMemFree(common_programs);
     for (const nimblerun::CatalogRoot& root : g_settings.catalog_roots) {
-        add_root(root.path, root.recursive, nimblerun::CatalogSource::UserFolder);
+        add_root(root.path, root.max_depth > nimblerun::kMinCatalogDepth,
+                 nimblerun::CatalogSource::UserFolder);
     }
     if (g_rebuild_pipeline) g_rebuild_pipeline->SetWatchSources(std::move(sources));
     // NR-156: kWatchChangedMessage carries a 1-based index into the watch

@@ -17,10 +17,10 @@ enum class Theme {
 };
 
 // One user-configured local folder root. The path is validated to be an
-// absolute local path on load; `recursive` controls subfolder scanning.
+// absolute local path on load; max_depth limits subfolder scanning.
 struct CatalogRoot {
     std::wstring path;
-    bool recursive = true;
+    int max_depth = 20;
 };
 
 // Supported launchable extensions for user folders (design-spec §FR-005).
@@ -32,6 +32,11 @@ std::vector<std::wstring> DefaultExtensions();
 // SettingsEditor::SetRecentCount. Inclusive endpoints; default 20.
 inline constexpr int kMinRecentCount = 1;
 inline constexpr int kMaxRecentCount = 1000;
+
+// User-folder scan depth bounds (design-spec §FR-005). Inclusive endpoints;
+// zero scans only the root directory and the default is CatalogRoot::max_depth.
+inline constexpr int kMinCatalogDepth = 0;
+inline constexpr int kMaxCatalogDepth = 50;
 
 // True when value is a local drive-letter absolute path (e.g. C:\Tools).
 // UNC, network, URI and device paths are rejected (design-spec §FR-005).

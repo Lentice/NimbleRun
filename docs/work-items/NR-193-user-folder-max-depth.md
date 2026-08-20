@@ -145,3 +145,23 @@ Focused runnable coverage 必須包含：
 - 舊檔遷移（`true`/`false`→20/0）與新檔 round-trip 的測試結果。
 - `.rc` 對話框版面調整前後的截圖或版面尺寸確認（若環境無法操作桌面，明確標記手動驗收未完成）。
 - Agent checks 的完整命令與結果。
+
+## 交接區（2026-08-20，實作完成）
+
+1. **CatalogRoot 與 schema 遷移**：`src/settings/settings_store.h:20-39` 將 `recursive` 移除，改為 `CatalogRoot::max_depth = 20`，並在同一處定義 `kMinCatalogDepth = 0`、`kMaxCatalogDepth = 50`。`src/settings/settings_store.cpp:21` 將輸出 schema 設為 2；`Load()` 的 `OlderSchema` 分支在 `:172-174` 明確落在可解析舊格式的路徑，而不是 `PreserveCorrupt`。`catalog_root` 解析位於 `:248-270`：先解析 schema=1 的 `true`／`false` 為 20／0，再解析 schema=2 的整數 0..50，其他值只捨棄該行；`Save()` `:299-312` 寫出 schema=2 與整數深度。實作驗證順序是先補 `OlderSchema` 分支、舊布林映射與 `TestCatalogRootSchemaMigration`，再以 schema=2 的設定重新 configure/build/test；測試會寫入 schema=1 舊檔，確認 true→20、false→0，Save 後讀回 schema=2 整數。這次 item 保持單一最終 commit，沒有額外留下中間 commit；順序證據由 migration test 與其實際通過結果保留在測試和本交接區。
+
+2. **Editor 與設定頁**：`src/settings/settings_editor.cpp:333-343` 的 `ClampCatalogDepthText` 複用既有 `ParseInt`，`SettingsEditor::AddRoot`／`SetRootMaxDepth` 在 `:437-487` 驗證 0..50 並維持 dirty tracking。`src/app_host/settings_dialog.cpp:304` 設定英文 label，`:356-366` 填入每列深度，`:437-452` 在 Save/OK 驗證並失敗時回復，`:559-570` 只在 `EN_KILLFOCUS` 對可解析越界值做純文字 clamp；空值、非數字與溢位保留原文字。`src/resources/NimbleRun.rc:63` 沿用原位置，把 checkbox 換成 `LTEXT`（16,230,116,10）與 `EDITTEXT`（136,228,40,14、`ES_NUMBER`），`IDC_FOLDER_DEPTH_LABEL` 定義在 `src/resources/resource.h:43`。本環境無法操作桌面或擷取設定頁截圖，因此實際 DPI 下的手動 UI 驗收未完成；上述 `.rc` 位置與尺寸已完成原始資源檢查，純值行為由可執行測試覆蓋。
+
+3. **列舉與 caller trace**：`src/catalog/directory_walker.h:12` 與 `src/catalog/directory_walker.cpp:6-63` 以目前深度與 `max_depth` 比較，0 只掃 root 第一層，N 再展開 N 層；`src/catalog/user_folder_catalog.cpp` 傳入 `root.max_depth`。`src/app_host/main.cpp:1444-1446` 僅把 `max_depth > 0` 映射到既有整棵 subtree watcher，`CatalogWatcher` 本身未修改，符合本 item 的 non-goal。`src/catalog/start_menu_catalog.cpp:262` 對既有 Start Menu 內部來源傳 `std::numeric_limits<int>::max()`，保留原本完整掃描語意；這不是使用者可選的「無限制」值，設定頁仍只有 0..50，user-folder 也沒有 sentinel。
+
+4. **測試覆蓋**：`tests/unit/settings_store_test.cpp:239-265` 驗證 schema=1 遷移與 Save→schema=2 round-trip，`:212-235` 驗證整數端點與非法值逐行捨棄；`tests/unit/settings_editor_test.cpp:139-181` 覆蓋 setter 0/50、-1/51 與 blur clamp；`tests/unit/directory_walker_test.cpp:33-57` 覆蓋深度 0/1/2；`tests/unit/user_folder_catalog_test.cpp` 更新每個 root 的深度呼叫；相關 refresh caller 也已更新。完整 CTest 中 Start Menu 深度案例、settings、settings UI、walker、user-folder、lifecycle、rebuild 全部通過。
+
+5. **Agent checks**：
+   - `cmake -S . -B build -G Ninja -D"CMAKE_TOOLCHAIN_FILE=cmake/llvm-mingw.cmake" -DCMAKE_BUILD_TYPE=Release`：成功。
+   - `cmake --build build`：成功；最後一次為 `ninja: no work to do.`，先前本 item 完成後的 Release build 亦成功且無新增 warning。
+   - `ctest --test-dir build -R "settings|directory_walker|user_folder_catalog" --output-on-failure`：4/4 passed。
+   - `ctest --test-dir build --output-on-failure`：32/33 passed；唯一失敗為已知、與本 item 無關的 `nimblerun_startup_option_test`（`FAILED: enable writes the entry` registry-write）。其餘 32 個通過，未嘗試修理該既知失敗。
+   - `rg -n "recursive" src/settings src/app_host/settings_dialog.cpp src/catalog/user_folder_catalog.cpp src/catalog/directory_walker.h src/catalog/directory_walker.cpp`：無輸出；`rg -n "max_depth|kMinCatalogDepth|kMaxCatalogDepth|OlderSchema" src/settings/settings_store.cpp src/settings/settings_store.h`：命中共用欄位、邊界常數、遷移分支與讀寫位置。
+   - `git diff --check`：無輸出。
+
+6. **未完成事項**：只剩無桌面環境下的設定頁人工視覺／互動驗收；沒有宣稱該項通過。CatalogWatcher 深度收斂、readability probe、rebuild pipeline generation／startup ordering 均依 non-goal 留給 NR-194／NR-195 或後續 item。

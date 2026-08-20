@@ -33,8 +33,10 @@ using nimblerun::UsageLoadResult;
 using nimblerun::UsageStore;
 using nimblerun::VersionedReadStatus;
 using nimblerun::UserDataDirFromLocalAppData;
+using nimblerun::kMaxCatalogDepth;
 using nimblerun::kMaxCatalogRoots;
 using nimblerun::kMaxHotkeyLength;
+using nimblerun::kMinCatalogDepth;
 
 namespace {
 
@@ -165,8 +167,8 @@ void TestEnglishInputOnShowRoundTrip(const std::wstring& dir) {
 void TestCatalogRootsRoundTrip(const std::wstring& dir) {
     SettingsStore store(dir);
     Settings expected;
-    expected.catalog_roots.push_back({L"C:\\Tools", true});
-    expected.catalog_roots.push_back({L"D:\\Games\\Emu", false});
+    expected.catalog_roots.push_back({L"C:\\Tools", kMaxCatalogDepth});
+    expected.catalog_roots.push_back({L"D:\\Games\\Emu", kMinCatalogDepth});
     expected.catalog_extensions = {L".exe", L".lnk"};
     Expect(store.Save(expected), "save catalog roots");
 
@@ -174,9 +176,11 @@ void TestCatalogRootsRoundTrip(const std::wstring& dir) {
     Expect(store.Load(loaded) == SettingsLoadResult::Loaded, "catalog roots load");
     Expect(loaded.catalog_roots.size() == 2, "catalog roots count");
     Expect(loaded.catalog_roots[0].path == L"C:\\Tools", "catalog root 1 path");
-    Expect(loaded.catalog_roots[0].recursive == true, "catalog root 1 recursive");
+    Expect(loaded.catalog_roots[0].max_depth == kMaxCatalogDepth,
+           "catalog root 1 max depth");
     Expect(loaded.catalog_roots[1].path == L"D:\\Games\\Emu", "catalog root 2 path");
-    Expect(loaded.catalog_roots[1].recursive == false, "catalog root 2 recursive");
+    Expect(loaded.catalog_roots[1].max_depth == kMinCatalogDepth,
+           "catalog root 2 max depth");
     Expect(loaded.catalog_extensions == expected.catalog_extensions, "catalog extensions round-trip");
 }
 
@@ -207,11 +211,14 @@ void TestIsLocalAbsolutePathRejectsVolumeRoot() {
 
 void TestCatalogRootsValidation(const std::wstring& dir) {
     WriteBytes(dir + L"\\settings.ini",
-        "schema=1\n"
-        "catalog_root=C:\\Valid|true\n"
-        "catalog_root=unc\\share|true\n"
-        "catalog_root=//net\\host|false\n"
-        "catalog_root=C:\\NoFlag\n"
+        "schema=2\n"
+        "catalog_root=C:\\Valid|50\n"
+        "catalog_root=unc\\share|20\n"
+        "catalog_root=//net\\host|0\n"
+        "catalog_root=C:\\NoValue\n"
+        "catalog_root=C:\\Negative|-1\n"
+        "catalog_root=C:\\TooDeep|51\n"
+        "catalog_root=C:\\Bad|depth\n"
         "catalog_extension=.exe\n"
         "catalog_extension=.DLL\n"
         "catalog_extension=.txt\n"
@@ -219,13 +226,43 @@ void TestCatalogRootsValidation(const std::wstring& dir) {
     SettingsStore store(dir);
     Settings loaded;
     Expect(store.Load(loaded) == SettingsLoadResult::Loaded, "catalog validation load");
-    Expect(loaded.catalog_roots.size() == 2, "only local absolute roots kept");
+    Expect(loaded.catalog_roots.size() == 1, "only valid local roots and depths kept");
     Expect(loaded.catalog_roots[0].path == L"C:\\Valid", "valid root kept");
-    Expect(loaded.catalog_roots[0].recursive == true, "valid root recursive flag");
-    Expect(loaded.catalog_roots[1].path == L"C:\\NoFlag", "valid root without flag kept");
-    Expect(loaded.catalog_roots[1].recursive == true, "missing flag defaults to recursive");
+    Expect(loaded.catalog_roots[0].max_depth == kMaxCatalogDepth,
+           "valid root max depth kept");
     Expect(loaded.catalog_extensions.size() == 1, "only allowlisted extensions kept");
     Expect(loaded.catalog_extensions[0] == L".exe", "extension normalized and deduped");
+}
+
+// NR-193: schema=1 used a boolean catalog-root value. OlderSchema must be
+// accepted before the schema bump, mapped to 20/0, and upgraded on Save.
+void TestCatalogRootSchemaMigration(const std::wstring& dir) {
+    WriteBytes(dir + L"\\settings.ini",
+        "schema=1\n"
+        "hotkey=Ctrl+1\n"
+        "catalog_root=C:\\LegacyTrue|true\n"
+        "catalog_root=D:\\LegacyFalse|false\n");
+    SettingsStore store(dir);
+    Settings loaded;
+    Expect(store.Load(loaded) == SettingsLoadResult::Loaded,
+           "schema=1 catalog roots migrate as a loaded settings file");
+    Expect(loaded.hotkey == L"Ctrl+1", "schema=1 migration keeps other settings");
+    Expect(loaded.catalog_roots.size() == 2, "schema=1 roots are retained");
+    Expect(loaded.catalog_roots[0].max_depth == 20,
+           "schema=1 true maps to the default depth 20");
+    Expect(loaded.catalog_roots[1].max_depth == kMinCatalogDepth,
+           "schema=1 false maps to depth 0");
+
+    Expect(store.Save(loaded), "migrated settings save as schema=2");
+    const std::string upgraded = ReadBytes(dir + L"\\settings.ini");
+    Expect(upgraded.rfind("schema=2\n", 0) == 0, "migration Save writes schema=2");
+    Settings reloaded;
+    Expect(store.Load(reloaded) == SettingsLoadResult::Loaded,
+           "schema=2 migrated settings reload");
+    Expect(reloaded.catalog_roots.size() == 2 &&
+               reloaded.catalog_roots[0].max_depth == 20 &&
+               reloaded.catalog_roots[1].max_depth == kMinCatalogDepth,
+           "migrated depths round-trip as integers");
 }
 
 void TestEscaping(const std::wstring& dir) {
@@ -264,12 +301,12 @@ void TestValidation(const std::wstring& dir) {
 // NR-191: the recent_count range is now inclusive 1..1000. In-range endpoints
 // load from a hand-written file and round-trip through Save/Load; out-of-range
 // values (0, negative, 1001) fall back to the default 20 without polluting the
-// loaded settings (no migration, schema stays 1).
+// loaded settings (schema=2; schema=1 migration is covered separately).
 void TestRecentCountBoundaries(const std::wstring& dir) {
     SettingsStore store(dir);
     for (const int endpoint : {1, 1000}) {
         WriteBytes(dir + L"\\settings.ini",
-            "schema=1\nrecent_count=" + std::to_string(endpoint) + "\n");
+            "schema=2\nrecent_count=" + std::to_string(endpoint) + "\n");
         Settings loaded;
         Expect(store.Load(loaded) == SettingsLoadResult::Loaded, "endpoint file loads");
         Expect(loaded.recent_count == endpoint, "endpoint value loaded");
@@ -284,7 +321,7 @@ void TestRecentCountBoundaries(const std::wstring& dir) {
     }
     for (const std::string bad : {"0", "-5", "1001"}) {
         WriteBytes(dir + L"\\settings.ini",
-            "schema=1\nrecent_count=" + bad + "\n");
+            "schema=2\nrecent_count=" + bad + "\n");
         Settings loaded;
         Expect(store.Load(loaded) == SettingsLoadResult::Loaded, "out-of-range file loads");
         Expect(loaded.recent_count == 20,
@@ -351,9 +388,9 @@ void TestOversizeFileCorrupt(const std::wstring& dir) {
 // Corrupt -- and the live settings fall back to DefaultSettings, never a
 // partial parse (NR-080 contract).
 void TestCatalogRootCap(const std::wstring& dir) {
-    std::string content = "schema=1\n";
+    std::string content = "schema=2\n";
     for (std::size_t i = 0; i < kMaxCatalogRoots + 1; ++i) {
-        content += "catalog_root=C:\\root|true\n";
+        content += "catalog_root=C:\\root|20\n";
     }
     WriteBytes(dir + L"\\settings.ini", content);
     SettingsStore store(dir);
@@ -368,9 +405,9 @@ void TestCatalogRootCap(const std::wstring& dir) {
 // NR-140: 32 roots is the maximum that loads; every root is preserved.
 void TestCatalogRootMaxOk(const std::wstring& dir) {
     // Paths avoid \r/\n/\t/\\ sequences: UnescapeText treats them as escapes.
-    std::string content = "schema=1\n";
+    std::string content = "schema=2\n";
     for (std::size_t i = 0; i < kMaxCatalogRoots; ++i) {
-        content += "catalog_root=C:\\Tools" + std::to_string(i) + "|true\n";
+        content += "catalog_root=C:\\Tools" + std::to_string(i) + "|20\n";
     }
     WriteBytes(dir + L"\\settings.ini", content);
     SettingsStore store(dir);
@@ -400,10 +437,10 @@ void TestHotkeyLengthCap(const std::wstring& dir) {
 // NR-140 extra evidence: the original DoS shape -- 100k roots -- is rejected
 // by the same cap, so StartWatchers never sees a single root.
 void TestCatalogRootCap100k(const std::wstring& dir) {
-    std::string content = "schema=1\n";
+    std::string content = "schema=2\n";
     content.reserve(3 * 100000);
     for (int i = 0; i < 100000; ++i) {
-        content += "catalog_root=C:\\root|true\n";
+        content += "catalog_root=C:\\root|20\n";
     }
     WriteBytes(dir + L"\\settings.ini", content);
     SettingsStore store(dir);
@@ -676,6 +713,7 @@ int wmain() {
     TestIsAcceptableDriveType();
     TestIsLocalAbsolutePathRejectsVolumeRoot();
     TestCatalogRootsValidation(MakeTempDir("catalogvalidation"));
+    TestCatalogRootSchemaMigration(MakeTempDir("catalogmigration"));
     TestCorrupt(MakeTempDir("corrupt"));
     TestCorruptMidFileUsesDefaults(MakeTempDir("midcorrupt"));
     TestOversizeFileCorrupt(MakeTempDir("oversize"));

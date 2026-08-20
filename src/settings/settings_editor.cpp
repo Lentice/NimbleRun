@@ -140,8 +140,8 @@ std::wstring_view SettingsStringText(SettingsString key) {
         return L"Remove";
     case SettingsString::BrowseFolderTitle:
         return L"Choose a local folder to scan";
-    case SettingsString::IncludeSubfolders:
-        return L"Include subfolders";
+    case SettingsString::MaxSubfolderDepthLabel:
+        return L"Max subfolder depth";
     case SettingsString::ExtensionsLabel:
         return L"Extensions to scan in user folders:";
     case SettingsString::ClearUsageButton:
@@ -164,6 +164,8 @@ std::wstring_view SettingsStringText(SettingsString key) {
         return L"Could not save settings. The previous values were kept.";
     case SettingsString::FolderInvalidNotice:
         return L"Only local folder paths are accepted (for example C:\\Tools).";
+    case SettingsString::FolderDepthNotice:
+        return L"Folder depth must be between 0 and 50. The previous value was kept.";
     case SettingsString::FolderLimitNotice:
         // NR-152: the write side mirrors Load's 32-root cap, so the notice says
         // what actually happened instead of blaming the picked path.
@@ -328,6 +330,20 @@ std::optional<int> ClampRecentCountText(std::wstring_view text) {
     return value;
 }
 
+std::optional<int> ClampCatalogDepthText(std::wstring_view text) {
+    int value = 0;
+    if (!ParseInt(text, value)) {
+        return std::nullopt;
+    }
+    if (value < kMinCatalogDepth) {
+        return kMinCatalogDepth;
+    }
+    if (value > kMaxCatalogDepth) {
+        return kMaxCatalogDepth;
+    }
+    return value;
+}
+
 bool SettingsEditor::SetRecentCount(int count) {
     if (count < kMinRecentCount || count > kMaxRecentCount) {
         return false;
@@ -418,8 +434,11 @@ bool SettingsEditor::SetExtensionEnabled(std::wstring_view extension, bool enabl
     return true;
 }
 
-bool SettingsEditor::AddRoot(std::wstring_view path, bool recursive) {
+bool SettingsEditor::AddRoot(std::wstring_view path, int max_depth) {
     if (!IsLocalAbsolutePath(path)) {
+        return false;
+    }
+    if (max_depth < kMinCatalogDepth || max_depth > kMaxCatalogDepth) {
         return false;
     }
     // NR-152: the write side mirrors Load's cap (settings_store.h). At 32
@@ -437,7 +456,7 @@ bool SettingsEditor::AddRoot(std::wstring_view path, bool recursive) {
     }
     CatalogRoot root;
     root.path = normalized;
-    root.recursive = recursive;
+    root.max_depth = max_depth;
     working_.catalog_roots.push_back(std::move(root));
     dirty_ = true;
     return true;
@@ -452,12 +471,15 @@ bool SettingsEditor::RemoveRoot(std::size_t index) {
     return true;
 }
 
-bool SettingsEditor::SetRootRecursive(std::size_t index, bool recursive) {
+bool SettingsEditor::SetRootMaxDepth(std::size_t index, int max_depth) {
     if (index >= working_.catalog_roots.size()) {
         return false;
     }
-    if (working_.catalog_roots[index].recursive != recursive) {
-        working_.catalog_roots[index].recursive = recursive;
+    if (max_depth < kMinCatalogDepth || max_depth > kMaxCatalogDepth) {
+        return false;
+    }
+    if (working_.catalog_roots[index].max_depth != max_depth) {
+        working_.catalog_roots[index].max_depth = max_depth;
         dirty_ = true;
     }
     return true;

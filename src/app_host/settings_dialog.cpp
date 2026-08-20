@@ -301,7 +301,7 @@ void InitLabels(HWND dialog) {
     SetControlText(dialog, IDC_FOLDERS_LABEL, SettingsString::UserFoldersLabel);
     SetControlText(dialog, IDC_ADD_FOLDER, SettingsString::AddFolderButton);
     SetControlText(dialog, IDC_REMOVE_FOLDER, SettingsString::RemoveFolderButton);
-    SetControlText(dialog, IDC_FOLDER_RECURSIVE, SettingsString::IncludeSubfolders);
+    SetControlText(dialog, IDC_FOLDER_DEPTH_LABEL, SettingsString::MaxSubfolderDepthLabel);
     SetControlText(dialog, IDC_EXTENSIONS_LABEL, SettingsString::ExtensionsLabel);
     SetControlText(dialog, IDC_CLEAR_USAGE, SettingsString::ClearUsageButton);
     SetControlText(dialog, IDC_RESET_SETTINGS, SettingsString::ResetSettingsButton);
@@ -358,8 +358,10 @@ void Populate(HWND dialog, const Settings& settings) {
     }
     if (!settings.catalog_roots.empty()) {
         SendMessageW(list, LB_SETCURSEL, 0, 0);
-        CheckDlgButton(dialog, IDC_FOLDER_RECURSIVE,
-                       settings.catalog_roots[0].recursive ? BST_CHECKED : BST_UNCHECKED);
+        SetDlgItemTextW(dialog, IDC_FOLDER_RECURSIVE,
+                        std::to_wstring(settings.catalog_roots[0].max_depth).c_str());
+    } else {
+        SetDlgItemTextW(dialog, IDC_FOLDER_RECURSIVE, L"");
     }
 
     SyncExtensionChecks(dialog);
@@ -434,6 +436,19 @@ INT_PTR CALLBACK SettingsDialogProc(HWND dialog, UINT message, WPARAM w_param, L
                 SetStatus(dialog, SettingsString::RecentCountNotice);
                 Populate(dialog, g_dialog.editor->Working());
                 return TRUE;
+            }
+            const LRESULT folder = SendMessageW(
+                GetDlgItem(dialog, IDC_FOLDERS_LIST), LB_GETCURSEL, 0, 0);
+            if (folder != LB_ERR) {
+                GetDlgItemTextW(dialog, IDC_FOLDER_RECURSIVE, buffer, 256);
+                int depth = 0;
+                if (!ParseInt(buffer, depth) ||
+                    !g_dialog.editor->SetRootMaxDepth(
+                        static_cast<std::size_t>(folder), depth)) {
+                    SetStatus(dialog, SettingsString::FolderDepthNotice);
+                    Populate(dialog, g_dialog.editor->Working());
+                    return TRUE;
+                }
             }
 
             // NR-014: reconcile the HKCU Run entry with the requested
@@ -538,16 +553,21 @@ INT_PTR CALLBACK SettingsDialogProc(HWND dialog, UINT message, WPARAM w_param, L
             }
             return TRUE;
 
-        case IDC_FOLDER_RECURSIVE: {
-            const LRESULT sel = SendMessageW(
-                GetDlgItem(dialog, IDC_FOLDERS_LIST), LB_GETCURSEL, 0, 0);
-            if (sel != LB_ERR) {
-                g_dialog.editor->SetRootRecursive(
-                    static_cast<std::size_t>(sel),
-                    IsDlgButtonChecked(dialog, IDC_FOLDER_RECURSIVE) == BST_CHECKED);
+        case IDC_FOLDER_RECURSIVE:
+            // NR-193: clamp parseable depth text on blur without touching the
+            // editor working copy or settings.ini. Save/OK validates it.
+            if (HIWORD(w_param) == EN_KILLFOCUS) {
+                wchar_t buffer[256];
+                GetDlgItemTextW(dialog, IDC_FOLDER_RECURSIVE, buffer, 256);
+                if (const auto clamped = ClampCatalogDepthText(buffer)) {
+                    int parsed = 0;
+                    if (ParseInt(buffer, parsed) && parsed != *clamped) {
+                        SetDlgItemTextW(dialog, IDC_FOLDER_RECURSIVE,
+                                        std::to_wstring(*clamped).c_str());
+                    }
+                }
             }
             return TRUE;
-        }
 
         case IDC_FOLDERS_LIST:
             if (HIWORD(w_param) == LBN_SELCHANGE) {
@@ -556,10 +576,8 @@ INT_PTR CALLBACK SettingsDialogProc(HWND dialog, UINT message, WPARAM w_param, L
                 const std::vector<CatalogRoot>& roots =
                     g_dialog.editor->Working().catalog_roots;
                 if (sel != LB_ERR && static_cast<std::size_t>(sel) < roots.size()) {
-                    CheckDlgButton(dialog, IDC_FOLDER_RECURSIVE,
-                        roots[static_cast<std::size_t>(sel)].recursive
-                            ? BST_CHECKED
-                            : BST_UNCHECKED);
+                    SetDlgItemTextW(dialog, IDC_FOLDER_RECURSIVE,
+                        std::to_wstring(roots[static_cast<std::size_t>(sel)].max_depth).c_str());
                 }
             }
             return TRUE;
@@ -583,7 +601,7 @@ INT_PTR CALLBACK SettingsDialogProc(HWND dialog, UINT message, WPARAM w_param, L
                             // (the limit) instead of the misleading path-invalid notice.
                             if (g_dialog.editor->Working().catalog_roots.size() >= kMaxCatalogRoots) {
                                 SetStatus(dialog, SettingsString::FolderLimitNotice);
-                            } else if (!g_dialog.editor->AddRoot(path, true)) {
+                            } else if (!g_dialog.editor->AddRoot(path, 20)) {
                                 SetStatus(dialog, SettingsString::FolderInvalidNotice);
                             }
                             Populate(dialog, g_dialog.editor->Working());
