@@ -15,6 +15,7 @@ namespace {
 
 using nimblerun::SetEnglishInputMode;
 using nimblerun::ShouldSetEnglishInputMode;
+using nimblerun::WarmUpInputMode;
 
 void TestTsfConversionModeContract() {
     Expect(nimblerun::input_mode_detail::kTsfConversionModeAlphanumeric == 0x00000000,
@@ -40,12 +41,20 @@ void TestSetEnglishInputModeFailureSafe() {
            "invalid HWND is a safe no-op");
 }
 
+void TestWarmUpInputModeDoesNotCrash() {
+    // NR-198: this test process never calls CoInitializeEx, so the internal
+    // CoCreateInstance is expected to fail -- the point is that a warm-up
+    // call before COM/TSF is even usable stays a silent, safe no-op.
+    WarmUpInputMode();
+}
+
 } // namespace
 
 int wmain() {
     TestTsfConversionModeContract();
     TestPredicateTruthTable();
     TestSetEnglishInputModeFailureSafe();
+    TestWarmUpInputModeDoesNotCrash();
     std::printf("NR-190 input mode check PASSED\n");
     return 0;
 }

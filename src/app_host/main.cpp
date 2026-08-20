@@ -3246,6 +3246,14 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     g_settings = settings;
     g_hide_after_launch = settings.hide_after_launch;
     g_theme = settings.theme;
+    // NR-198: warm up TSF's focus-tracking hooks now, before the search EDIT
+    // ever receives real focus, so the first hidden->visible ShowPanel's
+    // SetEnglishInputMode call (main.cpp ShowPanel) does not miss that focus
+    // change. Gated on the setting -- disabled means no input-mode API calls
+    // at all (NR-190).
+    if (g_settings.english_input_on_show) {
+        nimblerun::WarmUpInputMode();
+    }
 
     nimblerun::CatalogRefreshCoordinator refresh;
     g_refresh = &refresh;

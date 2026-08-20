@@ -112,4 +112,22 @@ bool SetEnglishInputMode(HWND edit) {
     return TryImm(edit);
 }
 
+void WarmUpInputMode() {
+    // NR-198: same Activate/Deactivate pair as TryTsf, minus the
+    // IsThreadFocus/compartment work -- this call's only job is to make TSF
+    // install its focus-tracking hooks before a real SetFocus happens.
+    ITfThreadMgr* raw_mgr = nullptr;
+    const HRESULT hr = CoCreateInstance(CLSID_TF_ThreadMgr, nullptr,
+                                        CLSCTX_INPROC_SERVER, IID_ITfThreadMgr,
+                                        reinterpret_cast<void**>(&raw_mgr));
+    if (FAILED(hr) || raw_mgr == nullptr) {
+        return;
+    }
+    ComPtr<ITfThreadMgr> thread_mgr(raw_mgr);
+    TfClientId client_id = 0;
+    if (SUCCEEDED(thread_mgr->Activate(&client_id))) {
+        thread_mgr->Deactivate();
+    }
+}
+
 } // namespace nimblerun
