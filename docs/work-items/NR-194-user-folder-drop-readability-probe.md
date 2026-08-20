@@ -117,3 +117,22 @@ Focused runnable coverage 必須包含：`nimblerun_user_folder_catalog_test` �
 - 重寫後的測試案例內容與其驗證的具體行為。
 - 針對真實或等規模樹重新量測的 `rebuild-ms userfolder` 數字，與量測方法（沿用既有診斷輸出或臨時 instrumentation）。
 - Agent checks 的完整命令與結果。
+
+## 交接區（2026-08-20，實作完成）
+
+1. **移除 probe 的實際 diff**：`src/catalog/user_folder_catalog.cpp:29-36` 的 `IsRegularFile(DWORD)` 現在只檢查 `FILE_ATTRIBUTE_DIRECTORY` 與 `FILE_ATTRIBUTE_REPARSE_POINT`，已移除原本的 `CreateFileW(GENERIC_READ)`、share flags、`CloseHandle` 與 locked/unreadable skip。`ProcessFile()` `:39-48` 對 `.exe`／`.cmd`／`.bat` 仍走 attributes guard，`.lnk`／`.appref-ms` 仍由 `shell_validated` 分支直接保留。`src/catalog/user_folder_catalog.h:31-33` 同步公開契約註解；`src/launch/shell_launch.cpp`、`launch_verified` 與 NR-022 的失敗對話框／refresh 路徑均未修改。
+
+2. **Spec 同步**：`docs/design-spec.md:383` 改為「`.exe`、`.cmd`、`.bat` 只需是非目錄、非 reparse point 的檔案系統項目即可進入 catalog；是否真的可開啟交由 Shell 在啟動時判斷，與 `.lnk`、`.appref-ms` 一致；啟動失敗走 §FR-010」。`rg -n "必須是可讀取的普通檔案|readable regular file" docs/design-spec.md` 無輸出。
+
+3. **測試重寫與保留的排除行為**：`tests/unit/user_folder_catalog_test.cpp:243-282` 仍以獨占 handle 建立 `Locked.exe`，但現在兩個 duplicate root 都必須得到該 entry（`CountByName == 2`、總數 4），因此若 probe 意外回來測試會失敗；同段仍驗證壞 root 不清空其他結果。`:299-302` 的 source sanity 額外固定 catalog 仍有 directory/reparse guards 且不含 `CreateFileW`。實際 reparse 不追蹤與 directory walker 的檔案排除仍由未修改的 `tests/unit/directory_walker_test.cpp:82-95` 覆蓋，完整 CTest 的 walker case 通過。
+
+4. **真實樹量測**：直接啟動 `build\\NimbleRun.exe` 時，桌面環境顯示 `NimbleRun.exe - Application Error (0xc0000142)` 且程序退出；因此沒有把 app-level log 當成成功證據，也沒有宣稱手動點擊鎖定檔案已走到 NR-022 對話框。依本 item 允許的 temporary instrumentation，暫時在既有 `nimblerun_user_folder_catalog_test` 加入環境變數 gated runner，Release build 後以 `NIMBLERUN_BENCHMARK_ROOT=D:\\Program files` 直接呼叫 `EnumerateUserFolderCatalog`，輸出相同診斷 token `rebuild-ms userfolder`，量完即還原測試檔並重新 build。四次結果為 `196 ms`、`222 ms`、`218 ms`、`219 ms`；每次均為 `entries=311`、`skipped-directories=0`、`source-ok=true`，中位數約 `219 ms`。相較 item 既有 baseline 的無 probe `208 ms` 與含 probe `25,371 ms`（冷啟動 log `21,641 ms`），新版本回到約 0.2 秒量級。
+
+5. **Agent checks**：
+   - `cmake -S . -B build -G Ninja -D"CMAKE_TOOLCHAIN_FILE=cmake/llvm-mingw.cmake" -DCMAKE_BUILD_TYPE=Release`：成功。
+   - `cmake --build build`：成功；最後一次 configure 後為 `ninja: no work to do.`，程式碼變更後的 Release 增量 build 亦成功且無新增 warning。
+   - `ctest --test-dir build -R "user_folder_catalog" --output-on-failure`：1/1 passed。
+   - `ctest --test-dir build --output-on-failure`：32/33 passed；唯一失敗為既知、與本 item 無關的 `nimblerun_startup_option_test`（`FAILED: enable writes the entry` registry-write）。包含 `nimblerun_shell_launch_test`、`nimblerun_directory_walker_test`、`nimblerun_lifecycle_check` 與 `nimblerun_rebuild_pipeline_test` 的其餘 32 項通過，未嘗試修理該既知失敗。
+   - `rg -n "CreateFileW|IsReadableRegularFile" src/catalog/user_folder_catalog.cpp`：無輸出；`rg -n "必須是可讀取的普通檔案|readable regular file" docs/design-spec.md`：無輸出；`git diff --check`：無輸出。
+
+6. **未完成事項**：無程式範圍遺留；桌面 app 啟動錯誤使「實際點擊鎖定 entry 後顯示 NR-022 對話框」的人工驗收未完成，已明確記錄而未宣稱通過。`CatalogWatcher`、`.lnk`／`.appref-ms`、launch failure UI、`launch_verified` 與其他 rebuild item 均依 non-goal 未動。

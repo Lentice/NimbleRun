@@ -34,8 +34,8 @@ struct UserFolderEnumerateResult {
 // AppEntry values with source UserFolder, a display name of the file name
 // without extension, source_path and launch_identity equal to the full file
 // path (Shell-launchable), and a stable id hashed from that path (§10.3).
-// .exe/.cmd/.bat must be readable regular files; .lnk/.appref-ms are kept for
-// Shell validation at launch time. `cancel` is an optional cooperative
+// .exe/.cmd/.bat must be non-directory, non-reparse entries; .lnk/.appref-ms
+// are kept for Shell validation at launch time. `cancel` is an optional cooperative
 // cancellation token (NR-098): when set the walk stops at the next safe
 // iteration boundary, reports source_ok = false and commits nothing.
 UserFolderEnumerateResult EnumerateUserFolderCatalog(const Settings& settings,

@@ -24,28 +24,22 @@ bool ExtensionAllowed(std::wstring_view path, const std::vector<std::wstring>& e
     return false;
 }
 
-// FR-005: .exe/.cmd/.bat must be readable regular files; .lnk/.appref-ms are
-// validated by the Shell at launch time and always kept.
-bool IsReadableRegularFile(const std::wstring& path, DWORD find_attributes) {
+// FR-005: .exe/.cmd/.bat must be non-directory, non-reparse entries;
+// .lnk/.appref-ms are validated by the Shell at launch time and always kept.
+bool IsRegularFile(DWORD find_attributes) {
     if ((find_attributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
         return false;
     }
     if ((find_attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
         return false;  // a symlink/junction is not a regular file
     }
-    const HANDLE file = CreateFileW(path.c_str(), GENERIC_READ,
-        FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (file == INVALID_HANDLE_VALUE) {
-        return false;  // unreadable/locked file: skip this item, keep enumerating
-    }
-    CloseHandle(file);
     return true;
 }
 
 void ProcessFile(const std::wstring& path, DWORD find_attributes, std::vector<AppEntry>& out) {
     const std::wstring ext = Extension(path);
     const bool shell_validated = ext == L".lnk" || ext == L".appref-ms";
-    if (!shell_validated && !IsReadableRegularFile(path, find_attributes)) {
+    if (!shell_validated && !IsRegularFile(find_attributes)) {
         return;
     }
     AppEntry entry;

@@ -245,7 +245,8 @@ void TestDuplicateRootsAndErrorIsolation() {
     const std::wstring good = base + L"\\Good";
     WriteBytes(good + L"\\AppA.exe", "dummy");
 
-    // A locked file appears in the walk but fails the readability probe.
+    // A locked file appears in the walk; launch-time Shell handling owns the
+    // question of whether it can actually be opened.
     const std::wstring locked_path = good + L"\\Locked.exe";
     const HANDLE locked = CreateFileW(locked_path.c_str(), GENERIC_WRITE, 0, nullptr,
         CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -272,10 +273,17 @@ void TestDuplicateRootsAndErrorIsolation() {
     const std::vector<AppEntry>& entries = result.entries;
     Expect(!entries.empty(), "other roots survive a failed root");
     Expect(CountByName(entries, L"AppA") == 2, "duplicate root scanned once each");
-    Expect(CountByName(entries, L"Locked") == 0, "anomalous unreadable file skipped");
-    Expect(entries.size() == 2, "isolation count");
-    Expect(entries[0].stable_id == entries[1].stable_id,
-           "duplicate entries share the stable id (dedup-ready for NR-007)");
+    Expect(CountByName(entries, L"Locked") == 2,
+           "locked candidate remains in the catalog for launch-time handling");
+    Expect(entries.size() == 4, "isolation count includes locked candidates");
+    const AppEntry* app_a = FindByName(entries, L"AppA");
+    Expect(app_a != nullptr, "duplicate app remains available");
+    for (const AppEntry& entry : entries) {
+        if (entry.display_name == L"AppA") {
+            Expect(entry.stable_id == app_a->stable_id,
+                   "duplicate entries share the stable id (dedup-ready for NR-007)");
+        }
+    }
 
     RemoveTreeBestEffort(base);
 }
@@ -288,6 +296,10 @@ void TestSourceSanityCheck() {
     const std::string pipeline = ReadSourceFile(root, L"src\\app_host\\rebuild_pipeline.cpp");
     ExpectContains(walker, "ERROR_NO_MORE_FILES", "clean-end check present in the walk");
     ExpectContains(catalog, "source_ok = false", "mid-walk failure sets source_ok false");
+    ExpectContains(catalog, "FILE_ATTRIBUTE_DIRECTORY", "directory guard remains in catalog");
+    ExpectContains(catalog, "FILE_ATTRIBUTE_REPARSE_POINT", "reparse guard remains in catalog");
+    Expect(catalog.find("CreateFileW") == std::string::npos,
+           "user-folder catalog does not probe candidate files");
     ExpectContains(pipeline, "enumerate_source_", "pipeline calls the enumerator");
     ExpectContains(pipeline, "result->failed = !enumeration.source_ok",
                    "worker forwards source_ok to failed");
