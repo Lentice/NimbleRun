@@ -232,6 +232,7 @@
 | NR-193 | 自訂資料夾遞迴深度改為有限整數上限（拿掉 recursive bool、無無限制選項） | 2 | `done` | NR-004, NR-013, NR-019, NR-096 | [NR-193](work-items/NR-193-user-folder-max-depth.md) |
 | NR-194 | UserFolder 掃描拿掉同步開檔可讀性檢查（實測唯一瓶頸，122 倍） | 2 | `done` | NR-019, NR-137, NR-022 | [NR-194](work-items/NR-194-user-folder-drop-readability-probe.md) |
 | NR-195 | 開機重建先跑 StartMenu/AppsFolder，UserFolder 延後成第二階段 generation | 3 | `done` | NR-132, NR-081, NR-116, NR-118 | [NR-195](work-items/NR-195-startup-rebuild-fast-sources-first.md) |
+| NR-196 | 把 catalog_root 舊格式遷移的預設深度命名成獨立常數 | 2 | `done` | NR-193 | [NR-196](work-items/NR-196-catalog-root-legacy-depth-constant.md) |
 
 ## Dependency lanes
 

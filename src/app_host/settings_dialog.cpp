@@ -601,7 +601,7 @@ INT_PTR CALLBACK SettingsDialogProc(HWND dialog, UINT message, WPARAM w_param, L
                             // (the limit) instead of the misleading path-invalid notice.
                             if (g_dialog.editor->Working().catalog_roots.size() >= kMaxCatalogRoots) {
                                 SetStatus(dialog, SettingsString::FolderLimitNotice);
-                            } else if (!g_dialog.editor->AddRoot(path, 20)) {
+                            } else if (!g_dialog.editor->AddRoot(path, kDefaultCatalogDepth)) {
                                 SetStatus(dialog, SettingsString::FolderInvalidNotice);
                             }
                             Populate(dialog, g_dialog.editor->Working());

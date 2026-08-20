@@ -16,11 +16,21 @@ enum class Theme {
     Dark,
 };
 
+// User-folder scan depth bounds (design-spec §FR-005). Inclusive endpoints;
+// zero scans only the root directory. kDefaultCatalogDepth is both the
+// default for a newly added root and the target depth NR-193's schema=1
+// `recursive=true` migration maps to -- named explicitly (NR-196) instead of
+// letting the migration read CatalogRoot's default member value, which was a
+// coincidental match rather than a stated dependency.
+inline constexpr int kMinCatalogDepth = 0;
+inline constexpr int kMaxCatalogDepth = 50;
+inline constexpr int kDefaultCatalogDepth = 20;
+
 // One user-configured local folder root. The path is validated to be an
 // absolute local path on load; max_depth limits subfolder scanning.
 struct CatalogRoot {
     std::wstring path;
-    int max_depth = 20;
+    int max_depth = kDefaultCatalogDepth;
 };
 
 // Supported launchable extensions for user folders (design-spec §FR-005).
@@ -32,11 +42,6 @@ std::vector<std::wstring> DefaultExtensions();
 // SettingsEditor::SetRecentCount. Inclusive endpoints; default 20.
 inline constexpr int kMinRecentCount = 1;
 inline constexpr int kMaxRecentCount = 1000;
-
-// User-folder scan depth bounds (design-spec §FR-005). Inclusive endpoints;
-// zero scans only the root directory and the default is CatalogRoot::max_depth.
-inline constexpr int kMinCatalogDepth = 0;
-inline constexpr int kMaxCatalogDepth = 50;
 
 // True when value is a local drive-letter absolute path (e.g. C:\Tools).
 // UNC, network, URI and device paths are rejected (design-spec §FR-005).

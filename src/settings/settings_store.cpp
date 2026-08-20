@@ -257,7 +257,9 @@ SettingsLoadResult SettingsStore::Load(Settings& out) const {
                 CatalogRoot root;
                 root.path = path;
                 if (const auto parsed = ParseBool(raw_depth)) {
-                    root.max_depth = *parsed ? root.max_depth : kMinCatalogDepth;
+                    // NR-196: schema=1 true/false maps to the named legacy
+                    // depths, not to CatalogRoot's default member value.
+                    root.max_depth = *parsed ? kDefaultCatalogDepth : kMinCatalogDepth;
                 } else {
                     int depth = 0;
                     if (!ParseInt(raw_depth, depth) ||
