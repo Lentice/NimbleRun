@@ -3,7 +3,7 @@
   <assemblyIdentity
     type="win32"
     name="NimbleRun"
-    version="0.1.0.0"
+    version="0.1.1.0"
     processorArchitecture="amd64" />
   <description>NimbleRun lightweight Windows app drawer</description>
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
