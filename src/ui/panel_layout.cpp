@@ -25,10 +25,11 @@ LayoutPx LayoutForDpi(float dpi) {
     out.search_top = px(kSearchTopDip);
     out.search_right = px(kSearchRightDip);
     out.search_bottom = px(kSearchBottomDip);
-    out.search_edit_left = px(kSearchLeftDip + kSearchTextInsetDip);
-    out.search_edit_top = px(kSearchTopDip + kSearchEditInsetYDip);
+    out.search_edit_left = px(kSearchIconCenterXDip + kSearchIconRadiusDip +
+                              kSearchIconTextGapDip);
+    out.search_edit_top = px(kSearchTopDip + kSearchEditTopInsetDip);
     out.search_edit_right = px(kSearchRightDip - kSearchTextInsetDip);
-    out.search_edit_bottom = px(kSearchBottomDip - kSearchEditInsetYDip);
+    out.search_edit_bottom = px(kSearchBottomDip - kSearchEditBottomInsetDip);
     out.search_font_height = -px(kSearchFontDip);
     out.dpi = static_cast<int>(std::lround(dpi));
     return out;
@@ -44,7 +45,7 @@ WindowSize ClampWindowSize(float dpi, int work_width, int work_height) {
 
 // NR-120: the footer band keeps its (kPanelHeightDip - kFooterTopDip) height
 // and hugs the client bottom, so a clamped client moves the band up instead of
-// clipping the path bar + key hints (design-spec §4.2/§4.9). Full height (488
+// clipping the path bar + key hints (design-spec §4.2/§4.9). Full height (520
 // DIP) lands exactly on kFooterTopDip; the kListTopDip floor keeps the band out
 // of the search box even on an absurdly small client.
 float FooterTopDip(float client_height_dip) {

@@ -234,6 +234,7 @@
 | NR-195 | 開機重建先跑 StartMenu/AppsFolder，UserFolder 延後成第二階段 generation | 3 | `done` | NR-132, NR-081, NR-116, NR-118 | [NR-195](work-items/NR-195-startup-rebuild-fast-sources-first.md) |
 | NR-196 | 把 catalog_root 舊格式遷移的預設深度命名成獨立常數 | 2 | `done` | NR-193 | [NR-196](work-items/NR-196-catalog-root-legacy-depth-constant.md) |
 | NR-197 | UserFolder 遞迴掃描候選方案實測與低風險優化 | 2 | `done` | NR-137, NR-192, NR-193, NR-194, NR-195 | [NR-197](work-items/NR-197-recursive-scan-performance.md) |
+| NR-198 | 暖機 TSF 以修復開啟英文輸入設定後第一次顯示不生效 | 3 | `done` | NR-190 | [NR-198](work-items/NR-198-tsf-warmup-first-show.md) |
 
 ## Dependency lanes
 

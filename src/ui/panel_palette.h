@@ -32,6 +32,7 @@ struct PanelColors {
     Rgb selected_border = 0;  // non-color selection signal (design-spec §NFR-006)
     Rgb pin_marker = 0;       // pinned marker color; shape, not color, carries the state (design-spec §NFR-006)
     Rgb hover_fill = 0;       // NR-029: grid hover cell fill (card-level)
+    Rgb footer = 0;            // C layout: softly separated footer band
     Rgb text = 0;
     Rgb dim = 0;
     Rgb error = 0;

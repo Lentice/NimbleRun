@@ -158,18 +158,15 @@ constexpr wchar_t kMissingApp[] = L"App not found";
 // NR-021: centralized footer key-hint strings (design-spec §4.9). Fixed
 // content, right-aligned in the reserved band; no status/version text.
 namespace footer_strings {
-constexpr wchar_t kScroll[] = L"Scroll";
-constexpr wchar_t kPageUp[] = L"PgUp";
-constexpr wchar_t kPageDown[] = L"PgDn";
 // NR-024: the Alt+digit quick-select hint group (design-spec §4.9).
 constexpr wchar_t kLaunch[] = L"Launch";
+constexpr wchar_t kHoldAlt[] = L"Hold";
+constexpr wchar_t kAltKey[] = L"Alt";
+constexpr wchar_t kShowShortcuts[] = L"to show shortcuts";
 constexpr wchar_t kAltOnePrefix[] = L"Alt+1~";
 // NR-176: the grid binds the full digit sequence (design-spec §4.7), so its
 // footer box shows Alt+0~9 instead of a viewport-derived range.
 constexpr wchar_t kAltZeroNine[] = L"Alt+0~9";
-// NR-045: shown in the grid state while Alt is up, in place of the
-// Alt+1~N / Launch group (design-spec §4.9).
-constexpr wchar_t kHoldAltHint[] = L"Hold Alt to show shortcuts";
 } // namespace footer_strings
 
 // NR-022: centralized English strings for the launch-failure / open-location
@@ -215,6 +212,7 @@ bool g_pins_notified = false;
 // NR-058: the main window HWND (tray callback target), set in wWinMain once the
 // window exists; the only UI-thread owner of the tray notices.
 HWND g_main_window = nullptr;
+HWND g_scrollbar = nullptr;
 HANDLE g_test_show_semaphore = nullptr;
 // NR-058: true once Shell_NotifyIconW(NIM_ADD) succeeded, so the host knows
 // whether a balloon can be shown now or must be deferred to the startup send
@@ -364,6 +362,7 @@ ID2D1SolidColorBrush* g_card_brush = nullptr;
 ID2D1SolidColorBrush* g_selected_brush = nullptr;
 ID2D1SolidColorBrush* g_selected_border_brush = nullptr;
 ID2D1SolidColorBrush* g_hover_brush = nullptr;  // NR-029: grid hover cell fill
+ID2D1SolidColorBrush* g_footer_brush = nullptr;
 ID2D1SolidColorBrush* g_search_fill_brush = nullptr;
 ID2D1SolidColorBrush* g_search_border_brush = nullptr;
 ID2D1SolidColorBrush* g_pin_marker_brush = nullptr;  // NR-177: pinned marker (amber corner / stripe)
@@ -420,6 +419,7 @@ void DiscardDeviceResources() {
     Release(g_selected_brush);
     Release(g_selected_border_brush);
     Release(g_hover_brush);
+    Release(g_footer_brush);
     Release(g_search_fill_brush);
     Release(g_search_border_brush);
     Release(g_pin_marker_brush);
@@ -492,7 +492,7 @@ nimblerun::palette::PanelColors ResolveCurrentColors() {
 bool CreateDeviceResources(HWND window) {
     if (g_render_target && g_text_brush && g_dim_brush && g_card_brush &&
         g_selected_brush && g_selected_border_brush && g_pin_marker_brush &&
-        g_hover_brush && g_search_fill_brush && g_search_border_brush &&
+        g_hover_brush && g_footer_brush && g_search_fill_brush && g_search_border_brush &&
         g_title_format && g_text_format && g_small_format &&
         g_grid_name_format && g_key_format) {
         return true;
@@ -678,6 +678,8 @@ bool CreateDeviceResources(HWND window) {
         SUCCEEDED(g_render_target->CreateSolidColorBrush(
             D2D1::ColorF(c.hover_fill), &g_hover_brush)) &&
         SUCCEEDED(g_render_target->CreateSolidColorBrush(
+            D2D1::ColorF(c.footer), &g_footer_brush)) &&
+        SUCCEEDED(g_render_target->CreateSolidColorBrush(
             D2D1::ColorF(c.input_fill), &g_search_fill_brush)) &&
         SUCCEEDED(g_render_target->CreateSolidColorBrush(
             D2D1::ColorF(c.input_border), &g_search_border_brush));
@@ -691,6 +693,84 @@ float ClientHeightDip(HWND window, float scale) {
     RECT client{};
     GetClientRect(window, &client);
     return static_cast<float>(std::max(0L, client.bottom - client.top)) / scale;
+}
+
+void HideCellTooltip(HWND window);
+
+void SyncScrollBar(HWND window) {
+    if (!g_scrollbar || !g_model) {
+        return;
+    }
+    const auto layout = nimblerun::layout::LayoutForDpi(GetDpiForWindow(window));
+    const float scale = layout.scale;
+    const float client_height_dip = ClientHeightDip(window, scale);
+    const int columns = std::max(1, g_model->Columns());
+    const int viewport_rows = std::max(1, g_model->ViewportRows());
+    const int content_rows = static_cast<int>((g_model->Rows().size() +
+        static_cast<std::size_t>(columns) - 1) / static_cast<std::size_t>(columns));
+    const bool visible = content_rows > viewport_rows;
+
+    RECT client{};
+    GetClientRect(window, &client);
+    const int top = static_cast<int>(std::lround(
+        nimblerun::layout::kListTopDip * scale));
+    const int bottom = static_cast<int>(std::lround(
+        nimblerun::layout::FooterTopDip(client_height_dip) * scale));
+    // Reserve the real themed scrollbar width instead of assuming a fixed DIP
+    // size; SM_CXVSCROLL is 17 px at 96 DPI on the validation machine.
+    const int width = std::max(1, GetSystemMetricsForDpi(
+        SM_CXVSCROLL, GetDpiForWindow(window)));
+    const int left = std::max(0, static_cast<int>(client.right) - width);
+    SetWindowPos(g_scrollbar, nullptr, left, top,
+                 std::max(1, std::min(width, static_cast<int>(client.right) - left)),
+                 std::max(1, bottom - top),
+                 SWP_NOZORDER | SWP_NOACTIVATE);
+
+    SCROLLINFO info{};
+    info.cbSize = sizeof(info);
+    info.fMask = SIF_RANGE | SIF_PAGE | SIF_POS | SIF_TRACKPOS;
+    info.nMin = 0;
+    info.nMax = std::max(0, content_rows - 1);
+    info.nPage = static_cast<UINT>(viewport_rows);
+    info.nPos = std::min(info.nMax - static_cast<int>(info.nPage) + 1,
+                         g_model->FirstVisibleRow() / columns);
+    info.nPos = std::max(0, info.nPos);
+    SetScrollInfo(g_scrollbar, SB_CTL, &info, TRUE);
+    ShowWindow(g_scrollbar, visible ? SW_SHOW : SW_HIDE);
+}
+
+bool ScrollFromBar(HWND window, WPARAM w_param, LPARAM l_param) {
+    if (!g_model || reinterpret_cast<HWND>(l_param) != g_scrollbar) {
+        return false;
+    }
+    const int columns = std::max(1, g_model->Columns());
+    const int current = g_model->FirstVisibleRow() / columns;
+    int target = current;
+    SCROLLINFO info{};
+    info.cbSize = sizeof(info);
+    info.fMask = SIF_RANGE | SIF_PAGE | SIF_POS | SIF_TRACKPOS;
+    GetScrollInfo(g_scrollbar, SB_CTL, &info);
+    switch (LOWORD(w_param)) {
+    case SB_LINEUP: --target; break;
+    case SB_LINEDOWN: ++target; break;
+    case SB_PAGEUP: target -= static_cast<int>(info.nPage); break;
+    case SB_PAGEDOWN: target += static_cast<int>(info.nPage); break;
+    case SB_TOP: target = 0; break;
+    case SB_BOTTOM: target = info.nMax - static_cast<int>(info.nPage) + 1; break;
+    case SB_THUMBTRACK:
+    case SB_THUMBPOSITION: target = info.nTrackPos; break;
+    default: return true;
+    }
+    const int max_target = std::max(
+        0, info.nMax - static_cast<int>(info.nPage) + 1);
+    target = std::clamp(target, 0, max_target);
+    if (target != current) {
+        HideCellTooltip(window);
+        g_model->ScrollBy((target - current) * columns, false);
+        InvalidateRect(window, nullptr, FALSE);
+    }
+    SyncScrollBar(window);
+    return true;
 }
 
 // NR-020/NR-029: model item index for a physical client point, or -1 when it
@@ -734,9 +814,6 @@ int PinnedRowCount() {
     const int recent_start = g_model->RecentStartIndex();
     return recent_start > 0 ? recent_start : 0;
 }
-
-// Defined below: the single tooltip hide point, reused by UpdateTooltipTimer.
-void HideCellTooltip(HWND window);
 
 // NR-178: the tooltip's 150 ms one-shot timer (design-spec §4.8). A hover
 // change dismisses any visible tooltip immediately, then the one-shot delay is
@@ -809,13 +886,14 @@ void UpdateViewportRows(HWND window) {
         nimblerun::layout::LayoutForDpi(GetDpiForWindow(window));
     // NR-120: the row area ends at the footer band's top edge, never the client
     // bottom, so ViewportRows() shrinks when ClampWindowSize shortens the panel
-    // below 488 DIP and the path bar + key hints stay visible (design-spec
+    // below 520 DIP and the path bar + key hints stay visible (design-spec
     // §4.2/§4.9). Pure DIP geometry, matching the D2D renderer's coordinate
     // space; a full-height client yields the same 8 list / 4 grid rows.
     const float client_height_dip = ClientHeightDip(window, layout.scale);
     g_model->SetViewportRows(nimblerun::layout::ViewportRowsForHeightDip(
         client_height_dip, g_model->Columns()));
     SyncAccessibility(window);
+    SyncScrollBar(window);
 }
 
 void SyncAccessibility(HWND window) {
@@ -864,7 +942,7 @@ void SyncAccessibility(HWND window) {
     snapshot.search_bounds = search;
     // NR-120: the footer band is pinned to the client bottom (same rule the
     // renderer and UpdateViewportRows use), so the reported bounds match where
-    // the band actually paints when the panel is clamped below 488 DIP.
+    // the band actually paints when the panel is clamped below 520 DIP.
     const float client_height_dip = ClientHeightDip(window, layout.scale);
     const float footer_top_dip = nimblerun::layout::FooterTopDip(client_height_dip);
     const float footer_bottom_dip = footer_top_dip +
@@ -1524,6 +1602,7 @@ void Render(HWND window) {
         EndPaint(window, &paint);
         return;
     }
+    SyncScrollBar(window);
 
     g_render_target->BeginDraw();
     g_render_target->Clear(D2D1::ColorF(colors.background));
@@ -1551,6 +1630,26 @@ void Render(HWND window) {
     const float search_border_width = std::max(1.0f, dpi_x / nimblerun::layout::kDpi96);
     g_render_target->DrawRoundedRectangle(search_box, g_search_border_brush,
                                           search_border_width);
+    const D2D1_POINT_2F search_icon_center = D2D1::Point2F(
+        nimblerun::layout::kSearchIconCenterXDip,
+        nimblerun::layout::kSearchIconCenterYDip);
+    // Keep the magnifier a little heavier than the 1-DIP search-box border so
+    // it remains legible at a glance without competing with the input text.
+    const float search_icon_stroke_width = std::max(
+        1.0f, 1.5f * dpi_x / nimblerun::layout::kDpi96);
+    g_render_target->DrawEllipse(
+        D2D1::Ellipse(search_icon_center,
+                      nimblerun::layout::kSearchIconRadiusDip,
+                      nimblerun::layout::kSearchIconRadiusDip),
+        g_dim_brush, search_icon_stroke_width);
+    constexpr float kSearchIconHandleDip = 5.0f;
+    const float handle_start = nimblerun::layout::kSearchIconRadiusDip * 0.7f;
+    g_render_target->DrawLine(
+        D2D1::Point2F(search_icon_center.x + handle_start,
+                      search_icon_center.y + handle_start),
+        D2D1::Point2F(search_icon_center.x + handle_start + kSearchIconHandleDip,
+                      search_icon_center.y + handle_start + kSearchIconHandleDip),
+        g_dim_brush, search_icon_stroke_width);
 
     if (g_model) {
         const auto& rows = g_model->Rows();
@@ -1578,6 +1677,14 @@ void Render(HWND window) {
                 const auto cell = D2D1::RectF(
                     cell_dip.left, cell_dip.top,
                     cell_dip.right, cell_dip.bottom);
+                const auto card = D2D1::RoundedRect(
+                    D2D1::RectF(
+                        cell.left + nimblerun::layout::kCardInsetDip,
+                        cell.top + nimblerun::layout::kCardInsetDip,
+                        cell.right - nimblerun::layout::kCardInsetDip,
+                        cell.bottom - nimblerun::layout::kCardInsetDip),
+                    nimblerun::layout::kCardCornerRadiusDip,
+                    nimblerun::layout::kCardCornerRadiusDip);
                 const float border_width = std::max(1.0f, dpi_x / nimblerun::layout::kDpi96);
                 if (row == -1) {
                     // NR-046: the drop target -- a dashed rounded outline only,
@@ -1599,22 +1706,13 @@ void Render(HWND window) {
                 // recomputed during it), so the reflow is not fighting a hover.
                 const bool hovered = !g_pin_drag_state.Dragging() &&
                     g_grid_hover_index == row;
-                if (selected) {
-                    g_render_target->FillRectangle(cell, g_selected_brush);
-                } else if (hovered) {
-                    // NR-029: hover is a card-level fill only; it never draws
-                    // the selection border, so the two states stay distinct.
-                    g_render_target->FillRectangle(cell, g_hover_brush);
-                }
-                if (selected) {
-                    // NR-015: the selected cell also gets a border in a color
-                    // distinct from the fill (design-spec §NFR-006).
-                    const float inset = border_width / 2.0f;
-                    g_render_target->DrawRectangle(
-                        D2D1::RectF(cell.left + inset, cell.top + inset,
-                                    cell.right - inset, cell.bottom - inset),
-                        g_selected_border_brush, border_width);
-                }
+                g_render_target->FillRoundedRectangle(
+                    card, selected ? g_selected_brush
+                                   : (hovered ? g_hover_brush : g_card_brush));
+                g_render_target->DrawRoundedRectangle(
+                    card,
+                    selected ? g_selected_border_brush : g_search_border_brush,
+                    border_width);
 
                 // NR-029: 40x40 icon horizontally centered in the cell's upper
                 // half; fallback tile + first letter until the real icon loads
@@ -1669,7 +1767,7 @@ void Render(HWND window) {
                 if (g_pins && g_pins->IsPinned(rows[row].stable_id) &&
                     g_pin_geometry) {
                     g_render_target->SetTransform(
-                        D2D1::Matrix3x2F::Translation(cell.left, cell.top));
+                        D2D1::Matrix3x2F::Translation(card.rect.left, card.rect.top));
                     g_render_target->FillGeometry(g_pin_geometry,
                                                   g_pin_marker_brush);
                     g_render_target->SetTransform(D2D1::Matrix3x2F::Identity());
@@ -1717,23 +1815,30 @@ void Render(HWND window) {
                     nimblerun::layout::SlotRect(i - first, 1);
                 const auto row_rect = D2D1::RectF(
                     row.left, row.top, row.right, row.bottom);
+                const auto row_card = D2D1::RoundedRect(
+                    D2D1::RectF(
+                        row_rect.left + nimblerun::layout::kCardInsetDip,
+                        row_rect.top + nimblerun::layout::kCardInsetDip,
+                        row_rect.right - nimblerun::layout::kCardInsetDip,
+                        row_rect.bottom - nimblerun::layout::kCardInsetDip),
+                    nimblerun::layout::kCardCornerRadiusDip,
+                    nimblerun::layout::kCardCornerRadiusDip);
                 const bool selected =
                     g_model->HasSelection() &&
                     g_model->SelectionIndex() == static_cast<std::size_t>(i);
-                g_render_target->FillRectangle(
-                    row_rect,
+                g_render_target->FillRoundedRectangle(
+                    row_card,
                     selected ? g_selected_brush : g_card_brush);
                 // NR-015: the selected row also gets a border in a color distinct
                 // from the fill, so selection is never conveyed by color alone
                 // (design-spec §NFR-006).
                 if (selected) {
                     const float border_width = std::max(1.0f, dpi_x / nimblerun::layout::kDpi96);
-                    const float inset = border_width / 2.0f;
-                    g_render_target->DrawRectangle(
-                        D2D1::RectF(row_rect.left + inset, row_rect.top + inset,
-                                    row_rect.right - inset, row_rect.bottom - inset),
-                        g_selected_border_brush,
-                        border_width);
+                    g_render_target->DrawRoundedRectangle(
+                        row_card, g_selected_border_brush, border_width);
+                } else {
+                    g_render_target->DrawRoundedRectangle(
+                        row_card, g_search_border_brush, 1.0f);
                 }
 
                 // NR-041: pinned marker -- a stripe on the row's leading edge,
@@ -1745,8 +1850,10 @@ void Render(HWND window) {
                 if (g_pins && g_pins->IsPinned(rows[i].stable_id)) {
                     constexpr float kPinStripeWidthDip = 3.0f;
                     g_render_target->FillRectangle(
-                        D2D1::RectF(row.left, row.top,
-                                    row.left + kPinStripeWidthDip, row.bottom),
+                        D2D1::RectF(row_card.rect.left,
+                                    row_card.rect.top + nimblerun::layout::kCardCornerRadiusDip,
+                                    row_card.rect.left + kPinStripeWidthDip,
+                                    row_card.rect.bottom - nimblerun::layout::kCardCornerRadiusDip),
                         g_pin_marker_brush);
                 }
                 // NR-012: fixed tile inside the row, vertically centered. The decoded
@@ -1815,20 +1922,18 @@ void Render(HWND window) {
         }
     }
 
-    // NR-021 footer key-hint band (design-spec §4.9). A 1 DIP divider then a
-    // right-aligned "Launch" group + "Scroll"/PgUp/PgDn group. Only key hints
-    // live here; no status, version or update text. NR-024 adds the Launch
-    // group whose box text depends on the current viewport row count.
+    // NR-021 footer key-hint band (design-spec §4.9). A softly tinted footer
+    // carries the right-aligned Launch group or the grid's Alt hint. Only key
+    // hints live here; no status, version or update text.
     // NR-120: the band hugs the client bottom (FooterTopDip), so the path bar +
-    // key hints stay visible when the panel is clamped below 488 DIP; a
+    // key hints stay visible when the panel is clamped below 520 DIP; a
     // full-height client keeps it exactly on kFooterTopDip as before.
     const D2D1_SIZE_F target_size = g_render_target->GetSize();
     const float footer_top = nimblerun::layout::FooterTopDip(target_size.height);
-    g_render_target->DrawLine(
-        D2D1::Point2F(0.0f, footer_top),
-        D2D1::Point2F(nimblerun::layout::kPanelWidthDip, footer_top),
-        g_dim_brush,
-        nimblerun::layout::kFooterDividerWidthDip);
+    g_render_target->FillRectangle(
+        D2D1::RectF(0.0f, footer_top,
+                    nimblerun::layout::kPanelWidthDip, target_size.height),
+        g_footer_brush);
 
     const float footer_band_height =
         nimblerun::layout::kPanelHeightDip - nimblerun::layout::kFooterTopDip;
@@ -1846,20 +1951,9 @@ void Render(HWND window) {
 
     float right = nimblerun::layout::kListRightDip;
     float hints_left = right;
-    right = draw_key_box(footer_strings::kPageDown, right,
-                         nimblerun::layout::kFooterKeyBoxWidthDip);
-    hints_left = std::min(hints_left, right);
-    right -= nimblerun::layout::kFooterKeyGapDip;
-    right = draw_key_box(footer_strings::kPageUp, right,
-                         nimblerun::layout::kFooterKeyBoxWidthDip);
-    hints_left = std::min(hints_left, right);
-    right -= nimblerun::layout::kFooterHintGapDip;
 
-    // The "Scroll" and "Launch" labels are right-aligned to the key box that
-    // follows them: measure the text once per frame and draw it ending at
-    // `right` so the group hugs the right edge (the shared formats stay
-    // left-aligned for the list rows). Returns the measured width so the path
-    // bar can stop kFooterHintGapDip before the leftmost hint (NR-029).
+    // Labels are right-aligned to the key box or footer edge that follows them.
+    // Measuring once per frame keeps the path bar from overlapping the hints.
     auto draw_right_label = [&](const wchar_t* label, float label_right) -> float {
         IDWriteTextLayout* label_layout = nullptr;
         if (SUCCEEDED(g_write_factory->CreateTextLayout(
@@ -1881,28 +1975,24 @@ void Render(HWND window) {
         return 0.0f;
     };
 
-    // NR-043: draw_right_label measures the label and draws it ending at
-    // `right`; `right` has to move past it too, or the next group to the left
-    // (NR-024's Alt+1~N box) lands on top of the label -- which is what clipped
-    // "Scroll" to "oll".
-    right -= draw_right_label(footer_strings::kScroll, right);
-    hints_left = std::min(hints_left, right);
-
-    // NR-024: "Launch" group to the left of "Scroll", separated by the hint
-    // gap. The wide box content depends on the state: the grid shows the full
-    // digit sequence Alt+0~9 (NR-176, design-spec §4.7), the list shows
-    // "Alt+1~" followed by the last digit bound to the current viewport
-    // (8 visible rows -> Alt+1~8, >=10 -> Alt+1~0); built per frame since the
-    // viewport can change.
-    right -= nimblerun::layout::kFooterHintGapDip;
+    // NR-045: while Alt is up, show the modifier as a key-shaped box. The
+    // right-to-left construction yields "Hold" [Alt] "to show shortcuts".
     if (g_model && g_model->Columns() > 1 && !AltHeld()) {
-        // NR-045: in the grid state while Alt is up the per-cell digit boxes
-        // are hidden, so the Alt+1~N group is replaced by one sentence that
-        // says how to reveal them; drawn with the same draw_right_label the
-        // rest of the group uses (design-spec §4.9).
-        right -= draw_right_label(footer_strings::kHoldAltHint, right);
+        right -= draw_right_label(footer_strings::kShowShortcuts, right);
+        hints_left = std::min(hints_left, right);
+        right -= nimblerun::layout::kFooterHintGapDip;
+        right = draw_key_box(footer_strings::kAltKey, right,
+                             nimblerun::layout::kFooterKeyBoxWidthDip);
+        hints_left = std::min(hints_left, right);
+        right -= nimblerun::layout::kFooterHintGapDip;
+        right -= draw_right_label(footer_strings::kHoldAlt, right);
         hints_left = std::min(hints_left, right);
     } else {
+        // NR-024: the Launch group. The wide box content depends on the state:
+        // the grid shows the full digit sequence Alt+0~9 (NR-176,
+        // design-spec §4.7), the list shows "Alt+1~" followed by the last
+        // digit bound to the current viewport (8 visible rows -> Alt+1~8,
+        // >=10 -> Alt+1~0); built per frame since the viewport can change.
         std::wstring alt_label;
         if (g_model && g_model->Columns() > 1) {
             alt_label = footer_strings::kAltZeroNine;
@@ -1975,7 +2065,7 @@ void ShowPanel(HWND window) {
     if (!GetMonitorInfoW(monitor, &monitor_info)) return;
 
     // NR-015: size the panel in DIPs scaled to the cursor monitor's DPI, then
-    // clamp it to the work area. Width/height stay 640x488 DIPs at any DPI, so
+    // clamp it to the work area. Width/height stay 640x520 DIPs at any DPI, so
     // the same layout math gives predictable bounds at 100/150/200%.
     const RECT work_area = monitor_info.rcWork;
     // NR-103: park the (still hidden) window on the cursor monitor first so a
@@ -2741,6 +2831,11 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
             return reinterpret_cast<LRESULT>(g_search_bg_brush);
         }
         return DefWindowProcW(window, message, w_param, l_param);
+    case WM_VSCROLL:
+        if (ScrollFromBar(window, w_param, l_param)) {
+            return 0;
+        }
+        return DefWindowProcW(window, message, w_param, l_param);
     case WM_MOUSEWHEEL: {
         // NR-178: scrolling dismisses the tooltip (design-spec §4.8).
         HideCellTooltip(window);
@@ -3197,12 +3292,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         // does not reach children the EDIT never repainted -- erasing the caret,
         // which the system draws outside WM_PAINT and cannot restore. The rounded
         // search frame is unaffected: it is drawn outside the EDIT rect, which is
-        // inset by kSearchTextInsetDip / kSearchEditInsetYDip.
-        WS_POPUP | WS_BORDER | WS_CLIPCHILDREN,
+        // inset by the search text and vertical edit padding constants.
+        WS_POPUP | WS_CLIPCHILDREN,
         0,
         0,
-        640,
-        488,
+        static_cast<int>(nimblerun::layout::kPanelWidthDip),
+        static_cast<int>(nimblerun::layout::kPanelHeightDip),
         nullptr,
         nullptr,
         instance,
@@ -3220,7 +3315,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     // NR-044: let DWM round the panel's corners so it matches the Windows 11
     // flyouts and the panel's own 6 DIP search box (design-spec §4.9). The
     // attribute is composited by DWM -- no region, no layered window, no
-    // per-frame cost, and it rounds the WS_BORDER frame and the system shadow
+    // per-frame cost, and it rounds the popup frame and system shadow
     // with it. Windows 10 does not know attribute 33: the call fails with
     // E_INVALIDARG and the panel stays square there, which NR-044 accepts. No
     // version probe and no fallback path, so the result is deliberately ignored.
@@ -3246,6 +3341,14 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     g_settings = settings;
     g_hide_after_launch = settings.hide_after_launch;
     g_theme = settings.theme;
+    // NR-198: warm up TSF's focus-tracking hooks now, before the search EDIT
+    // ever receives real focus, so the first hidden->visible ShowPanel's
+    // SetEnglishInputMode call (main.cpp ShowPanel) does not miss that focus
+    // change. Gated on the setting -- disabled means no input-mode API calls
+    // at all (NR-190).
+    if (g_settings.english_input_on_show) {
+        nimblerun::WarmUpInputMode();
+    }
 
     nimblerun::CatalogRefreshCoordinator refresh;
     g_refresh = &refresh;
@@ -3351,6 +3454,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     g_snapshot_assembler = &snapshot_assembler;
     RefreshPanelSnapshot();
 
+    // The native control supplies the scrollbar's themed thumb, width and
+    // accessibility contract; it is shown only when the catalog overflows.
+    g_scrollbar = CreateWindowExW(
+        0, L"SCROLLBAR", nullptr, WS_CHILD | SBS_VERT,
+        0, 0, 0, 0, window, nullptr, instance, nullptr);
+
     // NR-012: bounded decoded-bitmap cache + Shell-backed provider. NR-032: the
     // provider is owned by a dedicated worker thread (which CoInitializeEx's
     // its own STA); the UI thread only posts requests and receives results
@@ -3408,6 +3517,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         // in the box instead of silently in the EN_UPDATE buffer (both agree
         // on 1023 + NUL; the limit does not grow the contract).
         SendMessageW(g_search_edit, EM_LIMITTEXT, 1023, 0);
+        SendMessageW(g_search_edit, EM_SETCUEBANNER, TRUE,
+                     reinterpret_cast<LPARAM>(L"Search apps"));
         RepositionSearchEdit(window);
         UpdateSearchFont(window);
     }

@@ -24,4 +24,13 @@ bool ShouldSetEnglishInputMode(bool enabled, bool was_visible);
 // never changes the keyboard layout.
 bool SetEnglishInputMode(HWND edit);
 
+// NR-198: TSF installs the hooks it uses to track focus the first time a
+// thread calls ITfThreadMgr::Activate. Calling SetEnglishInputMode for the
+// first time only after SetFocus has already fired misses that focus change,
+// so the very first hidden->visible show never switches. Call this once,
+// early on the UI thread and before any real SetFocus, to activate/deactivate
+// TSF ahead of time so those hooks are already installed. Best-effort and
+// silent: no return value, never touches settings, never blocks.
+void WarmUpInputMode();
+
 } // namespace nimblerun

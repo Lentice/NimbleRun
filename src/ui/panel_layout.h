@@ -9,21 +9,21 @@ namespace layout {
 // controls, hit-testing) via LayoutForDpi().
 constexpr float kDpi96 = 96.0f;
 constexpr float kPanelWidthDip = 640.0f;
-constexpr float kPanelHeightDip = 488.0f; // NR-023: taller search box (16~64) keeps 8 rows visible
+constexpr float kPanelHeightDip = 520.0f; // C layout: four grid rows plus a roomier footer
 constexpr float kListLeftDip = 16.0f;
 constexpr float kListTopDip = 72.0f;      // NR-023: below the 64 DIP search box
 constexpr float kListRightDip = 624.0f;
 constexpr float kRowHeightDip = 48.0f;
 constexpr float kTileSizeDip = 30.0f;   // NR-012 fixed tile
 constexpr float kTileInsetDip = 8.0f;   // tile offset inside a row
-constexpr float kFooterTopDip = 456.0f; // NR-023: footer band 456~488 (replaces NR-020's 400~432)
+constexpr float kFooterTopDip = 472.0f; // C layout: compact footer band 472~520
 // NR-021: fixed footer key-hint band geometry (design-spec §4.9).
 constexpr float kFooterDividerWidthDip = 1.0f;
 constexpr float kFooterKeyBoxWidthDip = 44.0f;
 constexpr float kFooterKeyBoxHeightDip = 20.0f;
 constexpr float kFooterKeyRadiusDip = 3.0f;
 constexpr float kFooterKeyGapDip = 8.0f;
-constexpr float kFooterHintGapDip = 12.0f;  // "Scroll" label to the first key box
+constexpr float kFooterHintGapDip = 12.0f;  // gap between footer hint groups
 constexpr float kFooterTextInsetDip = 3.0f;  // text top padding inside a key box
 // NR-024: per-row quick-select digit box geometry (design-spec §4.9). The name
 // and second-line width unconditionally reserve kRowHintReserveDip so text
@@ -32,14 +32,16 @@ constexpr float kRowKeyBoxWidthDip = 20.0f;
 constexpr float kRowKeyRightInsetDip = 8.0f;   // box right edge from kListRightDip
 constexpr float kRowKeyGapDip = 8.0f;          // box left edge from the text right edge
 constexpr float kRowHintReserveDip = kRowKeyBoxWidthDip + kRowKeyRightInsetDip + kRowKeyGapDip;
-// NR-024: the footer "Alt+1~N" box is wider than the short PgUp/PgDn boxes.
+// NR-024: the footer "Alt+1~N" box is wider than the short modifier box.
 constexpr float kFooterWideKeyBoxWidthDip = 56.0f;
 // NR-029: empty-query icon grid (design-spec §4.9). One page is kGridColumns x
-// 4 rows = 24 cells (result area 72~456 DIP is 384 DIP tall -> 384/96 = 4 rows);
+// 4 rows = 24 cells (result area 72~472 DIP is 400 DIP tall -> 4 rows);
 // the grid reuses the model's viewport/scroll/selection state with Columns()>1.
 constexpr float kCellWidthDip = 101.0f;
 constexpr float kCellHeightDip = 96.0f;
 constexpr float kIconSizeDip = 40.0f;
+constexpr float kCardInsetDip = 3.0f;
+constexpr float kCardCornerRadiusDip = 6.0f;
 constexpr int kGridColumns = 6;
 // Left edge of the grid, horizontally centered in the list area (608 DIP wide
 // vs 6 x 101 = 606 DIP of cells).
@@ -52,7 +54,14 @@ constexpr float kSearchBottomDip = 64.0f;  // NR-023: search box 16~64, height 4
 // NR-023: rounded search box geometry (design-spec §4.9).
 constexpr float kSearchCornerRadiusDip = 6.0f;
 constexpr float kSearchTextInsetDip = 12.0f;   // EDIT inset left/right of the box
-constexpr float kSearchEditInsetYDip = 6.0f;   // EDIT inset top/bottom of the box
+constexpr float kSearchIconCenterXDip = 36.0f;
+constexpr float kSearchIconCenterYDip = 40.0f;
+constexpr float kSearchIconRadiusDip = 7.0f;
+constexpr float kSearchIconTextGapDip = 16.0f;
+// Shift the native single-line EDIT down slightly: Win32's internal text
+// padding otherwise makes the glyphs sit above the magnifier's visual center.
+constexpr float kSearchEditTopInsetDip = 8.0f;
+constexpr float kSearchEditBottomInsetDip = 4.0f;
 constexpr float kSearchFontDip = 24.0f;
 constexpr float kTitleFontDip = 16.0f;
 constexpr float kTextFontDip = 14.0f;
@@ -97,13 +106,13 @@ struct WindowSize {
 // on each edge (design-spec §4.9).
 WindowSize ClampWindowSize(float dpi, int work_width, int work_height);
 
-// NR-120: the footer band (divider at kFooterTopDip .. panel bottom) keeps its
+// NR-120: the footer band (kFooterTopDip .. panel bottom) keeps its
 // height and hugs the client's bottom edge, so the path bar + key hints
 // (design-spec §4.2/§4.9) stay visible even when ClampWindowSize shortens the
 // panel below kPanelHeightDip (small screen + high DPI). `client_height_dip`
 // is the client rect height in DIPs; returns the DIP y of the footer band's
 // top edge, which is also the bottom edge of the row area. A full-height
-// 488 DIP client lands exactly on kFooterTopDip; a shorter client moves the
+// 520 DIP client lands exactly on kFooterTopDip; a shorter client moves the
 // band up instead of clipping it. Pure value; no HWND dependency.
 float FooterTopDip(float client_height_dip);
 
