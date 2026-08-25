@@ -17,6 +17,7 @@ PanelColors ResolveColors(Theme setting, bool system_dark, bool high_contrast,
         colors.selected_border = system.highlight_text;
         colors.pin_marker = system.highlight_text;
         colors.hover_fill = system.highlight;
+        colors.footer = system.window;
         colors.text = system.window_text;
         colors.dim = system.gray_text;
         colors.error = system.window_text;
@@ -29,10 +30,10 @@ PanelColors ResolveColors(Theme setting, bool system_dark, bool high_contrast,
         setting == Theme::Dark || (setting == Theme::System && system_dark);
     if (dark) {
         return {0x181818, 0x2B2B2B, 0x2B2B2B, 0x3C3C3C, 0x3A5A8C, 0x8FB3D9,
-                0xE0B050, 0x2B2B2B, 0xD0D0D0, 0x707070, 0xE08070};
+                0xE0B050, 0x2B2B2B, 0x202A38, 0xD0D0D0, 0x707070, 0xE08070};
     }
-    return {0xF3F3F3, 0xFFFFFF, 0xFFFFFF, 0xE0E0E0, 0xBFD9F2, 0x2E6DB4,
-            0xA87400, 0xFFFFFF, 0x1A1A1A, 0x666666, 0xB03020};
+    return {0xEFF6FF, 0xFFFFFF, 0xFFFFFF, 0xCBD5E1, 0xBFDBFE, 0x1D4ED8,
+            0xA87400, 0xDBEAFE, 0xE0ECFF, 0x172554, 0x475569, 0xB03020};
 }
 
 }  // namespace palette

@@ -79,7 +79,7 @@ void TestLayoutScalingAcrossDpi() {
     // 100% (96 DPI): every field equals the DIP constant.
     const auto d96 = LayoutForDpi(96.0f);
     Expect(d96.panel_width == 640, "100% panel width is 640px");
-    Expect(d96.panel_height == 488, "100% panel height is 488px");
+    Expect(d96.panel_height == 520, "100% panel height is 520px");
     Expect(d96.list_left == 16 && d96.list_right == 624, "100% list bounds");
     Expect(d96.list_top == 72, "100% list top");
     Expect(d96.row_height == 48, "100% row height");
@@ -89,7 +89,7 @@ void TestLayoutScalingAcrossDpi() {
     // 150% (144 DPI): all pixel geometry is exactly 1.5x the DIP size.
     const auto d144 = LayoutForDpi(144.0f);
     Expect(d144.panel_width == 960, "150% panel width is 960px");
-    Expect(d144.panel_height == 732, "150% panel height is 732px");
+    Expect(d144.panel_height == 780, "150% panel height is 780px");
     Expect(d144.row_height == 72, "150% row height");
     Expect(d144.tile_size == 45, "150% tile size");
     Expect(d144.list_left == 24 && d144.list_right == 936, "150% list bounds");
@@ -98,7 +98,7 @@ void TestLayoutScalingAcrossDpi() {
     // 200% (192 DPI): doubling the scale doubles the pixel sizes.
     const auto d192 = LayoutForDpi(192.0f);
     Expect(d192.panel_width == 1280, "200% panel width is 1280px");
-    Expect(d192.panel_height == 976, "200% panel height is 976px");
+    Expect(d192.panel_height == 1040, "200% panel height is 1040px");
     Expect(d192.row_height == 96, "200% row height is 2x 100%");
     Expect(d192.tile_size == 60, "200% tile size is 2x 100%");
     Expect(d192.list_right == 1248, "200% list right is 2x 100%");
@@ -122,9 +122,9 @@ void TestLayoutMonotonicBounds() {
 void TestClampWindowSize() {
     // Large work area: the panel keeps its DPI-scaled size.
     const auto big = ClampWindowSize(96.0f, 1920, 1080);
-    Expect(big.width == 640 && big.height == 488, "large work area keeps panel size");
+    Expect(big.width == 640 && big.height == 520, "large work area keeps panel size");
     const auto big_150 = ClampWindowSize(144.0f, 1920, 1080);
-    Expect(big_150.width == 960 && big_150.height == 732, "150% keeps scaled size");
+    Expect(big_150.width == 960 && big_150.height == 780, "150% keeps scaled size");
 
     // Small work area: clamped, preserving a 32px margin on each edge.
     const auto small = ClampWindowSize(96.0f, 400, 300);
@@ -141,6 +141,8 @@ void TestPaletteLightAndDarkDiffer() {
     Expect(light.card != dark.card, "card differs light vs dark");
     Expect(light.text != dark.text, "text differs light vs dark");
     Expect(light.selected_fill != dark.selected_fill, "selection fill differs");
+    Expect(light.footer == 0xE0ECFF, "light footer uses the mist-blue band");
+    Expect(dark.footer == 0x202A38, "dark footer uses the dark-blue band");
 
     // Light and dark palettes keep the current dark defaults intact.
     Expect(dark.background == 0x181818 && dark.card == 0x2B2B2B,
@@ -151,7 +153,7 @@ void TestPaletteLightAndDarkDiffer() {
 void TestPaletteSystemFollowsOs() {
     const PanelColors light = ResolveColors(Theme::System, false, false, {});
     const PanelColors dark = ResolveColors(Theme::System, true, false, {});
-    Expect(light.background == 0xF3F3F3, "system + light OS -> light palette");
+    Expect(light.background == 0xEFF6FF, "system + light OS -> mist-blue palette");
     Expect(dark.background == 0x181818, "system + dark OS -> dark palette");
 }
 
@@ -373,20 +375,21 @@ void TestAccessibleProviderWindowSmoke() {
 }
 
 // NR-023: the search box grew to 16~64 DIP and the list/footer moved down, so
-// the footer band 456..488 keeps 8 visible rows at 96 DPI.
+// the compact footer band 472..520 keeps 8 visible rows at 96 DPI.
 void TestSearchFieldGeometry() {
     const auto d96 = LayoutForDpi(96.0f);
-    Expect(d96.panel_height == 488, "96 DPI panel height is 488");
+    Expect(d96.panel_height == 520, "96 DPI panel height is 520");
     Expect(d96.list_top == 72, "96 DPI list top is 72");
     Expect(d96.search_bottom == 64, "96 DPI search bottom is 64");
-    Expect((456 - 72) / 48 == 8, "footer band 456..488 leaves 8 visible rows");
+    Expect((472 - 72) / 48 == 8, "footer band 472..520 leaves 8 visible rows");
 
-    // The EDIT rect is the 12/6-DIP-inset box, rounded to physical px; the font
-    // height is negative (character height) for LOGFONTW::lfHeight.
-    Expect(d96.search_edit_left == 28, "96 DPI edit left is 28");
-    Expect(d96.search_edit_top == 22, "96 DPI edit top is 22");
+    // The EDIT rect uses 12 DIP horizontal and 8/4 DIP vertical insets,
+    // rounded to physical px; the font height is negative (character height)
+    // for LOGFONTW::lfHeight.
+    Expect(d96.search_edit_left == 59, "96 DPI edit starts after search icon");
+    Expect(d96.search_edit_top == 24, "96 DPI edit top is 24");
     Expect(d96.search_edit_right == 612, "96 DPI edit right is 612");
-    Expect(d96.search_edit_bottom == 58, "96 DPI edit bottom is 58");
+    Expect(d96.search_edit_bottom == 60, "96 DPI edit bottom is 60");
     Expect(d96.search_font_height == -24, "96 DPI search font height is -24");
 }
 
@@ -411,6 +414,10 @@ void TestEditRectInsideSearchBox() {
     for (const float dpi : dpis) {
         const auto l = LayoutForDpi(dpi);
         Expect(l.search_edit_left > l.search_left, "edit left is inside the box");
+        Expect(l.search_edit_left > static_cast<int>((
+               nimblerun::layout::kSearchIconCenterXDip +
+               nimblerun::layout::kSearchIconRadiusDip) * l.scale),
+               "edit starts after search icon");
         Expect(l.search_edit_top > l.search_top, "edit top is inside the box");
         Expect(l.search_edit_right < l.search_right, "edit right is inside the box");
         Expect(l.search_edit_bottom < l.search_bottom, "edit bottom is inside the box");
@@ -423,7 +430,7 @@ void TestEditRectInsideSearchBox() {
 void TestSearchFieldColors() {
     const PanelColors light = ResolveColors(Theme::Light, false, false, {});
     Expect(light.input_fill == 0xFFFFFF, "light input fill is white");
-    Expect(light.input_border == 0xE0E0E0, "light input border is light gray");
+    Expect(light.input_border == 0xCBD5E1, "light input border is blue gray");
     Expect(light.input_fill != light.background, "light input fill distinct from background");
 
     const PanelColors dark = ResolveColors(Theme::Dark, false, false, {});
@@ -496,7 +503,7 @@ void TestGridGeometryFits() {
 
 // NR-120: the footer band keeps its height and hugs the client bottom, so the
 // path bar + key hints stay visible even when ClampWindowSize shortens the
-// panel below 488 DIP. A full-height client keeps the band exactly on
+// panel below 520 DIP. A full-height client keeps the band exactly on
 // kFooterTopDip.
 void TestFooterBandAlwaysVisible() {
     const float band = kPanelHeightDip - kFooterTopDip;
@@ -512,8 +519,8 @@ void TestFooterBandAlwaysVisible() {
         Expect(FooterTopDip(client) >= kListTopDip,
                "footer band never overlaps the search box");
     }
-    Expect(FooterTopDip(348.0f) == 316.0f, "200%@768 work area band top is 316");
-    Expect(FooterTopDip(464.0f) == 432.0f, "150%@1366x768 band top is 432");
+    Expect(FooterTopDip(348.0f) == 300.0f, "200%@768 work area band top is 300");
+    Expect(FooterTopDip(464.0f) == 416.0f, "150%@1366x768 band top is 416");
 }
 
 // NR-120: ViewportRowsForHeightDip shrinks the visible row count so the footer
@@ -524,7 +531,7 @@ void TestViewportRowsShrinkForFooter() {
     Expect(ViewportRowsForHeightDip(kPanelHeightDip, kGridColumns) == 4,
            "full grid rows");
     // 200% @ 1366x768 (work area 728px -> clamped client 348 DIP).
-    Expect(ViewportRowsForHeightDip(348.0f, 1) == 5, "clamped list rows (200%)");
+    Expect(ViewportRowsForHeightDip(348.0f, 1) == 4, "clamped list rows (200%)");
     Expect(ViewportRowsForHeightDip(348.0f, kGridColumns) == 2,
            "clamped grid rows (200%)");
     // 150% @ 1366x768 (work area 728px -> clamped client 464 DIP).
@@ -608,14 +615,14 @@ void TestSlotGeometryRoundTrips() {
 }
 
 
-// NR-029: grid hover needs a visible fill in every theme. Light/dark use the
-// card-level fill; high contrast collapses card to the window background, so
-// the palette resolves hover to the system highlight there (the selection
-// border is what separates a hovered cell from the selected cell).
+// NR-029: grid hover needs a visible fill in every theme. The mist-blue light
+// palette uses a dedicated hover fill; dark uses the card-level fill. High
+// contrast resolves hover to the system highlight (the selection border keeps
+// a hovered cell distinct from the selected cell).
 void TestGridHoverFillVisible() {
     const PanelColors light = ResolveColors(Theme::Light, false, false, {});
-    Expect(light.hover_fill == light.card && light.hover_fill != light.background,
-           "light hover fill is the card-level fill, visible on the background");
+    Expect(light.hover_fill == 0xDBEAFE && light.hover_fill != light.background,
+           "light hover fill is visibly distinct from the background");
     const PanelColors dark = ResolveColors(Theme::Dark, false, false, {});
     Expect(dark.hover_fill == dark.card && dark.hover_fill != dark.background,
            "dark hover fill is the card-level fill, visible on the background");

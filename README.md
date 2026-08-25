@@ -1,29 +1,51 @@
 # NimbleRun
 
-NimbleRun is a lightweight Windows app drawer: a grid of frequently used app icons with instant app-name search.
+**Launch Windows apps in a keystroke — without the noise of files, web results, or AI.**
 
-The MVP is intentionally narrow:
+NimbleRun is a lightweight, local-first app drawer for Windows 10 and 11. Press `Alt+Space`, pick a frequently used app, or type a few letters and press `Enter`.
 
-- C++20 and native Win32.
-- Direct2D/DirectWrite for the launcher surface.
-- Windows Shell for app discovery, icons, and launching.
-- Local-only data; no network, telemetry, or third-party runtime dependency.
-- Portable ZIP distribution.
+![NimbleRun product preview](docs/assets/nimblerun-preview.png)
 
-## Status
+![NimbleRun live build](docs/assets/nimblerun-live-check.png)
 
-The repository is mid-MVP (Phase 5 release gate, see `docs/roadmap.md`). The current executable is a real launcher: multi-source catalog with watcher-driven refresh, lazy icon store, search with usage ranking, pinning, settings, tray menu, and native cell tooltips. It is not yet a released product — release evidence (`docs/release-evidence.md`) is INCOMPLETE until the NFR-001 resource gates are measured.
+The live capture shows the light-blue four-row launcher layout. The native
+vertical scrollbar appears only when the catalog has more items than the
+visible grid/list area.
 
-## Requirements
+## Why NimbleRun?
 
-- Windows 10 22H2 or Windows 11 x64.
-- LLVM-MinGW x64 toolchain.
-- CMake 3.25 or newer.
-- Ninja.
+- **Apps only** — results stay focused on launchable desktop and Microsoft Store apps.
+- **Fast by design** — native C++20, Win32, Direct2D, and DirectWrite; no Electron or separate runtime.
+- **Keyboard or mouse** — instant search, arrow-key navigation, quick-launch shortcuts, and a frequently used app grid.
+- **Private and offline** — no network access, telemetry, accounts, or cloud sync.
+- **Quiet in the background** — event-driven refresh instead of constant disk scanning or high-frequency timers.
+- **Made for your setup** — pin and reorder apps, add local app folders, and follow the Windows light/dark theme.
+- **Comfortable at a glance** — a mist-blue body, softly tinted footer, rounded app cards, and a roomy four-row grid keep the launcher easy to scan.
 
-## Build
+## How it works
 
-Run these commands from a shell where LLVM-MinGW, CMake, and Ninja are on `PATH`:
+1. Press `Alt+Space` to show NimbleRun.
+2. Click a favorite app, or start typing to search the app catalog.
+3. Use the arrow keys and `Enter` to launch, or press `Esc` to close.
+
+NimbleRun discovers apps from the Start Menu, Windows AppsFolder, and local folders you choose. It launches them through Windows Shell APIs and keeps settings and usage data under `%LOCALAPPDATA%\NimbleRun`.
+
+## Project status
+
+NimbleRun is in the **Phase 5 release gate**. The launcher already includes app discovery, live catalog refresh, icons, search and usage ranking, pinning, settings, tray controls, and native tooltips.
+
+It is not released yet. Resource-budget measurements, soak testing, release packaging, and Windows 10/11 validation are still in progress. See the [roadmap](docs/roadmap.md) and [release evidence](docs/release-evidence.md) for details.
+
+## Build from source
+
+### Requirements
+
+- Windows 10 22H2 or Windows 11 x64
+- LLVM-MinGW x64 toolchain
+- CMake 3.25 or newer
+- Ninja
+
+From a shell with the required tools on `PATH`:
 
 ```powershell
 cmake -S . -B build -G Ninja -DCMAKE_TOOLCHAIN_FILE=cmake/llvm-mingw.cmake -DCMAKE_BUILD_TYPE=Release
@@ -31,28 +53,8 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-The executable is produced at `build/NimbleRun.exe`.
+The executable is produced at `build/NimbleRun.exe`. No administrator privileges or additional runtime are required.
 
-## Layout
+## Contributing
 
-```text
-NimbleRun/
-├── CMakeLists.txt
-├── AGENTS.md
-├── cmake/
-│   └── llvm-mingw.cmake
-├── docs/
-│   ├── design-spec.md
-│   ├── development.md
-│   ├── performance-baseline.md
-│   ├── roadmap.md
-│   └── testing.md
-├── src/
-│   ├── app_host/
-│   ├── catalog/
-│   ├── resources/
-│   └── search/
-└── tests/unit/
-```
-
-Read `AGENTS.md` before changing the project and `docs/design-spec.md` before making product decisions.
+Read [AGENTS.md](AGENTS.md) before changing the project and use the [design specification](docs/design-spec.md) as the product source of truth. Development and validation guidance lives in [docs/development.md](docs/development.md) and [docs/testing.md](docs/testing.md).
