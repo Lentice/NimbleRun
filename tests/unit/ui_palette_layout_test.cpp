@@ -82,7 +82,7 @@ void TestLayoutScalingAcrossDpi() {
     // 100% (96 DPI): every field equals the DIP constant.
     const auto d96 = LayoutForDpi(96.0f);
     Expect(d96.panel_width == 640, "100% panel width is 640px");
-    Expect(d96.panel_height == 520, "100% panel height is 520px");
+    Expect(d96.panel_height == 510, "100% panel height is 510px");
     Expect(d96.list_left == 16 && d96.list_right == 624, "100% list bounds");
     Expect(d96.list_top == 72, "100% list top");
     Expect(d96.row_height == 48, "100% row height");
@@ -92,7 +92,7 @@ void TestLayoutScalingAcrossDpi() {
     // 150% (144 DPI): all pixel geometry is exactly 1.5x the DIP size.
     const auto d144 = LayoutForDpi(144.0f);
     Expect(d144.panel_width == 960, "150% panel width is 960px");
-    Expect(d144.panel_height == 780, "150% panel height is 780px");
+    Expect(d144.panel_height == 765, "150% panel height is 765px");
     Expect(d144.row_height == 72, "150% row height");
     Expect(d144.tile_size == 45, "150% tile size");
     Expect(d144.list_left == 24 && d144.list_right == 936, "150% list bounds");
@@ -101,7 +101,7 @@ void TestLayoutScalingAcrossDpi() {
     // 200% (192 DPI): doubling the scale doubles the pixel sizes.
     const auto d192 = LayoutForDpi(192.0f);
     Expect(d192.panel_width == 1280, "200% panel width is 1280px");
-    Expect(d192.panel_height == 1040, "200% panel height is 1040px");
+    Expect(d192.panel_height == 1020, "200% panel height is 1020px");
     Expect(d192.row_height == 96, "200% row height is 2x 100%");
     Expect(d192.tile_size == 60, "200% tile size is 2x 100%");
     Expect(d192.list_right == 1248, "200% list right is 2x 100%");
@@ -125,9 +125,9 @@ void TestLayoutMonotonicBounds() {
 void TestClampWindowSize() {
     // Large work area: the panel keeps its DPI-scaled size.
     const auto big = ClampWindowSize(96.0f, 1920, 1080);
-    Expect(big.width == 640 && big.height == 520, "large work area keeps panel size");
+    Expect(big.width == 640 && big.height == 510, "large work area keeps panel size");
     const auto big_150 = ClampWindowSize(144.0f, 1920, 1080);
-    Expect(big_150.width == 960 && big_150.height == 780, "150% keeps scaled size");
+    Expect(big_150.width == 960 && big_150.height == 765, "150% keeps scaled size");
 
     // Small work area: clamped, preserving a 32px margin on each edge.
     const auto small = ClampWindowSize(96.0f, 400, 300);
@@ -378,13 +378,13 @@ void TestAccessibleProviderWindowSmoke() {
 }
 
 // NR-023: the search box grew to 16~64 DIP and the list/footer moved down, so
-// the compact footer band 476..520 keeps 8 visible rows at 96 DPI.
+// the compact footer band 466..510 keeps 8 visible rows at 96 DPI.
 void TestSearchFieldGeometry() {
     const auto d96 = LayoutForDpi(96.0f);
-    Expect(d96.panel_height == 520, "96 DPI panel height is 520");
+    Expect(d96.panel_height == 510, "96 DPI panel height is 510");
     Expect(d96.list_top == 72, "96 DPI list top is 72");
     Expect(d96.search_bottom == 64, "96 DPI search bottom is 64");
-    Expect((476 - 72) / 48 == 8, "footer band 476..520 leaves 8 visible rows");
+    Expect((466 - 72) / 48 == 8, "footer band 466..510 leaves 8 visible rows");
 
     // The EDIT rect uses 12 DIP horizontal and 8/4 DIP vertical insets,
     // rounded to physical px; the font height is negative (character height)
@@ -528,7 +528,7 @@ void TestGridGeometryFits() {
 
 // NR-120: the footer band keeps its height and hugs the client bottom, so the
 // path bar + key hints stay visible even when ClampWindowSize shortens the
-// panel below 520 DIP. A full-height client keeps the band exactly on
+// panel below 510 DIP. A full-height client keeps the band exactly on
 // kFooterTopDip.
 void TestFooterBandAlwaysVisible() {
     const float band = kPanelHeightDip - kFooterTopDip;

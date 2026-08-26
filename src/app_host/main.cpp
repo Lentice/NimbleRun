@@ -943,7 +943,7 @@ void UpdateViewportRows(HWND window) {
         nimblerun::layout::LayoutForDpi(GetDpiForWindow(window));
     // NR-120: the row area ends at the footer band's top edge, never the client
     // bottom, so ViewportRows() shrinks when ClampWindowSize shortens the panel
-    // below 520 DIP and the path bar + key hints stay visible (design-spec
+    // below 510 DIP and the path bar + key hints stay visible (design-spec
     // §4.2/§4.9). Pure DIP geometry, matching the D2D renderer's coordinate
     // space; a full-height client yields the same 8 list / 4 grid rows.
     const float client_height_dip = ClientHeightDip(window, layout.scale);
@@ -1002,7 +1002,7 @@ void SyncAccessibility(HWND window) {
     snapshot.search_bounds = search;
     // NR-120: the footer band is pinned to the client bottom (same rule the
     // renderer and UpdateViewportRows use), so the reported bounds match where
-    // the band actually paints when the panel is clamped below 520 DIP.
+    // the band actually paints when the panel is clamped below 510 DIP.
     const float client_height_dip = ClientHeightDip(window, layout.scale);
     const float footer_top_dip = nimblerun::layout::FooterTopDip(client_height_dip);
     const float footer_bottom_dip = footer_top_dip +
@@ -2043,7 +2043,7 @@ void Render(HWND window) {
     // carries the right-aligned Launch group or the grid's Alt hint. Only key
     // hints live here; no status, version or update text.
     // NR-120: the band hugs the client bottom (FooterTopDip), so the path bar +
-    // key hints stay visible when the panel is clamped below 520 DIP; a
+    // key hints stay visible when the panel is clamped below 510 DIP; a
     // full-height client keeps it exactly on kFooterTopDip as before.
     const D2D1_SIZE_F target_size = g_render_target->GetSize();
     const float footer_top = nimblerun::layout::FooterTopDip(target_size.height);
@@ -2186,7 +2186,7 @@ void ShowPanel(HWND window) {
     if (!GetMonitorInfoW(monitor, &monitor_info)) return;
 
     // NR-015: size the panel in DIPs scaled to the cursor monitor's DPI, then
-    // clamp it to the work area. Width/height stay 640x520 DIPs at any DPI, so
+    // clamp it to the work area. Width/height stay 640x510 DIPs at any DPI, so
     // the same layout math gives predictable bounds at 100/150/200%.
     const RECT work_area = monitor_info.rcWork;
     // NR-103: park the (still hidden) window on the cursor monitor first so a

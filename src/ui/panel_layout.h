@@ -9,14 +9,14 @@ namespace layout {
 // controls, hit-testing) via LayoutForDpi().
 constexpr float kDpi96 = 96.0f;
 constexpr float kPanelWidthDip = 640.0f;
-constexpr float kPanelHeightDip = 520.0f; // C layout: four grid rows plus a roomier footer
+constexpr float kPanelHeightDip = 510.0f; // C layout: four grid rows plus a roomier footer
 constexpr float kListLeftDip = 16.0f;
 constexpr float kListTopDip = 72.0f;      // NR-023: below the 64 DIP search box
 constexpr float kListRightDip = 624.0f;
 constexpr float kRowHeightDip = 48.0f;
 constexpr float kTileSizeDip = 30.0f;   // NR-012 fixed tile
 constexpr float kTileInsetDip = 8.0f;   // tile offset inside a row
-constexpr float kFooterTopDip = 476.0f; // C layout: compact footer band 476~520 (44 DIP tall)
+constexpr float kFooterTopDip = 466.0f; // C layout: compact footer band 466~510 (44 DIP tall)
 // NR-021: fixed footer key-hint band geometry (design-spec §4.9).
 constexpr float kFooterDividerWidthDip = 1.0f;
 constexpr float kFooterKeyBoxWidthDip = 44.0f;
@@ -35,7 +35,7 @@ constexpr float kRowHintReserveDip = kRowKeyBoxWidthDip + kRowKeyRightInsetDip +
 // NR-024: the footer "Alt+1~N" box is wider than the short modifier box.
 constexpr float kFooterWideKeyBoxWidthDip = 56.0f;
 // NR-029: empty-query icon grid (design-spec §4.9). One page is kGridColumns x
-// 4 rows = 24 cells (result area 72~476 DIP is 404 DIP tall -> 4 rows);
+// 4 rows = 24 cells (result area 72~466 DIP is 394 DIP tall -> 4 rows);
 // the grid reuses the model's viewport/scroll/selection state with Columns()>1.
 constexpr float kCellWidthDip = 101.0f;
 constexpr float kCellHeightDip = 96.0f;
@@ -131,7 +131,7 @@ WindowSize ClampWindowSize(float dpi, int work_width, int work_height);
 // panel below kPanelHeightDip (small screen + high DPI). `client_height_dip`
 // is the client rect height in DIPs; returns the DIP y of the footer band's
 // top edge, which is also the bottom edge of the row area. A full-height
-// 520 DIP client lands exactly on kFooterTopDip; a shorter client moves the
+// 510 DIP client lands exactly on kFooterTopDip; a shorter client moves the
 // band up instead of clipping it. Pure value; no HWND dependency.
 float FooterTopDip(float client_height_dip);
 
