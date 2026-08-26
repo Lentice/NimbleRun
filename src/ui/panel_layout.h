@@ -53,11 +53,15 @@ constexpr float kSearchRightDip = 624.0f;
 constexpr float kSearchBottomDip = 64.0f;  // NR-023: search box 16~64, height 48 DIP
 // NR-023: rounded search box geometry (design-spec §4.9).
 constexpr float kSearchCornerRadiusDip = 6.0f;
-constexpr float kSearchTextInsetDip = 12.0f;   // EDIT inset left/right of the box
 constexpr float kSearchIconCenterXDip = 36.0f;
 constexpr float kSearchIconCenterYDip = 40.0f;
 constexpr float kSearchIconRadiusDip = 7.0f;
 constexpr float kSearchIconTextGapDip = 16.0f;
+constexpr float kSearchSpinnerCenterXDip = 600.0f;
+constexpr float kSearchSpinnerCenterYDip = 40.0f;
+constexpr float kSearchSpinnerRadiusDip = 7.0f;
+constexpr float kSearchSpinnerTextGapDip = 12.0f;
+constexpr int kSearchSpinnerSegments = 8;
 // Shift the native single-line EDIT down slightly: Win32's internal text
 // padding otherwise makes the glyphs sit above the magnifier's visual center.
 constexpr float kSearchEditTopInsetDip = 8.0f;
@@ -66,6 +70,21 @@ constexpr float kSearchFontDip = 24.0f;
 constexpr float kTitleFontDip = 16.0f;
 constexpr float kTextFontDip = 14.0f;
 constexpr float kSmallFontDip = 11.0f;
+
+// The spinner timer exists only while both facts are true. Kept pure so the
+// idle-path decision is covered without testing Win32 timer internals.
+constexpr bool ShouldAnimateSearchSpinner(bool rebuild_in_progress,
+                                          bool panel_visible) {
+    return rebuild_in_progress && panel_visible;
+}
+
+constexpr float SearchSpinnerSegmentOpacity(int segment, int frame,
+                                             bool high_contrast) {
+    const int distance = (segment - frame + kSearchSpinnerSegments) %
+                         kSearchSpinnerSegments;
+    if (high_contrast) return distance < 2 ? 1.0f : 0.0f;
+    return distance < 4 ? 1.0f - 0.2f * distance : 0.2f;
+}
 
 // Physical-pixel geometry for a monitor at `dpi`: every field is the
 // corresponding DIP constant scaled by dpi / 96 (rounded). Pure value; no HWND

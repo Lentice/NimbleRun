@@ -9,6 +9,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <cmath>
 #include <cwchar>
 #include <oleacc.h>
 #include <string>
@@ -27,6 +28,8 @@ using nimblerun::layout::LayoutForDpi;
 using nimblerun::layout::ViewportRowsForHeightDip;
 using nimblerun::layout::SlotAtPointDip;
 using nimblerun::layout::SlotRect;
+using nimblerun::layout::ShouldAnimateSearchSpinner;
+using nimblerun::layout::SearchSpinnerSegmentOpacity;
 using nimblerun::layout::kCellHeightDip;
 using nimblerun::layout::kCellWidthDip;
 using nimblerun::layout::kFooterTopDip;
@@ -388,7 +391,7 @@ void TestSearchFieldGeometry() {
     // for LOGFONTW::lfHeight.
     Expect(d96.search_edit_left == 59, "96 DPI edit starts after search icon");
     Expect(d96.search_edit_top == 24, "96 DPI edit top is 24");
-    Expect(d96.search_edit_right == 612, "96 DPI edit right is 612");
+    Expect(d96.search_edit_right == 581, "96 DPI edit leaves room for spinner");
     Expect(d96.search_edit_bottom == 60, "96 DPI edit bottom is 60");
     Expect(d96.search_font_height == -24, "96 DPI search font height is -24");
 }
@@ -420,8 +423,30 @@ void TestEditRectInsideSearchBox() {
                "edit starts after search icon");
         Expect(l.search_edit_top > l.search_top, "edit top is inside the box");
         Expect(l.search_edit_right < l.search_right, "edit right is inside the box");
+        // The spinner repaint fills center +/- (radius + 3) DIP, so the EDIT
+        // must clear that padded rect, not just the drawn radius.
+        Expect(l.search_edit_right < static_cast<int>((
+                   nimblerun::layout::kSearchSpinnerCenterXDip -
+                   nimblerun::layout::kSearchSpinnerRadiusDip - 3.0f) * l.scale),
+               "edit ends before the scanning spinner repaint rect");
         Expect(l.search_edit_bottom < l.search_bottom, "edit bottom is inside the box");
     }
+}
+
+void TestSearchSpinnerIdleDecision() {
+    Expect(ShouldAnimateSearchSpinner(true, true),
+           "visible rebuild animates scanning spinner");
+    Expect(!ShouldAnimateSearchSpinner(true, false),
+           "hidden panel stops scanning spinner");
+    Expect(!ShouldAnimateSearchSpinner(false, true),
+           "completed rebuild stops scanning spinner");
+    Expect(SearchSpinnerSegmentOpacity(0, 0, false) == 1.0f,
+           "normal spinner head is opaque");
+    Expect(std::abs(SearchSpinnerSegmentOpacity(3, 0, false) - 0.4f) < 0.001f,
+           "normal spinner trail fades by segment");
+    Expect(SearchSpinnerSegmentOpacity(0, 0, true) == 1.0f &&
+               SearchSpinnerSegmentOpacity(2, 0, true) == 0.0f,
+           "high contrast spinner uses solid visible segments only");
 }
 
 // NR-023 palette: input fill/border follow the theme and never equal the panel
@@ -652,6 +677,7 @@ int wmain() {
     TestSearchFieldGeometry();
     TestSearchFieldScalingTo200Percent();
     TestEditRectInsideSearchBox();
+    TestSearchSpinnerIdleDecision();
     TestSearchFieldColors();
     TestQuickSelectSlotForKey();
     TestQuickSelectLabelForSlot();

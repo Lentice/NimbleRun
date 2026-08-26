@@ -105,6 +105,8 @@ constexpr UINT_PTR kRebuildTimerId = 2;
 // resident timer).
 constexpr UINT_PTR kTooltipTimerId = 3;
 constexpr UINT kTooltipDelayMs = 150;
+constexpr UINT_PTR kSearchSpinnerTimerId = 4;
+constexpr UINT kSearchSpinnerIntervalMs = 125;  // 8 FPS
 // NR-178: the grid name rect is the cell inset 4 DIP per side (Render's
 // name_rect); a name whose natural width exceeds this is drawn trimmed.
 constexpr float kTooltipNameWidthDip = nimblerun::layout::kCellWidthDip - 8.0f;
@@ -285,6 +287,9 @@ WNDPROC g_search_original_proc = nullptr;
 // palette change and released on WM_DESTROY (no per-message allocation).
 HFONT g_search_font = nullptr;
 HBRUSH g_search_bg_brush = nullptr;
+bool g_search_spinner_timer_active = false;
+int g_search_spinner_frame = 0;
+bool g_high_contrast_active = false;
 
 // NR-011 refresh state. The coordinator is pure; the watcher posts change
 // messages, and enumeration runs on short-lived background threads whose
@@ -501,10 +506,11 @@ nimblerun::palette::SystemColors ReadSystemColors() {
 }
 
 nimblerun::palette::PanelColors ResolveCurrentColors() {
+    g_high_contrast_active = HighContrastActive();
     return nimblerun::palette::ResolveColors(
         g_theme,
         SystemUsesDarkTheme(),
-        HighContrastActive(),
+        g_high_contrast_active,
         ReadSystemColors());
 }
 
@@ -893,6 +899,38 @@ void ShowTooltipForHoverCell(HWND window) {
 
 void SyncAccessibility(HWND window);
 
+RECT SearchSpinnerBoundsPx(HWND window) {
+    const float scale = static_cast<float>(GetDpiForWindow(window)) /
+                        nimblerun::layout::kDpi96;
+    const float padding = nimblerun::layout::kSearchSpinnerRadiusDip + 3.0f;
+    return {static_cast<LONG>(std::floor(
+                (nimblerun::layout::kSearchSpinnerCenterXDip - padding) * scale)),
+            static_cast<LONG>(std::floor(
+                (nimblerun::layout::kSearchSpinnerCenterYDip - padding) * scale)),
+            static_cast<LONG>(std::ceil(
+                (nimblerun::layout::kSearchSpinnerCenterXDip + padding) * scale)),
+            static_cast<LONG>(std::ceil(
+                (nimblerun::layout::kSearchSpinnerCenterYDip + padding) * scale))};
+}
+
+void SyncSearchSpinnerAnimation(HWND window) {
+    if (!window) return;
+    const bool should_animate = nimblerun::layout::ShouldAnimateSearchSpinner(
+        g_refresh && g_refresh->IsRebuildInProgress(), IsWindowVisible(window) != FALSE);
+    if (should_animate == g_search_spinner_timer_active) return;
+
+    if (should_animate) {
+        g_search_spinner_timer_active =
+            SetTimer(window, kSearchSpinnerTimerId, kSearchSpinnerIntervalMs, nullptr) != 0;
+    } else {
+        KillTimer(window, kSearchSpinnerTimerId);
+        g_search_spinner_timer_active = false;
+    }
+    const RECT bounds = SearchSpinnerBoundsPx(window);
+    InvalidateRect(window, &bounds, FALSE);
+    SyncAccessibility(window);
+}
+
 // NR-020: recomputes the viewport row count from the current client rect and
 // DPI and pushes it into the model (design-spec §4.2/§4.9). Called whenever the
 // panel is shown or resized; no timers. NR-029: the row height differs per
@@ -940,6 +978,9 @@ void SyncAccessibility(HWND window) {
     snapshot.footer = L"Query: " + snapshot.query + L"; Page " +
                       std::to_wstring(snapshot.page) + L" of " +
                       std::to_wstring(snapshot.page_count);
+    if (g_search_spinner_timer_active) {
+        snapshot.footer += L"; Scanning apps";
+    }
     if (selected_index >= 0) {
         snapshot.footer += L"; Selected: " + g_model->SelectedAccessibleName();
     }
@@ -1144,6 +1185,7 @@ void HidePanel(HWND window) {
     // popup on screen.
     HideCellTooltip(window);
     ShowWindow(window, SW_HIDE);
+    SyncSearchSpinnerAnimation(window);
     if (g_icon_worker) {
         // NR-099: drop the previous hide cycle's queued prewarm before the
         // fresh flush + prewarm for the new idle session is posted, so stale
@@ -1499,6 +1541,7 @@ void OnGenerationCompleteRefresh() {
     }
     g_launch_failure_refresh.OnRefreshComplete();
     RefreshPanelSnapshot();
+    SyncSearchSpinnerAnimation(g_main_window);
     if (g_rebuild_pipeline && !g_rebuild_pipeline->CacheWritesDisabled()) {
         // NR-187: the cache is rebuildable, but a silent write failure hides a
         // disk/permission problem the next cold start will hit again; one
@@ -1519,6 +1562,7 @@ void OnGenerationCompleteRefresh() {
 void StartRebuild(std::vector<nimblerun::CatalogSource> sources) {
     if (g_rebuild_pipeline) {
         g_rebuild_pipeline->Request(std::move(sources), nimblerun::RebuildReason::Explicit);
+        SyncSearchSpinnerAnimation(g_main_window);
     }
 }
 
@@ -1594,9 +1638,61 @@ void DrawKeyBox(const wchar_t* label, const D2D1_RECT_F& box_rect) {
         g_dim_brush);
 }
 
+void DrawSearchSpinner(float stroke_width) {
+    constexpr float kPi = 3.14159265358979323846f;
+    for (int segment = 0; segment < nimblerun::layout::kSearchSpinnerSegments;
+         ++segment) {
+        const float opacity = nimblerun::layout::SearchSpinnerSegmentOpacity(
+            segment, g_search_spinner_frame, g_high_contrast_active);
+        if (opacity == 0.0f) continue;
+        g_dim_brush->SetOpacity(opacity);
+        const float angle = (static_cast<float>(segment) /
+                             static_cast<float>(nimblerun::layout::kSearchSpinnerSegments)) *
+                                2.0f * kPi - kPi / 2.0f;
+        const float sin_angle = std::sin(angle);
+        const float cos_angle = std::cos(angle);
+        g_render_target->DrawLine(
+            D2D1::Point2F(nimblerun::layout::kSearchSpinnerCenterXDip +
+                              cos_angle * 4.0f,
+                          nimblerun::layout::kSearchSpinnerCenterYDip +
+                              sin_angle * 4.0f),
+            D2D1::Point2F(nimblerun::layout::kSearchSpinnerCenterXDip +
+                              cos_angle * nimblerun::layout::kSearchSpinnerRadiusDip,
+                          nimblerun::layout::kSearchSpinnerCenterYDip +
+                              sin_angle * nimblerun::layout::kSearchSpinnerRadiusDip),
+            g_dim_brush, stroke_width);
+    }
+    g_dim_brush->SetOpacity(1.0f);
+}
+
 void Render(HWND window) {
     PAINTSTRUCT paint{};
     BeginPaint(window, &paint);
+
+    const RECT spinner_bounds = SearchSpinnerBoundsPx(window);
+    if (g_search_spinner_timer_active && g_render_target && g_search_fill_brush &&
+        g_dim_brush && EqualRect(&paint.rcPaint, &spinner_bounds)) {
+        float dpi_x = 96.0f;
+        float dpi_y = 96.0f;
+        g_render_target->GetDpi(&dpi_x, &dpi_y);
+        const float padding = nimblerun::layout::kSearchSpinnerRadiusDip + 3.0f;
+        const D2D1_RECT_F clip = D2D1::RectF(
+            nimblerun::layout::kSearchSpinnerCenterXDip - padding,
+            nimblerun::layout::kSearchSpinnerCenterYDip - padding,
+            nimblerun::layout::kSearchSpinnerCenterXDip + padding,
+            nimblerun::layout::kSearchSpinnerCenterYDip + padding);
+        g_render_target->BeginDraw();
+        g_render_target->PushAxisAlignedClip(clip, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+        g_render_target->FillRectangle(clip, g_search_fill_brush);
+        DrawSearchSpinner(std::max(1.0f, 1.5f * dpi_x / nimblerun::layout::kDpi96));
+        g_render_target->PopAxisAlignedClip();
+        if (g_render_target->EndDraw() == D2DERR_RECREATE_TARGET) {
+            DiscardDeviceResources();
+            InvalidateRect(window, nullptr, FALSE);
+        }
+        EndPaint(window, &paint);
+        return;
+    }
     SyncAccessibility(window);
 
     // NR-015: resolve the palette for this frame; if it differs from the one
@@ -1669,6 +1765,8 @@ void Render(HWND window) {
         D2D1::Point2F(search_icon_center.x + handle_start + kSearchIconHandleDip,
                       search_icon_center.y + handle_start + kSearchIconHandleDip),
         g_dim_brush, search_icon_stroke_width);
+
+    if (g_search_spinner_timer_active) DrawSearchSpinner(search_icon_stroke_width);
 
     if (g_model) {
         const auto& rows = g_model->Rows();
@@ -2106,6 +2204,7 @@ void ShowPanel(HWND window) {
     const int top = work_area.top + ((work_area.bottom - work_area.top) - size.height) / 2;
 
     SetWindowPos(window, HWND_TOPMOST, left, top, size.width, size.height, SWP_SHOWWINDOW);
+    SyncSearchSpinnerAnimation(window);
     SetForegroundWindow(window);
     // NR-015: the theme applies on the next panel show; reload so a settings
     // change is picked up without a restart (same "apply on next launch" rule
@@ -2727,6 +2826,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
         g_rebuild_pipeline->Request({*source}, l_param != 0
             ? nimblerun::RebuildReason::FullRescan
             : nimblerun::RebuildReason::Change);
+        SyncSearchSpinnerAnimation(window);
         return 0;
     }
     case kRebuildDoneMessage:
@@ -2741,12 +2841,21 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
     case WM_TIMER:
         if (w_param == kRebuildTimerId) {
             KillTimer(window, kRebuildTimerId);
-            if (g_rebuild_pipeline) g_rebuild_pipeline->OnDebounceTimer();
+            if (g_rebuild_pipeline) {
+                g_rebuild_pipeline->OnDebounceTimer();
+                SyncSearchSpinnerAnimation(window);
+            }
         } else if (w_param == kTooltipTimerId) {
             // NR-178: one-shot -- the tooltip shows once per hover, then the
             // next hover change re-arms the timer.
             KillTimer(window, kTooltipTimerId);
             ShowTooltipForHoverCell(window);
+        } else if (w_param == kSearchSpinnerTimerId) {
+            g_search_spinner_frame =
+                (g_search_spinner_frame + 1) %
+                nimblerun::layout::kSearchSpinnerSegments;
+            const RECT bounds = SearchSpinnerBoundsPx(window);
+            InvalidateRect(window, &bounds, FALSE);
         }
         return 0;
     case kSettingsMessage: {
@@ -3178,6 +3287,8 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
         // NR-178: tear the tooltip down with the panel (its D2D resources are
         // created from factories that are released after the message loop).
         HideCellTooltip(window);
+        KillTimer(window, kSearchSpinnerTimerId);
+        g_search_spinner_timer_active = false;
         RemoveTrayIcon(window);
         g_hotkey.Shutdown();
         // NR-032/NR-036: stop the icon worker before the D2D resources and the

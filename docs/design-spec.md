@@ -274,6 +274,7 @@ Tab 順序只包含搜尋欄、結果清單及必要按鈕。面板顯示後不�
 - 數字快選指引顯示於對應項目上：清單狀態在列最右方，寬度固定且常駐佔位，App 名稱與第二行文字的可用寬度不因指引有無而變動。格狀狀態在格子右上角，僅在按住 `Alt` 時顯示；未按住時 footer 右側以 `Hold` [Alt] `to show shortcuts` 提示，且 `Alt` 使用與其他快捷鍵相同的按鍵樣式。格狀態的 footer 快選盒固定顯示完整鍵序 `Alt+0~9`（§4.7 指派前 10 格，不隨可見列數縮減）；清單狀態的 `Alt+1~N` 依當前可見列數組出。修飾鍵 `Alt` 仍只在 footer 說明一次，不在每個方塊上重複。
 - 搜尋欄外觀：距面板左右各 16 DIP、上緣 16 DIP，高 48 DIP，圓角半徑 6 DIP；填色與 1 DIP 邊框由主題色盤提供，與面板底色可分辨，高對比模式下改用系統語意色並保持實心可見。
 - 搜尋輸入沿用原生 EDIT 控制項（caret、選取、IME、剪貼簿為系統行為），文字左內距 12 DIP、字級 24 DIP。搜尋欄的圓角框由面板繪製，EDIT 內縮於框內。
+- Catalog rebuild 進行中且面板可見時，搜尋框右側顯示 8 段式 spinner，以 8 FPS 步進動畫表示正在掃描；不顯示文字、百分比或預估時間。面板隱藏或 rebuild 完成時立即停止動畫 timer 並隱藏 spinner，待機路徑不保留動畫更新。每個 tick 只重畫 spinner 區域；高對比模式只使用全不透明的系統語意色段。Spinner 是 best-effort 視覺回饋，建立失敗不得延後 app startup、主視窗顯示或 Catalog rebuild。
 - 啟用「Switch input to English on show」時，面板 hidden→visible 且搜尋框取得焦點後，以原生 TSF（thread-manager keyboard-input conversion compartment，`TF_CONVERSIONMODE_ALPHANUMERIC`）嘗試切換目前 IME 為英文／英數模式，TSF 不可用時回退 IMM32（`ImmGetContext`／`ImmSetOpenStatus`／`ImmSetConversionStatus`）。切換為 best-effort：不使用輸入法廠商私有 API、不切換 keyboard layout，對不遵守公開 TSF／IMM32 行為的第三方輸入法失敗時為安全 no-op（面板照常顯示）。
 - 使用系統字型與系統色彩語意。搜尋欄字型取系統 message font，只覆寫字級。
 - 跟隨 Windows 淺色／深色模式。

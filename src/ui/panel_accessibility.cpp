@@ -72,6 +72,10 @@ bool PanelAccessibilityProvider::Update(
         if (window_ != nullptr && structure_changed) {
             NotifyWinEvent(EVENT_OBJECT_REORDER, window_, OBJID_CLIENT, CHILDID_SELF);
         }
+        if (window_ != nullptr && old.footer != snapshot.footer) {
+            NotifyWinEvent(EVENT_OBJECT_NAMECHANGE, window_, OBJID_CLIENT,
+                           kFirstRowChild + static_cast<LONG>(snapshot.rows.size()));
+        }
         if (window_ != nullptr && old.selected_row != snapshot.selected_row) {
             const LONG child = snapshot.selected_row >= 0
                 ? kFirstRowChild + snapshot.selected_row : CHILDID_SELF;

@@ -28,7 +28,8 @@ LayoutPx LayoutForDpi(float dpi) {
     out.search_edit_left = px(kSearchIconCenterXDip + kSearchIconRadiusDip +
                               kSearchIconTextGapDip);
     out.search_edit_top = px(kSearchTopDip + kSearchEditTopInsetDip);
-    out.search_edit_right = px(kSearchRightDip - kSearchTextInsetDip);
+    out.search_edit_right = px(kSearchSpinnerCenterXDip - kSearchSpinnerRadiusDip -
+                               kSearchSpinnerTextGapDip);
     out.search_edit_bottom = px(kSearchBottomDip - kSearchEditBottomInsetDip);
     out.search_font_height = -px(kSearchFontDip);
     out.dpi = static_cast<int>(std::lround(dpi));
