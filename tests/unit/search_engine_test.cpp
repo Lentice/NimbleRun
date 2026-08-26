@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -118,15 +119,22 @@ int wmain() {
             big.push_back(std::move(entry));
         }
 
-        const auto start = steady_clock::now();
-        const auto results = nimblerun::SearchApps(big, L"e");
-        const auto elapsed_us =
-            duration_cast<microseconds>(steady_clock::now() - start).count();
+        std::vector<std::int64_t> samples;
+        samples.reserve(100);
+        std::vector<AppEntry> results;
+        for (int i = 0; i < 100; ++i) {
+            const auto start = steady_clock::now();
+            results = nimblerun::SearchApps(big, L"e");
+            samples.push_back(duration_cast<microseconds>(steady_clock::now() - start).count());
+        }
+        std::sort(samples.begin(), samples.end());
+        const auto elapsed_us = samples.back();
+        const auto p95_us = samples[94];
 
-        std::wprintf(L"NR-038: SearchApps over 5000 pre-normalized entries took %lld us (%lld ms), matched %zu\n",
-                     elapsed_us, elapsed_us / 1000, results.size());
+        std::wprintf(L"NR-038: SearchApps over 5000 pre-normalized entries p95 %lld us (%lld ms), max %lld us, matched %zu\n",
+                     p95_us, p95_us / 1000, elapsed_us, results.size());
         Expect(results.size() == 5000, "5000-entry search returns every entry");
-        Expect(elapsed_us / 1000 < 50, "5000-entry search stays under 50 ms");
+        Expect(p95_us < 16000, "5000-entry search p95 stays under 16 ms blocking threshold");
     }
 
     // NR-047: worst-path latency when every display name misses and every entry

@@ -69,6 +69,7 @@ constexpr wchar_t kWindowClass[] = L"NimbleRun.Phase0Probe";
 constexpr wchar_t kWindowTitle[] = L"NimbleRun";
 constexpr wchar_t kInstanceMutex[] = L"Local\\NimbleRun.SingleInstance";
 constexpr wchar_t kStartupReadyEvent[] = L"Local\\NimbleRun.StartupReady";
+constexpr wchar_t kHotkeyReadyEvent[] = L"Local\\NimbleRun.HotkeyReady";
 constexpr wchar_t kShowPanelMessageName[] = L"NimbleRun.ShowPanel";
 constexpr DWORD kStartupRendezvousTimeoutMs = 5000;
 constexpr DWORD kStartupTestGateTimeoutMs = 30000;
@@ -214,6 +215,8 @@ bool g_pins_notified = false;
 HWND g_main_window = nullptr;
 HWND g_scrollbar = nullptr;
 HANDLE g_test_show_semaphore = nullptr;
+HANDLE g_test_input_ready_event = nullptr;
+HANDLE g_test_visible_ready_event = nullptr;
 // NR-058: true once Shell_NotifyIconW(NIM_ADD) succeeded, so the host knows
 // whether a balloon can be shown now or must be deferred to the startup send
 // point (the first pin load runs before the tray icon exists).
@@ -334,6 +337,22 @@ HANDLE OpenTestShowSemaphore() {
         return nullptr;
     }
     return OpenSemaphoreW(SEMAPHORE_MODIFY_STATE, FALSE, name.c_str());
+}
+
+HANDLE OpenTestInputReadyEvent() {
+    const std::wstring name = EnvironmentValue(L"NIMBLERUN_TEST_INPUT_READY_EVENT");
+    if (name.empty()) {
+        return nullptr;
+    }
+    return OpenEventW(EVENT_MODIFY_STATE, FALSE, name.c_str());
+}
+
+HANDLE OpenTestVisibleReadyEvent() {
+    const std::wstring name = EnvironmentValue(L"NIMBLERUN_TEST_VISIBLE_READY_EVENT");
+    if (name.empty()) {
+        return nullptr;
+    }
+    return OpenEventW(EVENT_MODIFY_STATE, FALSE, name.c_str());
 }
 
 // NR-017: bounded local diagnostic log under the per-user data dir. Only
@@ -2046,6 +2065,10 @@ void Render(HWND window) {
     if (result == D2DERR_RECREATE_TARGET) {
         DiscardDeviceResources();
     }
+    if (g_test_visible_ready_event && g_model && g_model->Columns() > 1 &&
+        g_model->Rows().size() >= 20 && g_icon_request_session.PendingCount() == 0) {
+        SetEvent(g_test_visible_ready_event);
+    }
     EndPaint(window, &paint);
 }
 
@@ -2163,6 +2186,9 @@ void ShowPanel(HWND window) {
         if (nimblerun::ShouldSetEnglishInputMode(
                 g_settings.english_input_on_show, was_visible)) {
             nimblerun::SetEnglishInputMode(g_search_edit);
+        }
+        if (g_test_input_ready_event) {
+            SetEvent(g_test_input_ready_event);
         }
     }
     // NR-020/NR-029: the visible row count derives from the actual client rect
@@ -3246,6 +3272,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     if (!startup_ready) {
         return 1;
     }
+    nimblerun::HandleGuard hotkey_ready(
+        CreateEventW(nullptr, TRUE, FALSE, kHotkeyReadyEvent));
+    if (!hotkey_ready) {
+        return 1;
+    }
 
     nimblerun::HandleGuard mutex(CreateMutexW(nullptr, TRUE, kInstanceMutex));
     if (!mutex) {
@@ -3311,6 +3342,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     SetEvent(startup_ready.Get());
     nimblerun::HandleGuard test_show_semaphore{OpenTestShowSemaphore()};
     g_test_show_semaphore = test_show_semaphore.Get();
+    nimblerun::HandleGuard test_input_ready_event{OpenTestInputReadyEvent()};
+    g_test_input_ready_event = test_input_ready_event.Get();
+    nimblerun::HandleGuard test_visible_ready_event{OpenTestVisibleReadyEvent()};
+    g_test_visible_ready_event = test_visible_ready_event.Get();
 
     // NR-044: let DWM round the panel's corners so it matches the Windows 11
     // flyouts and the panel's own 6 DIP search box (design-spec §4.9). The
@@ -3536,6 +3571,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         startup_binding = settings_binding;
     }
     const nimblerun::HotkeyResult hotkey_result = g_hotkey.Initialize(window, startup_binding);
+    SetEvent(hotkey_ready.Get());
 
     AddTrayIcon(window);
     if (!hotkey_result.success) {
@@ -3616,6 +3652,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         provider->Release();
     }
     g_test_show_semaphore = nullptr;
+    g_test_input_ready_event = nullptr;
+    g_test_visible_ready_event = nullptr;
     if (g_rebuild_shutdown_timed_out) {
         // NR-146: Shutdown timed out and detached the workers (rebuild_pipeline.cpp
         // timeout branch, NR-123), which may still be running on this object's

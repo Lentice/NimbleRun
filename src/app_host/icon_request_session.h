@@ -15,6 +15,7 @@ public:
     void OnResult(const std::wstring& encoded_key, bool ok);
     void OnShow();
     void DrainDropped(const std::vector<std::wstring>& dropped_keys);
+    std::size_t PendingCount() const { return pending_.size(); }
 
 private:
     std::set<std::wstring> pending_;

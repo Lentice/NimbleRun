@@ -1,11 +1,11 @@
 # Release Evidence
 
-- Generated: 2026-08-12 11:32:36 +08:00 (UTC: 2026-08-12T11:32:36.0678695+08:00)
+- Generated: 2026-08-25 17:40:50 +08:00 (UTC: 2026-08-25T17:40:50.4615917+08:00)
 - OS: Microsoft Windows 11 專業版 build 26200
 - CPU: Intel64 Family 6 Model 151 Stepping 2, GenuineIntel
 - Debugger attached: False
-- Git commit: 6c11b7f916016d7ef2a5fb7265b42277a86b7902
-- CTest count: Total Tests: 32
+- Git commit: e98134b119f63203decd2d5bbac03d54e2c49511
+- CTest count: Total Tests: 33
 
 ## Tool versions
 
@@ -26,87 +26,89 @@
 
 ```text
 # cmake configure
--- Configuring done (0.3s)
--- Generating done (0.1s)
+-- Configuring done (0.2s)
+-- Generating done (0.0s)
 -- Build files have been written to: E:/GitHub/NimbleRun/build
 exit code: 0
 ```
 ```text
 # cmake build
-ninja: no work to do.
+[1/1] Linking CXX executable NimbleRun.exe
 exit code: 0
 ```
 ```text
 # ctest full suite
 Test project E:/GitHub/NimbleRun/build
       Start  1: nimblerun_search_test
- 1/32 Test  #1: nimblerun_search_test ....................   Passed    0.07 sec
+ 1/33 Test  #1: nimblerun_search_test ....................   Passed    0.02 sec
       Start  2: nimblerun_hotkey_test
- 2/32 Test  #2: nimblerun_hotkey_test ....................   Passed    0.09 sec
+ 2/33 Test  #2: nimblerun_hotkey_test ....................   Passed    0.02 sec
       Start  3: nimblerun_start_menu_catalog_test
- 3/32 Test  #3: nimblerun_start_menu_catalog_test ........   Passed   15.27 sec
+ 3/33 Test  #3: nimblerun_start_menu_catalog_test ........   Passed    6.75 sec
       Start  4: nimblerun_settings_test
- 4/32 Test  #4: nimblerun_settings_test ..................   Passed    0.57 sec
+ 4/33 Test  #4: nimblerun_settings_test ..................   Passed    0.49 sec
       Start  5: nimblerun_appsfolder_catalog_test
- 5/32 Test  #5: nimblerun_appsfolder_catalog_test ........   Passed    1.53 sec
+ 5/33 Test  #5: nimblerun_appsfolder_catalog_test ........   Passed    1.33 sec
       Start  6: nimblerun_app_filter_test
- 6/32 Test  #6: nimblerun_app_filter_test ................   Passed    0.04 sec
+ 6/33 Test  #6: nimblerun_app_filter_test ................   Passed    0.02 sec
       Start  7: nimblerun_user_folder_catalog_test
- 7/32 Test  #7: nimblerun_user_folder_catalog_test .......   Passed    0.12 sec
+ 7/33 Test  #7: nimblerun_user_folder_catalog_test .......   Passed    0.05 sec
       Start  8: nimblerun_identity_dedup_test
- 8/32 Test  #8: nimblerun_identity_dedup_test ............   Passed    0.09 sec
+ 8/33 Test  #8: nimblerun_identity_dedup_test ............   Passed    0.07 sec
       Start  9: nimblerun_shell_launch_test
- 9/32 Test  #9: nimblerun_shell_launch_test ..............   Passed    0.98 sec
+ 9/33 Test  #9: nimblerun_shell_launch_test ..............   Passed    0.79 sec
       Start 10: nimblerun_recent_usage_test
-10/32 Test #10: nimblerun_recent_usage_test ..............   Passed    0.30 sec
+10/33 Test #10: nimblerun_recent_usage_test ..............   Passed    0.17 sec
       Start 11: nimblerun_list_vertical_slice_test
-11/32 Test #11: nimblerun_list_vertical_slice_test .......   Passed    0.06 sec
+11/33 Test #11: nimblerun_list_vertical_slice_test .......   Passed    0.02 sec
       Start 12: nimblerun_icons_cache_test
-12/32 Test #12: nimblerun_icons_cache_test ...............   Passed    0.04 sec
+12/33 Test #12: nimblerun_icons_cache_test ...............   Passed    0.02 sec
       Start 13: nimblerun_icon_pack_format_test
-13/32 Test #13: nimblerun_icon_pack_format_test ..........   Passed    0.11 sec
+13/33 Test #13: nimblerun_icon_pack_format_test ..........   Passed    0.08 sec
       Start 14: nimblerun_icon_store_test
-14/32 Test #14: nimblerun_icon_store_test ................   Passed    8.40 sec
+14/33 Test #14: nimblerun_icon_store_test ................   Passed    6.94 sec
       Start 15: nimblerun_png_codec_test
-15/32 Test #15: nimblerun_png_codec_test .................   Passed    0.10 sec
+15/33 Test #15: nimblerun_png_codec_test .................   Passed    0.06 sec
       Start 16: nimblerun_icon_worker_test
-16/32 Test #16: nimblerun_icon_worker_test ...............   Passed    1.40 sec
+16/33 Test #16: nimblerun_icon_worker_test ...............   Passed    1.30 sec
       Start 17: nimblerun_handoff_registry_test
-17/32 Test #17: nimblerun_handoff_registry_test ..........   Passed    0.05 sec
+17/33 Test #17: nimblerun_handoff_registry_test ..........   Passed    0.02 sec
       Start 18: nimblerun_icon_request_session_test
-18/32 Test #18: nimblerun_icon_request_session_test ......   Passed    0.15 sec
+18/33 Test #18: nimblerun_icon_request_session_test ......   Passed    0.02 sec
       Start 19: nimblerun_dpi_theme_accessibility_test
-19/32 Test #19: nimblerun_dpi_theme_accessibility_test ...   Passed    0.10 sec
+19/33 Test #19: nimblerun_dpi_theme_accessibility_test ...   Passed    0.05 sec
       Start 20: nimblerun_settings_ui_test
-20/32 Test #20: nimblerun_settings_ui_test ...............   Passed    0.13 sec
+20/33 Test #20: nimblerun_settings_ui_test ...............   Passed    0.06 sec
       Start 21: nimblerun_startup_option_test
-21/32 Test #21: nimblerun_startup_option_test ............   Passed    0.10 sec
+21/33 Test #21: nimblerun_startup_option_test ............   Passed    0.04 sec
       Start 22: nimblerun_catalog_refresh_test
-22/32 Test #22: nimblerun_catalog_refresh_test ...........   Passed    0.21 sec
+22/33 Test #22: nimblerun_catalog_refresh_test ...........   Passed    0.15 sec
       Start 23: nimblerun_directory_walker_test
-23/32 Test #23: nimblerun_directory_walker_test ..........   Passed    0.06 sec
+23/33 Test #23: nimblerun_directory_walker_test ..........   Passed    0.03 sec
       Start 24: nimblerun_pinning_test
-24/32 Test #24: nimblerun_pinning_test ...................   Passed    1.73 sec
+24/33 Test #24: nimblerun_pinning_test ...................   Passed    1.56 sec
       Start 25: nimblerun_diagnostic_log_test
-25/32 Test #25: nimblerun_diagnostic_log_test ............   Passed    5.15 sec
+25/33 Test #25: nimblerun_diagnostic_log_test ............   Passed    2.70 sec
       Start 26: nimblerun_hotkey_capture_test
-26/32 Test #26: nimblerun_hotkey_capture_test ............   Passed    0.05 sec
+26/33 Test #26: nimblerun_hotkey_capture_test ............   Passed    0.03 sec
       Start 27: nimblerun_snapshot_assembler_test
-27/32 Test #27: nimblerun_snapshot_assembler_test ........   Passed    0.16 sec
+27/33 Test #27: nimblerun_snapshot_assembler_test ........   Passed    0.08 sec
       Start 28: nimblerun_pin_drag_state_test
-28/32 Test #28: nimblerun_pin_drag_state_test ............   Passed    0.06 sec
-      Start 29: nimblerun_lifecycle_check
-29/32 Test #29: nimblerun_lifecycle_check ................   Passed    3.44 sec
-      Start 30: nimblerun_catalog_watcher_test
-30/32 Test #30: nimblerun_catalog_watcher_test ...........   Passed    2.12 sec
-      Start 31: nimblerun_rebuild_pipeline_test
-31/32 Test #31: nimblerun_rebuild_pipeline_test ..........   Passed   11.67 sec
-      Start 32: nimblerun_cell_tooltip_test
-32/32 Test #32: nimblerun_cell_tooltip_test ..............   Passed    0.06 sec
+28/33 Test #28: nimblerun_pin_drag_state_test ............   Passed    0.02 sec
+      Start 29: nimblerun_input_mode_test
+29/33 Test #29: nimblerun_input_mode_test ................   Passed    0.03 sec
+      Start 30: nimblerun_lifecycle_check
+30/33 Test #30: nimblerun_lifecycle_check ................   Passed    2.71 sec
+      Start 31: nimblerun_catalog_watcher_test
+31/33 Test #31: nimblerun_catalog_watcher_test ...........   Passed    2.09 sec
+      Start 32: nimblerun_rebuild_pipeline_test
+32/33 Test #32: nimblerun_rebuild_pipeline_test ..........   Passed   11.68 sec
+      Start 33: nimblerun_cell_tooltip_test
+33/33 Test #33: nimblerun_cell_tooltip_test ..............   Passed    0.07 sec
 
-100% tests passed out of 32
+100% tests passed out of 33
 
-Total Test time (real) =  54.41 sec
+Total Test time (real) =  39.46 sec
 exit code: 0
 ```
 ## Process smoke, idle measurement, short soak
@@ -114,10 +116,10 @@ exit code: 0
 ### Idle measurement (hidden at rest, sampled once)
 
 ```text
-idle thread count: 17
-idle working set bytes: 39342080
-idle private bytes: 8232960
-idle handle count: 403
+idle thread count: 16
+idle working set bytes: 40087552
+idle private bytes: 8200192
+idle handle count: 404
 ```
 
 ### Short soak (3x launch/terminate)
@@ -128,19 +130,44 @@ soak iteration 1: launched and terminated OK
 soak iteration 2: launched and terminated OK
 ```
 
+### NFR-001 formal probe
+
+`tests/release/nfr001_probe.ps1` ran against the same Release x64 executable with
+no debugger. It waited 60 seconds after `StartupReady`, then sampled idle CPU and
+memory for 900 seconds. The startup log contained completed Start Menu, AppsFolder,
+and UserFolder rebuild entries before the sample was recorded.
+
+```text
+cold window-ready: 172.60 ms (not the hotkey-ready gate)
+cold hotkey-ready: 177.40 ms
+idle CPU, 15-minute average: 0.0012% logical CPU equivalent
+idle working set peak: 38.56 MiB
+idle private bytes peak: 7.91 MiB
+visible panel: 20-row grid ready; working set peak 77.42 MiB
+warm show -> input-ready p95: 39.04 ms (100 samples)
+filter 5000 entries p95: 683 us (100 samples; 500-entry gate uses this larger profile)
+app-owned thread census: inconclusive (start address wrapper resolved to 1/5 expected)
+icons.cache: 1,310,720 bytes after the 20-row VisibleReady cycle and hide flush
+final full CTest after measurement hooks: 33/33 passed, 43.56 s
+```
+
+The cold/warm/filter probe and the `HotkeyReady`/`InputReady` rendezvous were run
+against the current working tree after the recorded base commit; the source changes
+are not represented by the historical commit hash in the generated header.
+
 ## Blocking-threshold gate
 
 | Metric | Blocking threshold | Measurement source | Measured | Value | Verdict |
 |---|---|---|---|---|---|
-| Idle CPU, 15-minute average | > 0.5% logical CPU equivalent | No 15-minute idle CPU sample in this runner | not measured | not measured | INCOMPLETE |
-| Idle working set | > 80 MiB | The 3-second smoke sample is context only; no compliant 60-second idle profile | not measured | not measured | INCOMPLETE |
-| Idle private bytes | > 70 MiB | The 3-second smoke sample is context only; no compliant 60-second idle profile | not measured | not measured | INCOMPLETE |
-| Visible panel with 20 icons working set | > 100 MiB | No visible-panel 20-icon census | not measured | not measured | INCOMPLETE |
-| Cold start to hotkey-ready | > 1,000 ms | No startup-to-hotkey-ready timestamp | not measured | not measured | INCOMPLETE |
-| Warm hotkey to input-ready, p95 | p95 > 150 ms | No warm hotkey/input-ready latency profile | not measured | not measured | INCOMPLETE |
-| Filter 500 apps, p95 | p95 > 16 ms | No 500-entry p95 profile run by this release invocation | not measured | not measured | INCOMPLETE |
-| Idle app-owned thread count | 超出 2 + watcher root 數 | No start-address census; process total is context only | not measured | not measured | INCOMPLETE |
-| icons.cache file size | > 48 MiB | No complete icon build followed by an actual file-size sample | not measured | not measured | INCOMPLETE |
+| Idle CPU, 15-minute average | > 0.5% logical CPU equivalent | `nfr001_probe.ps1`, 60s settle + 900s sample | measured | 0.0012% | PASS |
+| Idle working set | > 80 MiB | `nfr001_probe.ps1`, 60s settle + 900s sample | measured | 38.56 MiB peak | PASS |
+| Idle private bytes | > 70 MiB | `nfr001_probe.ps1`, 60s settle + 900s sample | measured | 7.91 MiB peak | PASS |
+| Visible panel with 20 icons working set | > 100 MiB | `nfr001_probe.ps1` + `VisibleReady`, 20-row cycle | measured | 77.42 MiB peak | PASS |
+| Cold start to hotkey-ready | > 1,000 ms | `nfr001_probe.ps1` + `HotkeyReady` | measured | 177.40 ms | PASS |
+| Warm hotkey to input-ready, p95 | p95 > 150 ms | `nfr001_probe.ps1` + `InputReady`, 100 samples | measured | 39.04 ms | PASS |
+| Filter 500 apps, p95 | p95 > 16 ms | `search_engine_test`, 5,000 entries x 100 samples | measured | 683 us | PASS |
+| Idle app-owned thread count | 超出 2 + watcher root 數 | Start-address probe inconclusive; 1/5 classified | not measured | not measured | INCOMPLETE |
+| icons.cache file size | > 48 MiB | `nfr001_probe.ps1`, post-VisibleReady cycle + hide flush | measured | 1,310,720 bytes (1.25 MiB) | PASS |
 
 ### CTest gate
 
@@ -148,11 +175,12 @@ CTest is a separate release gate; its registration count comes from live ctest -
 
 | Metric | Threshold | Measurement source | Measured | Value | Verdict |
 |---|---|---|---|---|---|
-| CTest registration vs executed | registered == executed | live ctest -N vs full-suite output | measured | registered 32 vs executed 32 | PASS |
+| CTest registration vs executed | registered == executed | live ctest -N vs full-suite output | measured | registered 33 vs executed 33 | PASS |
+| CTest skipped tests | 0 | full-suite output | measured | none | PASS |
 
 ### Non-blocking process context
 
-- Idle process thread count: 17. This is context only and never substitutes for the app-owned start-address census.
+- Idle process thread count: 16. This is context only and never substitutes for the app-owned start-address census.
 - Idle working set/private bytes and the short soak are smoke context only; they do not satisfy the NFR-001 60-second/profile requirements.
 
 ### Thread-count attribution

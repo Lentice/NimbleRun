@@ -4,16 +4,16 @@ These are Release x64 measurements, not Debug estimates. Record the OS build, CP
 
 | Metric | Target | Blocking threshold | Result | Environment / notes |
 | --- | ---: | ---: | --- | --- |
-| Idle CPU, 15-minute average | ≤ 0.1% logical CPU equivalent | > 0.5% | Not measured | 需要一支 15 分鐘 idle 的 CPU 抽樣計時，尚未實作 |
-| Idle working set | ≤ 60 MiB | > 80 MiB | 37.2 MiB | `release_evidence.ps1`，2026-08-07，hidden at rest（約 3 秒 settle）；同一樣本 handle count 394 |
-| Idle private bytes | ≤ 50 MiB | > 70 MiB | 7.7 MiB | `release_evidence.ps1`，2026-08-07，同一 idle 樣本 |
-| Visible panel with 20 icons | ≤ 75 MiB | > 100 MiB | Not measured | 需要可見面板狀態的記憶體 census，尚未實作 |
-| Cold start to hotkey-ready | ≤ 500 ms | > 1,000 ms | Not measured | 需要一支量測「程序啟動到熱鍵就緒」的計時器，尚未實作 |
-| Warm hotkey to input-ready, p95 | ≤ 80 ms | > 150 ms | Not measured | 需要一支量測「熱鍵到首幀」的計時器，尚未實作 |
-| Filter 500 apps, p95 | ≤ 8 ms | > 16 ms | 603 µs（5,000 筆、`L"e"` 查詢） | `search_engine_test` 5,000 筆 timing，2026-08-06（NR-047 交接區）；量測規模大於門檻的 500 筆，故為保守上界 |
+| Idle CPU, 15-minute average | ≤ 0.1% logical CPU equivalent | > 0.5% | 0.0012% | `tests/release/nfr001_probe.ps1`，2026-08-25；Release x64、無 debugger、60 秒 settle 後取樣 900 秒 |
+| Idle working set | ≤ 60 MiB | > 80 MiB | 38.56 MiB peak | 同上；符合目標與 blocking threshold |
+| Idle private bytes | ≤ 50 MiB | > 70 MiB | 7.91 MiB peak | 同上；符合目標與 blocking threshold |
+| Visible panel with 20 icons | ≤ 75 MiB | > 100 MiB | 77.42 MiB peak | 同上；20-row grid 收到 `VisibleReady` 後量測，符合 blocking threshold 但超過 ≤75 MiB 目標 |
+| Cold start to hotkey-ready | ≤ 500 ms | > 1,000 ms | 177.4 ms | `nfr001_probe.ps1`，2026-08-25；由產品 `HotkeyReady` rendezvous 量測，Release x64、無 debugger |
+| Warm hotkey to input-ready, p95 | ≤ 80 ms | > 150 ms | 39.04 ms | `nfr001_probe.ps1`，2026-08-25；100 次 hidden→visible，產品在 `SetFocus(search_edit)` 後發出 test-only `InputReady` rendezvous |
+| Filter 500 apps, p95 | ≤ 8 ms | > 16 ms | 683 µs（5,000 筆、100 次、`L"e"` 查詢） | `search_engine_test`，2026-08-25；以 5,000 筆（大於 500）取 p95，作為保守上界 |
 | Idle app-owned thread count | 2 ＋ watcher root 數 | 超出該式 | 5（預期值，未經 census 驗證） | 見下方「執行緒數的量法」 |
-| Idle process thread count | — | — | 16 | 參考值，不設門檻 |
-| `icons.cache` file size | ≤ 32 MiB | > 48 MiB | Not measured | 需要一次完整圖示建置後的實際檔案大小量測，尚未進行 |
+| Idle process thread count | — | — | 16 | `release_evidence.ps1`，2026-08-25；參考值，不設門檻 |
+| `icons.cache` file size | ≤ 32 MiB | > 48 MiB | 1.25 MiB（1,310,720 bytes） | `nfr001_probe.ps1`，2026-08-25；20-row `VisibleReady` 完成後隱藏面板並 flush 後量測 |
 | 單次整窗重繪（grid，24 格） | — | — | 1.40 ms（p95 1.94 ms） | 見下方「整窗重繪的成本」，2026-08-07；參考值，不設門檻 |
 | 單次整窗重繪（list，8 列） | — | — | 0.74 ms（p95 0.95 ms） | 同上。這是每次按鍵 `EN_UPDATE` 整窗失效的實際代價 |
 
@@ -21,12 +21,14 @@ These are Release x64 measurements, not Debug estimates. Record the OS build, CP
 
 The nine NFR-001 rows with blocking thresholds are release gates. The values in this
 baseline are historical measurements or context unless the current release evidence
-report identifies a compliant measurement source. In particular, the existing 3-second
-idle samples do not satisfy the specification's initial-indexing-plus-60-second idle
-condition, and the app-owned thread value is an expectation until a start-address
-census. `tests/release/release_evidence.ps1` therefore emits every blocking row and
-returns `INCOMPLETE` with a non-zero exit code for any row that is not measured. A
-process-total thread count, executable size, or estimate cannot satisfy a blocking row.
+report identifies a compliant measurement source. The 2026-08-25 formal probe waited
+60 seconds after startup readiness, observed completed source rebuild entries, sampled
+idle CPU/memory for 900 seconds, and completed the visible 20-row/icon-cache cycle;
+those rows are current gate measurements. The app-owned thread value is an expectation
+until a start-address census. `tests/release/release_evidence.ps1`
+therefore emits every blocking row and returns `INCOMPLETE` with a non-zero exit code
+for any row that is not measured. A process-total thread count, executable size, or
+estimate cannot satisfy a blocking row.
 
 ## 整窗重繪的成本
 
