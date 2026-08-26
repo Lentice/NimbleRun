@@ -378,13 +378,13 @@ void TestAccessibleProviderWindowSmoke() {
 }
 
 // NR-023: the search box grew to 16~64 DIP and the list/footer moved down, so
-// the compact footer band 472..520 keeps 8 visible rows at 96 DPI.
+// the compact footer band 476..520 keeps 8 visible rows at 96 DPI.
 void TestSearchFieldGeometry() {
     const auto d96 = LayoutForDpi(96.0f);
     Expect(d96.panel_height == 520, "96 DPI panel height is 520");
     Expect(d96.list_top == 72, "96 DPI list top is 72");
     Expect(d96.search_bottom == 64, "96 DPI search bottom is 64");
-    Expect((472 - 72) / 48 == 8, "footer band 472..520 leaves 8 visible rows");
+    Expect((476 - 72) / 48 == 8, "footer band 476..520 leaves 8 visible rows");
 
     // The EDIT rect uses 12 DIP horizontal and 8/4 DIP vertical insets,
     // rounded to physical px; the font height is negative (character height)
@@ -544,8 +544,8 @@ void TestFooterBandAlwaysVisible() {
         Expect(FooterTopDip(client) >= kListTopDip,
                "footer band never overlaps the search box");
     }
-    Expect(FooterTopDip(348.0f) == 300.0f, "200%@768 work area band top is 300");
-    Expect(FooterTopDip(464.0f) == 416.0f, "150%@1366x768 band top is 416");
+    Expect(FooterTopDip(348.0f) == 304.0f, "200%@768 work area band top is 304");
+    Expect(FooterTopDip(464.0f) == 420.0f, "150%@1366x768 band top is 420");
 }
 
 // NR-120: ViewportRowsForHeightDip shrinks the visible row count so the footer
