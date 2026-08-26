@@ -53,6 +53,11 @@ void PostNotification(CatalogWatcher::Watch& watch, int level) {
 }
 
 void WatchLoop(std::shared_ptr<CatalogWatcher::Watch> watch) {
+    // Identifies this thread to Win32 tooling as app-owned: the CRT's
+    // _beginthreadex trampoline is the reported Win32 start address for every
+    // std::thread on this toolchain, so start-address alone cannot distinguish
+    // it from an OS-injected worker.
+    SetThreadDescription(GetCurrentThread(), L"NimbleRun.Watcher");
     try {
         std::vector<BYTE> buffer(kBufferBytes);
         const HANDLE completion = CreateEventW(nullptr, TRUE, FALSE, nullptr);

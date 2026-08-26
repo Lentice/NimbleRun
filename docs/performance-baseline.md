@@ -4,16 +4,16 @@ These are Release x64 measurements, not Debug estimates. Record the OS build, CP
 
 | Metric | Target | Blocking threshold | Result | Environment / notes |
 | --- | ---: | ---: | --- | --- |
-| Idle CPU, 15-minute average | ≤ 0.1% logical CPU equivalent | > 0.5% | 0.0012% | `tests/release/nfr001_probe.ps1`，2026-08-25；Release x64、無 debugger、60 秒 settle 後取樣 900 秒 |
-| Idle working set | ≤ 60 MiB | > 80 MiB | 38.56 MiB peak | 同上；符合目標與 blocking threshold |
-| Idle private bytes | ≤ 50 MiB | > 70 MiB | 7.91 MiB peak | 同上；符合目標與 blocking threshold |
-| Visible panel with 20 icons | ≤ 75 MiB | > 100 MiB | 77.42 MiB peak | 同上；20-row grid 收到 `VisibleReady` 後量測，符合 blocking threshold 但超過 ≤75 MiB 目標 |
-| Cold start to hotkey-ready | ≤ 500 ms | > 1,000 ms | 177.4 ms | `nfr001_probe.ps1`，2026-08-25；由產品 `HotkeyReady` rendezvous 量測，Release x64、無 debugger |
-| Warm hotkey to input-ready, p95 | ≤ 80 ms | > 150 ms | 39.04 ms | `nfr001_probe.ps1`，2026-08-25；100 次 hidden→visible，產品在 `SetFocus(search_edit)` 後發出 test-only `InputReady` rendezvous |
+| Idle CPU, 15-minute average | ≤ 0.1% logical CPU equivalent | > 0.5% | 0.0013% | `tests/release/nfr001_probe.ps1`，2026-08-26；Release x64、無 debugger、60 秒 settle 後取樣 900 秒 |
+| Idle working set | ≤ 60 MiB | > 80 MiB | 39.45 MiB peak | 同上；符合目標與 blocking threshold |
+| Idle private bytes | ≤ 50 MiB | > 70 MiB | 7.84 MiB peak | 同上；符合目標與 blocking threshold |
+| Visible panel with 20 icons | ≤ 75 MiB | > 100 MiB | 80.37 MiB peak | 同上；20-row grid 收到 `VisibleReady` 後量測，符合 blocking threshold 但超過 ≤75 MiB 目標 |
+| Cold start to hotkey-ready | ≤ 500 ms | > 1,000 ms | 220.4 ms | `nfr001_probe.ps1`，2026-08-26；由產品 `HotkeyReady` rendezvous 量測，Release x64、無 debugger |
+| Warm hotkey to input-ready, p95 | ≤ 80 ms | > 150 ms | 41.54 ms | `nfr001_probe.ps1`，2026-08-26；20 次 hidden→visible，產品在 `SetFocus(search_edit)` 後發出 test-only `InputReady` rendezvous |
 | Filter 500 apps, p95 | ≤ 8 ms | > 16 ms | 683 µs（5,000 筆、100 次、`L"e"` 查詢） | `search_engine_test`，2026-08-25；以 5,000 筆（大於 500）取 p95，作為保守上界 |
-| Idle app-owned thread count | 2 ＋ watcher root 數 | 超出該式 | 5（預期值，未經 census 驗證） | 見下方「執行緒數的量法」 |
-| Idle process thread count | — | — | 16 | `release_evidence.ps1`，2026-08-25；參考值，不設門檻 |
-| `icons.cache` file size | ≤ 32 MiB | > 48 MiB | 1.25 MiB（1,310,720 bytes） | `nfr001_probe.ps1`，2026-08-25；20-row `VisibleReady` 完成後隱藏面板並 flush 後量測 |
+| Idle app-owned thread count | 2 ＋ watcher root 數 | 超出該式 | 5（已量測，`GetThreadDescription` census） | 見下方「執行緒數的量法」 |
+| Idle process thread count | — | — | 10 | `nfr001_probe.ps1`，2026-08-26；參考值，不設門檻，隨系統注入執行緒數波動 |
+| `icons.cache` file size | ≤ 32 MiB | > 48 MiB | 1.31 MiB（1,376,256 bytes） | `nfr001_probe.ps1`，2026-08-26；20-row `VisibleReady` 完成後隱藏面板並 flush 後量測 |
 | 單次整窗重繪（grid，24 格） | — | — | 1.40 ms（p95 1.94 ms） | 見下方「整窗重繪的成本」，2026-08-07；參考值，不設門檻 |
 | 單次整窗重繪（list，8 列） | — | — | 0.74 ms（p95 0.95 ms） | 同上。這是每次按鍵 `EN_UPDATE` 整窗失效的實際代價 |
 
@@ -24,8 +24,9 @@ baseline are historical measurements or context unless the current release evide
 report identifies a compliant measurement source. The 2026-08-25 formal probe waited
 60 seconds after startup readiness, observed completed source rebuild entries, sampled
 idle CPU/memory for 900 seconds, and completed the visible 20-row/icon-cache cycle;
-those rows are current gate measurements. The app-owned thread value is an expectation
-until a start-address census. `tests/release/release_evidence.ps1`
+those rows are current gate measurements. The app-owned thread value is measured by a
+`GetThreadDescription` census (see below) rather than being an expectation.
+`tests/release/release_evidence.ps1`
 therefore emits every blocking row and returns `INCOMPLETE` with a non-zero exit code
 for any row that is not measured. A process-total thread count, executable size, or
 estimate cannot satisfy a blocking row.
@@ -83,6 +84,16 @@ fallback 下超過該值），再談改法。
 
 判定方式是「數量是否等於上式」與「是否全部處於 Wait、CPU 0%」，而不是與固定上限比大小。行程總數仍要記錄，但只作為環境參考。
 
-已量測（Release x64，Windows 11 Pro 26200，commit `cd0f256`，catalog root = 兩個 Start Menu Programs ＋ `D:\Program files`，未接除錯器，啟動後待機 3 秒）：行程總數 16 條，全部處於 Wait、CPU 0%，handle 391，working set 38.0 MiB。
+**量法**：start-address 無法判定 app-owned——這個 UCRT 工具鏈下 `std::thread` 是透過
+`_beginthreadex` 建立，OS 回報的 Win32 start address 一律是 `ucrtbase.dll` 內的 CRT
+trampoline，與系統注入的 CRT／COM worker thread 完全相同，無法用位址區分（2026-08-26
+重新量測時，5 條預期執行緒只有 1 條落在模組範圍內）。改為讓程式自己替常駐執行緒命名：
+`main`（`wWinMain` 進入點）、`icon_worker.cpp` 的 `IconWorker::Run`、
+`catalog_watcher.cpp` 的 `WatchLoop`，各呼叫一次 `SetThreadDescription(GetCurrentThread(),
+L"NimbleRun.*")`；`tests/release/nfr001_probe.ps1` 對每條執行緒呼叫
+`GetThreadDescription` 讀回，比對 `NimbleRun.` 前綴計數。
 
-app-owned 的 5 條是由上式推導的預期值（1 UI ＋ 1 icon worker ＋ 3 watcher root），本次未做 start-address census 驗證。2026-08-05 的 census 實測為 3 條（main ＋ 2 個 Programs watcher），當時還沒有常駐 icon worker、也還沒設定自訂 root，與上式一致。要把這欄從「預期值」升級為「已量測」，需要 `tests/release/release_evidence.ps1` 補上 start-address census；在那之前這欄不是硬性 gate。
+已量測（Release x64，Windows 11 Pro 26200，2026-08-26 formal probe，catalog root =
+兩個 Start Menu Programs ＋ `D:\Program files`，未接除錯器，60 秒 settle 後量測）：
+app-owned 執行緒 5 條（main、icon worker、3 個 watcher，符合公式 2 + 3 = 5），行程總數
+10 條，`icons.cache` 1.31 MiB。

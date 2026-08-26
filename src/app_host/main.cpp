@@ -3366,6 +3366,10 @@ bool RegisterMainWindow(HINSTANCE instance) {
 } // namespace
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
+    // Identifies this thread to Win32 tooling as app-owned (see icon_worker.cpp
+    // and catalog_watcher.cpp for why start-address attribution does not work
+    // on this toolchain).
+    SetThreadDescription(GetCurrentThread(), L"NimbleRun.Main");
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
     // NR-181: explicit common control registration (TOOLTIPS_CLASS is an

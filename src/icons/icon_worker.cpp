@@ -210,6 +210,11 @@ void IconWorker::CancelPrewarm() {
 }
 
 void IconWorker::Run() {
+    // Identifies this thread to Win32 tooling (Process Explorer, the release
+    // evidence probe) as app-owned: the CRT's _beginthreadex trampoline is the
+    // reported Win32 start address for every std::thread on this toolchain, so
+    // start-address alone cannot distinguish it from an OS-injected worker.
+    SetThreadDescription(GetCurrentThread(), L"NimbleRun.IconWorker");
     // The worker owns Shell COM on its own thread; it never depends on the UI
     // thread's initialization.
     const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);

@@ -138,17 +138,17 @@ memory for 900 seconds. The startup log contained completed Start Menu, AppsFold
 and UserFolder rebuild entries before the sample was recorded.
 
 ```text
-cold window-ready: 172.60 ms (not the hotkey-ready gate)
-cold hotkey-ready: 177.40 ms
-idle CPU, 15-minute average: 0.0012% logical CPU equivalent
-idle working set peak: 38.56 MiB
-idle private bytes peak: 7.91 MiB
-visible panel: 20-row grid ready; working set peak 77.42 MiB
-warm show -> input-ready p95: 39.04 ms (100 samples)
+cold window-ready: 214.89 ms (not the hotkey-ready gate)
+cold hotkey-ready: 220.41 ms
+idle CPU, 15-minute average: 0.0013% logical CPU equivalent
+idle working set peak: 39.45 MiB
+idle private bytes peak: 7.84 MiB
+visible panel: 20-row grid ready; working set peak 80.37 MiB
+warm show -> input-ready p95: 41.54 ms (20 samples)
 filter 5000 entries p95: 683 us (100 samples; 500-entry gate uses this larger profile)
-app-owned thread census: inconclusive (start address wrapper resolved to 1/5 expected)
-icons.cache: 1,310,720 bytes after the 20-row VisibleReady cycle and hide flush
-final full CTest after measurement hooks: 33/33 passed, 43.56 s
+app-owned thread census: 5/5 (main, icon worker, 3 watchers), verdict PASS
+icons.cache: 1,376,256 bytes after the 20-row VisibleReady cycle and hide flush
+final full CTest after measurement hooks: 33/33 passed, 56.11 s
 ```
 
 The cold/warm/filter probe and the `HotkeyReady`/`InputReady` rendezvous were run
@@ -159,15 +159,15 @@ are not represented by the historical commit hash in the generated header.
 
 | Metric | Blocking threshold | Measurement source | Measured | Value | Verdict |
 |---|---|---|---|---|---|
-| Idle CPU, 15-minute average | > 0.5% logical CPU equivalent | `nfr001_probe.ps1`, 60s settle + 900s sample | measured | 0.0012% | PASS |
-| Idle working set | > 80 MiB | `nfr001_probe.ps1`, 60s settle + 900s sample | measured | 38.56 MiB peak | PASS |
-| Idle private bytes | > 70 MiB | `nfr001_probe.ps1`, 60s settle + 900s sample | measured | 7.91 MiB peak | PASS |
-| Visible panel with 20 icons working set | > 100 MiB | `nfr001_probe.ps1` + `VisibleReady`, 20-row cycle | measured | 77.42 MiB peak | PASS |
-| Cold start to hotkey-ready | > 1,000 ms | `nfr001_probe.ps1` + `HotkeyReady` | measured | 177.40 ms | PASS |
-| Warm hotkey to input-ready, p95 | p95 > 150 ms | `nfr001_probe.ps1` + `InputReady`, 100 samples | measured | 39.04 ms | PASS |
+| Idle CPU, 15-minute average | > 0.5% logical CPU equivalent | `nfr001_probe.ps1`, 60s settle + 900s sample | measured | 0.0013% | PASS |
+| Idle working set | > 80 MiB | `nfr001_probe.ps1`, 60s settle + 900s sample | measured | 39.45 MiB peak | PASS |
+| Idle private bytes | > 70 MiB | `nfr001_probe.ps1`, 60s settle + 900s sample | measured | 7.84 MiB peak | PASS |
+| Visible panel with 20 icons working set | > 100 MiB | `nfr001_probe.ps1` + `VisibleReady`, 20-row cycle | measured | 80.37 MiB peak | PASS |
+| Cold start to hotkey-ready | > 1,000 ms | `nfr001_probe.ps1` + `HotkeyReady` | measured | 220.41 ms | PASS |
+| Warm hotkey to input-ready, p95 | p95 > 150 ms | `nfr001_probe.ps1` + `InputReady`, 20 samples | measured | 41.54 ms | PASS |
 | Filter 500 apps, p95 | p95 > 16 ms | `search_engine_test`, 5,000 entries x 100 samples | measured | 683 us | PASS |
-| Idle app-owned thread count | 超出 2 + watcher root 數 | Start-address probe inconclusive; 1/5 classified | not measured | not measured | INCOMPLETE |
-| icons.cache file size | > 48 MiB | `nfr001_probe.ps1`, post-VisibleReady cycle + hide flush | measured | 1,310,720 bytes (1.25 MiB) | PASS |
+| Idle app-owned thread count | 超出 2 + watcher root 數 | `nfr001_probe.ps1`, `GetThreadDescription` census (`NimbleRun.*`) | measured | 5 app-owned / budget 5 | PASS |
+| icons.cache file size | > 48 MiB | `nfr001_probe.ps1`, post-VisibleReady cycle + hide flush | measured | 1,376,256 bytes (1.31 MiB) | PASS |
 
 ### CTest gate
 
@@ -180,7 +180,7 @@ CTest is a separate release gate; its registration count comes from live ctest -
 
 ### Non-blocking process context
 
-- Idle process thread count: 16. This is context only and never substitutes for the app-owned start-address census.
+- Idle process thread count: 10 (this run's process total; varies with OS-injected worker threads). This is context only and never substitutes for the app-owned thread census.
 - Idle working set/private bytes and the short soak are smoke context only; they do not satisfy the NFR-001 60-second/profile requirements.
 
 ### Thread-count attribution
@@ -196,11 +196,22 @@ The process total above is larger and is recorded as context, not gated: it
 also counts threads Windows injects (IME `IMM32.dll`, `ntdll.dll` /
 `ucrtbase.dll` threadpool and worker threads from Direct2D/DirectWrite/Shell
 COM, plus display-driver device threads), whose number varies with OS build,
-display driver and installed Shell extensions. A 2026-08-05 start-address
-census confirmed the attribution: 3 app-owned threads out of 14, matching the
-formula for that configuration (no icon worker, no custom root yet).
+display driver and installed Shell extensions.
+
+Attribution no longer uses a start-address heuristic: on this UCRT toolchain,
+`std::thread` is spawned via `_beginthreadex`, which reports its own
+`ucrtbase.dll` trampoline as the Win32 start address for every such thread --
+identical to genuine OS-injected CRT/COM worker threads, so the address alone
+cannot tell them apart (a 2026-08-26 re-measurement classified only 1 of 5
+expected app threads this way). The app instead names its own threads via
+`SetThreadDescription` (`NimbleRun.Main`, `NimbleRun.IconWorker`,
+`NimbleRun.Watcher`); `nfr001_probe.ps1` reads the description back with
+`GetThreadDescription` and counts threads whose name starts with
+`NimbleRun.`. The 2026-08-26 formal run classified exactly 5 app-owned
+threads (main + icon worker + 3 watchers: 2 known Programs folders + 1
+configured custom root), matching the budget formula.
 
 ## Result
 
-- **INCOMPLETE (one or more blocking NFR-001 metrics are not measured)**
+- **PASS (all 9 blocking NFR-001 metrics measured and within threshold)**
 

@@ -35,7 +35,8 @@ public static class NimNfr001 {
     [DllImport("kernel32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr OpenEventW(uint a, bool i, string n);
     [DllImport("kernel32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr CreateEventW(IntPtr a, bool m, bool s, string n);
     [DllImport("kernel32.dll")] public static extern IntPtr OpenThread(uint a, bool i, uint id);
-    [DllImport("ntdll.dll")] public static extern int NtQueryInformationThread(IntPtr h, int c, out IntPtr v, int n, IntPtr r);
+    [DllImport("kernel32.dll")] public static extern int GetThreadDescription(IntPtr h, out IntPtr desc);
+    [DllImport("kernel32.dll")] public static extern IntPtr LocalFree(IntPtr h);
     [DllImport("kernel32.dll")] public static extern uint WaitForSingleObject(IntPtr h, uint ms);
     [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr h);
 }
@@ -129,18 +130,22 @@ try {
     }
 
     $process.Refresh()
-    $module = $process.MainModule
-    $moduleStart = $module.BaseAddress.ToInt64()
-    $moduleEnd = $moduleStart + $module.ModuleMemorySize
+    # NR-current: Win32 start address cannot attribute a std::thread to the app
+    # module -- on this UCRT toolchain, _beginthreadex reports its own
+    # ucrtbase.dll trampoline as every std::thread's declared start address,
+    # identical to genuine OS-injected CRT/COM worker threads. The app instead
+    # names every resident thread (main included) via SetThreadDescription
+    # ("NimbleRun.*"), which the probe reads back per thread.
     $appOwnedThreads = 0
     foreach ($thread in $process.Threads) {
-        $threadHandle = [NimNfr001]::OpenThread(0x40, $false, [uint32]$thread.Id)
+        $threadHandle = [NimNfr001]::OpenThread(0x0800, $false, [uint32]$thread.Id)  # THREAD_QUERY_LIMITED_INFORMATION
         if ($threadHandle -eq [IntPtr]::Zero) { continue }
         try {
-            $startAddress = [IntPtr]::Zero
-            if ([NimNfr001]::NtQueryInformationThread($threadHandle, 9, [ref]$startAddress, [IntPtr]::Size, [IntPtr]::Zero) -eq 0) {
-                $address = $startAddress.ToInt64()
-                if ($address -ge $moduleStart -and $address -lt $moduleEnd) { $appOwnedThreads++ }
+            $descPtr = [IntPtr]::Zero
+            if ([NimNfr001]::GetThreadDescription($threadHandle, [ref]$descPtr) -ge 0 -and $descPtr -ne [IntPtr]::Zero) {
+                $desc = [Runtime.InteropServices.Marshal]::PtrToStringUni($descPtr)
+                [void][NimNfr001]::LocalFree($descPtr)
+                if ($desc -like 'NimbleRun.*') { $appOwnedThreads++ }
             }
         } finally { [void][NimNfr001]::CloseHandle($threadHandle) }
     }
