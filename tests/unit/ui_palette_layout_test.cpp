@@ -219,7 +219,7 @@ void TestAccessibleNamesPerRow() {
     Expect(model.AccessibleNameFor(2) == L"Gamma", "row 2 accessible name is display name");
     Expect(model.AccessibleNameFor(5).empty(), "out-of-range row has empty name");
     Expect(model.SelectedAccessibleName() == L"Alpha", "first row selected by default");
-    model.MoveSelection(1);
+    model.MoveRow(1);
     Expect(model.SelectedAccessibleName() == L"Beta", "selection moves with the row");
 }
 

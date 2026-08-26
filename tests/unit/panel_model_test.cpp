@@ -90,8 +90,8 @@ void TestQuerySwitchesToFilteredRows() {
     Expect(model.Rows()[0].display_name == L"Calculator", "query row is the match");
     Expect(model.HasSelection(), "first result selected");
     // Selecting a row never auto-launches: only an explicit Activate() does.
-    model.MoveSelection(0);
-    model.MoveSelection(0);
+    model.MoveRow(0);
+    model.MoveRow(0);
     Expect(model.HasSelection(), "moving selection keeps it selected");
 }
 
@@ -104,11 +104,11 @@ void TestMoveSelectionClampsAndWraps() {
     model.SetQuery(L"o");
     const std::size_t count = model.Rows().size();
     Expect(count == 2, "two rows match 'o'");
-    model.MoveSelection(1);
+    model.MoveRow(1);
     Expect(model.SelectionIndex() == 1, "down moves selection");
-    model.MoveSelection(1);
+    model.MoveRow(1);
     Expect(model.SelectionIndex() == 0, "down wraps to first");
-    model.MoveSelection(-1);
+    model.MoveRow(-1);
     Expect(model.SelectionIndex() == count - 1, "up wraps to last");
 }
 
@@ -219,7 +219,7 @@ void TestQueryChangeResetsSelection() {
         Entry(L"1", L"One"), Entry(L"2", L"Two"), Entry(L"3", L"Three")};
     PanelModel model(&catalog, {});
     model.SetQuery(L"o");
-    model.MoveSelection(1);
+    model.MoveRow(1);
     Expect(model.SelectionIndex() == 1, "moved off first row");
     model.SetQuery(L"e");
     Expect(model.SelectionIndex() == 0, "query change resets to first row");
@@ -259,9 +259,9 @@ void TestFewRowsKeepFirstVisibleZero() {
     model.SetQuery(L"App");
     model.SetViewportRows(7);
     // Selection moves inside the whole list; the window never needs to scroll.
-    model.MoveSelection(1);
+    model.MoveRow(1);
     Expect(model.FirstVisibleRow() == 0, "rows fewer than viewport keep first visible 0");
-    model.MoveSelection(-1);  // wraps to the last row
+    model.MoveRow(-1);  // wraps to the last row
     Expect(model.FirstVisibleRow() == 0, "wrap with rows fewer than viewport stays 0");
 }
 
@@ -270,15 +270,15 @@ void TestMoveSelectionScrollsViewportByOne() {
     PanelModel model(&catalog, {});
     model.SetQuery(L"App");
     model.SetViewportRows(3);
-    model.MoveSelection(1);  // 1
-    model.MoveSelection(1);  // 2
+    model.MoveRow(1);  // 1
+    model.MoveRow(1);  // 2
     Expect(model.FirstVisibleRow() == 0, "selection inside viewport does not scroll");
-    model.MoveSelection(1);  // 3 -> below the window
+    model.MoveRow(1);  // 3 -> below the window
     Expect(model.FirstVisibleRow() == 1, "moving down out of view scrolls by exactly one");
-    model.MoveSelection(-1);  // 2, still visible in [1,4)
-    model.MoveSelection(-1);  // 1
+    model.MoveRow(-1);  // 2, still visible in [1,4)
+    model.MoveRow(-1);  // 1
     Expect(model.FirstVisibleRow() == 1, "moving up inside viewport does not scroll");
-    model.MoveSelection(-1);  // 0 -> above the window
+    model.MoveRow(-1);  // 0 -> above the window
     Expect(model.FirstVisibleRow() == 0, "moving up out of view scrolls by exactly one");
 }
 
@@ -289,7 +289,7 @@ void TestWrapToLastRowScrollsToTail() {
     model.SetViewportRows(3);
     Expect(model.SelectionIndex() == 0 && model.FirstVisibleRow() == 0,
            "starts at the first row");
-    model.MoveSelection(-1);  // up on the first row wraps to the last
+    model.MoveRow(-1);  // up on the first row wraps to the last
     Expect(model.SelectionIndex() == 9, "up from the first row wraps to the last");
     Expect(model.FirstVisibleRow() == 7, "visible window jumps to the tail");
     Expect(model.FirstVisibleRow() == 10 - 3, "tail window does not run past the end");
@@ -300,21 +300,21 @@ void TestResetOperationsClearScroll() {
     PanelModel model(&catalog, {});
     model.SetQuery(L"App");
     model.SetViewportRows(3);
-    model.MoveSelection(1);
-    model.MoveSelection(1);
-    model.MoveSelection(1);
+    model.MoveRow(1);
+    model.MoveRow(1);
+    model.MoveRow(1);
     Expect(model.FirstVisibleRow() == 1, "viewport scrolled down");
     model.SetQuery(L"App");
     Expect(model.FirstVisibleRow() == 0, "SetQuery resets first visible");
-    model.MoveSelection(1);
-    model.MoveSelection(1);
-    model.MoveSelection(1);
+    model.MoveRow(1);
+    model.MoveRow(1);
+    model.MoveRow(1);
     model.Reset();
     Expect(model.FirstVisibleRow() == 0, "Reset resets first visible");
     model.SetQuery(L"App");
-    model.MoveSelection(1);
-    model.MoveSelection(1);
-    model.MoveSelection(1);
+    model.MoveRow(1);
+    model.MoveRow(1);
+    model.MoveRow(1);
     Expect(model.FirstVisibleRow() == 1, "viewport scrolled down again");
     model.SetPins({Pin(L"id0")});
     Expect(model.FirstVisibleRow() == 0, "SetPins resets first visible");
@@ -325,9 +325,9 @@ void TestViewportLargerThanRowsNeverNegative() {
     PanelModel model(&catalog, {});
     model.SetQuery(L"App");
     model.SetViewportRows(10);
-    model.MoveSelection(-1);  // wraps 0 -> 2
+    model.MoveRow(-1);  // wraps 0 -> 2
     Expect(model.FirstVisibleRow() == 0, "viewport larger than rows keeps first visible 0");
-    model.MoveSelection(-1);  // 2 -> 1
+    model.MoveRow(-1);  // 2 -> 1
     Expect(model.FirstVisibleRow() == 0, "first visible never goes negative");
 }
 
@@ -433,7 +433,7 @@ void TestScrollByWheelKeepsSelection() {
     PanelModel model(&catalog, {});
     model.SetQuery(L"App");
     model.SetViewportRows(5);
-    model.MoveSelection(1);
+    model.MoveRow(1);
     const std::size_t selection_before = model.SelectionIndex();
     Expect(selection_before == 1, "selection moved off the first row");
     model.ScrollBy(5, false);
@@ -467,7 +467,7 @@ void TestScrollByWheelKeepsSelectionInGrid() {
     Expect(model.FirstVisibleRow() == 24, "wheel scroll pages the grid view");
     Expect(model.SelectionIndex() == selection_before,
            "grid wheel scroll leaves the selection where it was");
-    model.MoveSelection(0);
+    model.MoveRow(0);
     Expect(model.SelectionIndex() == selection_before,
            "selection survives intact off-screen");
     Expect(model.FirstVisibleRow() == 0,
@@ -640,13 +640,49 @@ void TestGridMoveSelectionRows() {
     model.SetGridColumns(6);
     model.SetViewportRows(4);
     Expect(model.SelectionIndex() == 0, "grid starts at item 0");
-    model.MoveSelection(6);
-    Expect(model.SelectionIndex() == 6, "down by Columns() moves one grid row");
-    model.MoveSelection(6);
+    model.MoveRow(1);
+    Expect(model.SelectionIndex() == 6, "down moves one grid row");
+    model.MoveRow(1);
     Expect(model.SelectionIndex() == 12, "down again moves to the third row");
     model.SelectRow(29);  // last item of the last row
-    model.MoveSelection(6);
+    model.MoveRow(1);
     Expect(model.SelectionIndex() == 5, "down past the last row wraps to the top");
+}
+
+// NR-186 override: partial last row must clamp the column, not wrap flat
+// across the whole item list, so Up/Down never lands on a non-existent cell.
+void TestGridMoveRowClampsPartialLastRow() {
+    const std::vector<AppEntry> catalog = CatalogOf(25);  // last row: 1 item
+    PanelModel model(&catalog, catalog);
+    model.SetGridColumns(6);
+    model.SelectRow(24);  // sole item of the partial last row, column 0
+    model.MoveRow(1);
+    Expect(model.SelectionIndex() == 0, "down from the partial last row wraps to top, same column");
+    model.MoveRow(-1);
+    Expect(model.SelectionIndex() == 24, "up from the top wraps back to the partial last row");
+
+    model.SelectRow(23);  // second-to-last row, column 5 (last row has no column 5)
+    model.MoveRow(1);
+    Expect(model.SelectionIndex() == 24, "down into a short row clamps to its last real item");
+}
+
+// NR-186 override: Left/Right stay inside the current row and wrap there,
+// they never cross into the next/previous row.
+void TestGridMoveColumnWrapsWithinRow() {
+    const std::vector<AppEntry> catalog = CatalogOf(25);  // last row: 1 item
+    PanelModel model(&catalog, catalog);
+    model.SetGridColumns(6);
+    model.SelectRow(0);
+    model.MoveColumn(-1);
+    Expect(model.SelectionIndex() == 5, "left from the first column wraps to the row's last column");
+    model.MoveColumn(1);
+    Expect(model.SelectionIndex() == 0, "right from the last column wraps back to the first");
+
+    model.SelectRow(24);  // the partial last row's only item
+    model.MoveColumn(-1);
+    Expect(model.SelectionIndex() == 24, "left in a one-item row wraps to itself");
+    model.MoveColumn(1);
+    Expect(model.SelectionIndex() == 24, "right in a one-item row wraps to itself");
 }
 
 void TestGridScrollByPages() {
@@ -1184,6 +1220,8 @@ int wmain() {
     TestGridTailItemsReachable();
     TestGridPageNotMultipleStillReachesAll();
     TestGridMoveSelectionRows();
+    TestGridMoveRowClampsPartialLastRow();
+    TestGridMoveColumnWrapsWithinRow();
     TestGridScrollByPages();
     TestGridFewerThanPageNoScroll();
     TestGridQueryTransitionResetsViewport();

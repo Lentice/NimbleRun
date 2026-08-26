@@ -169,19 +169,45 @@ void PanelModel::EnsureSelectionVisible() {
     ClampFirstVisible();
 }
 
-void PanelModel::MoveSelection(int delta) {
+void PanelModel::MoveRow(int delta_rows) {
     if (rows_.empty()) {
         selected_ = -1;
         first_visible_ = 0;
         return;
     }
-    // ponytail: modular wrap; catalog rows are bounded (<5k, design-spec FR-003).
-    const std::size_t count = rows_.size();
-    const int next =
-        static_cast<int>(selected_) + delta;
-    selected_ = static_cast<int>(((next % static_cast<int>(count)) +
-                                  static_cast<int>(count)) %
-                                 static_cast<int>(count));
+    // Row wrap only touches the row; the column is clamped to the last item
+    // that actually exists in the target row, so a partial last row (grid
+    // item count not a multiple of Columns()) never lands the selection on a
+    // column that has nothing in it.
+    const int cols = Columns();
+    const int count = static_cast<int>(rows_.size());
+    const int row_count = (count + cols - 1) / cols;
+    const int cur_row = selected_ / cols;
+    const int cur_col = selected_ % cols;
+    const int new_row = ((cur_row + delta_rows) % row_count + row_count) % row_count;
+    const int row_start = new_row * cols;
+    const int row_last_col = std::min(row_start + cols, count) - row_start - 1;
+    selected_ = row_start + std::min(cur_col, row_last_col);
+    EnsureSelectionVisible();
+}
+
+void PanelModel::MoveColumn(int delta_cols) {
+    if (rows_.empty()) {
+        selected_ = -1;
+        first_visible_ = 0;
+        return;
+    }
+    // Column wrap stays inside the current row (design-spec grid nav): moving
+    // left of the first column wraps to the row's last column, and vice
+    // versa. A partial last row wraps within its own shorter length.
+    const int cols = Columns();
+    const int count = static_cast<int>(rows_.size());
+    const int cur_row = selected_ / cols;
+    const int cur_col = selected_ % cols;
+    const int row_start = cur_row * cols;
+    const int row_len = std::min(row_start + cols, count) - row_start;
+    const int new_col = ((cur_col + delta_cols) % row_len + row_len) % row_len;
+    selected_ = row_start + new_col;
     EnsureSelectionVisible();
 }
 

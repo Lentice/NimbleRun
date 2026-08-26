@@ -77,7 +77,7 @@ public:
     // Sets the number of rows visible in one viewport (clamped to >= 1). The
     // host calls this whenever the panel DPI or size changes; the visible
     // window (FirstVisibleRow()..+ViewportRows()) stays inside the list and
-    // MoveSelection() keeps the selection within it (design-spec §4.2).
+    // MoveRow()/MoveColumn() keeps the selection within it (design-spec §4.2).
     void SetViewportRows(int rows);
     int ViewportRows() const { return viewport_rows_; }
 
@@ -127,15 +127,24 @@ public:
     const std::wstring& AccessibleNameFor(std::size_t index) const;
     const std::wstring& SelectedAccessibleName() const;
 
-    // Moves the selection by delta rows, wrapping around the list.
-    void MoveSelection(int delta);
+    // Moves the selection by delta_rows grid rows (list rows when Columns()
+    // == 1), wrapping top<->bottom. The column is clamped to the last item
+    // that exists in the target row, so a partial last row never selects a
+    // gap.
+    void MoveRow(int delta_rows);
+
+    // Moves the selection by delta_cols within the current row, wrapping
+    // left<->right at the row's own length (never crosses into another row).
+    // No-op in the list view (Columns() == 1: a single-column row always
+    // wraps to itself).
+    void MoveColumn(int delta_cols);
 
     // Scrolls the visible window by delta_rows (PgUp/PgDn and the mouse wheel
     // share this single entry point). The window is clamped to the list ends
     // and never wraps. move_selection=true (PgUp/PgDn, design-spec §4.7)
     // moves the selection to the new first visible row; false (mouse wheel,
     // design-spec §4.8) leaves the selection untouched -- it may leave the
-    // visible window, and MoveSelection()'s EnsureSelectionVisible brings it
+    // visible window, and MoveRow()/MoveColumn()'s EnsureSelectionVisible brings it
     // back. No-op on an empty list.
     void ScrollBy(int delta_rows, bool move_selection = true);
 

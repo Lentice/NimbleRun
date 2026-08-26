@@ -2698,28 +2698,31 @@ LRESULT CALLBACK SearchEditProc(HWND edit, UINT message, WPARAM w_param, LPARAM 
         if (g_model) {
             switch (w_param) {
             case VK_UP:
-                // NR-029: in the grid one step is a whole row (Columns() items);
-                // in the list Columns() is 1, so this stays the original move.
-                g_model->MoveSelection(-g_model->Columns());
+                // Up/Down only ever change row; the column is clamped to
+                // whatever exists in the target row (MoveRow), so a partial
+                // last row in the grid can't select a gap.
+                g_model->MoveRow(-1);
                 InvalidateRect(GetParent(edit), nullptr, FALSE);
                 return 0;
             case VK_DOWN:
-                g_model->MoveSelection(g_model->Columns());
+                g_model->MoveRow(1);
                 InvalidateRect(GetParent(edit), nullptr, FALSE);
                 return 0;
             case VK_LEFT:
                 // NR-029: only the grid consumes Left/Right (the search box is
                 // empty there, so caret movement is moot); the list keeps
                 // NR-020 behavior and hands them to the EDIT for text editing.
+                // Left/Right only ever change column, wrapping within the row
+                // (MoveColumn) instead of crossing into the next/previous row.
                 if (g_model->Columns() > 1) {
-                    g_model->MoveSelection(-1);
+                    g_model->MoveColumn(-1);
                     InvalidateRect(GetParent(edit), nullptr, FALSE);
                     return 0;
                 }
                 break;
             case VK_RIGHT:
                 if (g_model->Columns() > 1) {
-                    g_model->MoveSelection(1);
+                    g_model->MoveColumn(1);
                     InvalidateRect(GetParent(edit), nullptr, FALSE);
                     return 0;
                 }
