@@ -2,7 +2,10 @@
 
 **Launch Windows apps in a keystroke — without the noise of files, web results, or AI.**
 
-NimbleRun is a lightweight, local-first app drawer for Windows 10 and 11. Press `Alt+Space`, pick a frequently used app, or type a few letters and press `Enter`.
+Hit `Alt+Space`, type two or three letters, hit `Enter`. That's the whole
+tool. NimbleRun is a lightweight, local-first app drawer for Windows 10 and
+11 — no accounts, no cloud sync, no background chatter, just your installed
+apps, indexed and one keystroke away.
 
 ![NimbleRun product preview](docs/assets/nimblerun-preview.png)
 
@@ -11,6 +14,12 @@ NimbleRun is a lightweight, local-first app drawer for Windows 10 and 11. Press 
 The live capture shows the light-blue four-row launcher layout. The native
 vertical scrollbar appears only when the catalog has more items than the
 visible grid/list area.
+
+## Download
+
+Grab the latest portable build from the [Releases page](https://github.com/Lentice/NimbleRun/releases) —
+unzip, run `NimbleRun.exe`, done. No installer, no admin rights, nothing
+written outside `%LOCALAPPDATA%\NimbleRun`.
 
 ## Why NimbleRun?
 
@@ -34,7 +43,7 @@ NimbleRun discovers apps from the Start Menu, Windows AppsFolder, and local fold
 
 NimbleRun is in the **Phase 5 release gate**. The launcher already includes app discovery, live catalog refresh, icons, search and usage ranking, pinning, settings, tray controls, and native tooltips.
 
-It is not released yet. Resource-budget measurements, soak testing, release packaging, and Windows 10/11 validation are still in progress. See the [roadmap](docs/roadmap.md) and [release evidence](docs/release-evidence.md) for details.
+Idle CPU, memory, startup latency, and thread-count budgets are all measured and passing (see [release evidence](docs/release-evidence.md)). What's left before a stable release: a full 72-hour soak, a clean leak-check run, and Windows 10 validation — see the [roadmap](docs/roadmap.md). Builds published before then are marked pre-release.
 
 ## Build from source
 
