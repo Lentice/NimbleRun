@@ -43,7 +43,7 @@ NimbleRun discovers apps from the Start Menu, Windows AppsFolder, and local fold
 
 NimbleRun is in the **Phase 5 release gate**. The launcher already includes app discovery, live catalog refresh, icons, search and usage ranking, pinning, settings, tray controls, and native tooltips.
 
-Idle CPU, memory, startup latency, and thread-count budgets are all measured and passing (see [release evidence](docs/release-evidence.md)). What's left before a stable release: a full 72-hour soak, a clean leak-check run, and Windows 10 validation — see the [roadmap](docs/roadmap.md). Builds published before then are marked pre-release.
+Idle CPU, memory, startup latency, and thread-count budgets are all measured and passing (see [release evidence](docs/release-evidence.md)). Still open, tracked on the [roadmap](docs/roadmap.md): a full 72-hour soak, a clean leak-check run, and Windows 10 validation.
 
 ## Build from source
 
