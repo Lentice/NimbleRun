@@ -235,6 +235,7 @@
 | NR-196 | 把 catalog_root 舊格式遷移的預設深度命名成獨立常數 | 2 | `done` | NR-193 | [NR-196](work-items/NR-196-catalog-root-legacy-depth-constant.md) |
 | NR-197 | UserFolder 遞迴掃描候選方案實測與低風險優化 | 2 | `done` | NR-137, NR-192, NR-193, NR-194, NR-195 | [NR-197](work-items/NR-197-recursive-scan-performance.md) |
 | NR-198 | 暖機 TSF 以修復開啟英文輸入設定後第一次顯示不生效 | 3 | `done` | NR-190 | [NR-198](work-items/NR-198-tsf-warmup-first-show.md) |
+| NR-199 | 持有 TSF activation 以修復英文輸入切換間歇失效 | 3 | `done` | NR-190, NR-198 | [NR-199](work-items/NR-199-tsf-activation-lifetime.md) |
 
 ## Dependency lanes
 

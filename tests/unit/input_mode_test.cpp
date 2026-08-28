@@ -45,6 +45,14 @@ void TestWarmUpInputModeDoesNotCrash() {
     // NR-198: this test process never calls CoInitializeEx, so the internal
     // CoCreateInstance is expected to fail -- the point is that a warm-up
     // call before COM/TSF is even usable stays a silent, safe no-op.
+    // NR-199: the warm-up now caches a process-lifetime activated thread
+    // manager. Call it repeatedly, and call SetEnglishInputMode across it, to
+    // cover the "acquire failed, do not cache or double-release" path -- a
+    // cached-failure or double-Release bug here crashes this process.
+    WarmUpInputMode();
+    WarmUpInputMode();
+    Expect(!SetEnglishInputMode(nullptr),
+           "warm-up must not change the null-HWND guard");
     WarmUpInputMode();
 }
 

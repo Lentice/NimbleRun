@@ -18,19 +18,25 @@ inline constexpr LONG kTsfConversionModeAlphanumeric = 0x00000000;
 bool ShouldSetEnglishInputMode(bool enabled, bool was_visible);
 
 // Best-effort switch of the search EDIT's IME input mode to alphanumeric
-// (English). Tries the TSF thread-manager keyboard-input compartment first,
-// falls back to IMM32. Returns false for a null/invalid HWND or when no usable
-// IME context exists; never throws, never blocks, never touches settings, and
-// never changes the keyboard layout.
+// (English). NR-199: runs BOTH the TSF thread-manager keyboard-input
+// compartment and the IMM32 path -- a successful TSF SetValue is not proof the
+// focused TIP changed mode, so it must not suppress IMM32. Returns true if
+// either path reported success, false for a null/invalid HWND or when neither
+// is usable; never throws, never blocks, never touches settings, and never
+// changes the keyboard layout.
 bool SetEnglishInputMode(HWND edit);
 
-// NR-198: TSF installs the hooks it uses to track focus the first time a
-// thread calls ITfThreadMgr::Activate. Calling SetEnglishInputMode for the
-// first time only after SetFocus has already fired misses that focus change,
-// so the very first hidden->visible show never switches. Call this once,
-// early on the UI thread and before any real SetFocus, to activate/deactivate
-// TSF ahead of time so those hooks are already installed. Best-effort and
-// silent: no return value, never touches settings, never blocks.
+// NR-198: TSF installs the hooks it uses to track focus when a thread calls
+// ITfThreadMgr::Activate. Calling SetEnglishInputMode for the first time only
+// after SetFocus has already fired misses that focus change, so the very first
+// hidden->visible show never switches. Call this once, early on the UI thread
+// and before any real SetFocus.
+//
+// NR-199: Activate is a reference count. The original implementation paired it
+// with an immediate Deactivate, which dropped the count back to zero and undid
+// the very hooks it was installing. This now acquires an activation that is
+// held for the life of the process, on the thread that calls it. Best-effort
+// and silent: no return value, never touches settings, never blocks.
 void WarmUpInputMode();
 
 } // namespace nimblerun
