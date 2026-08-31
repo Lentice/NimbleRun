@@ -50,10 +50,11 @@ The setting "Switch input to English on show" (`english_input_on_show`, default 
 
 1. **Setting off**: with the setting unchecked, warm-start with a Chinese IME active. Press `Alt+Space`; the search box stays in the IME's previous Chinese mode and typed Latin letters compose as usual.
 2. **Setting on, hidden→visible**: check the setting, open Settings → OK (no restart needed). Switch the search IME to Chinese, hide the panel, then press `Alt+Space`. Expected: the box first gets focus, then switches to English/alphanumeric, and Latin letters enter directly.
-3. **Repeated show while visible**: with the panel visible and English mode active, switch back to Chinese manually, then trigger another show request (hotkey while visible hides; use tray Open or a second instance). Expected: the visible panel is not switched back to English by the repeat show; only a real hide→show switches again.
-4. **Entry points**: repeat step 2 with each of (a) the global hotkey, (b) tray left-click, (c) tray menu Open, (d) launching a second instance. All must switch once on the hide→show transition.
-5. **Two IMEs**: run step 2 with Microsoft New Phonetic (Chinese) and at least one other locally installed window IME. An IME that ignores the public TSF/IMM32 mode switch must not crash or block the panel (safe no-op).
-6. **No active IME context** (English-only system, or an IME-less session): enabling the setting must not change any keyboard layout, show no error dialog, and the panel must still appear normally.
+3. **Live toggle without restart**: while NimbleRun is already running with the setting off, open Settings, enable it, choose OK, hide the panel, switch the search IME back to Chinese, and press `Alt+Space`. Expected: the first hidden→visible show warms input mode before focus and then switches the focused box to English/alphanumeric.
+4. **Repeated show while visible**: with the panel visible and English mode active, switch back to Chinese manually, then trigger another show request (hotkey while visible hides; use tray Open or a second instance). Expected: the visible panel is not switched back to English by the repeat show; only a real hide→show switches again.
+5. **Entry points**: repeat step 2 or step 3 with each of (a) the global hotkey, (b) tray left-click, (c) tray menu Open, (d) launching a second instance. All must switch once on the hide→show transition.
+6. **Two IMEs**: run step 2 or step 3 with Microsoft New Phonetic (Chinese) and at least one other locally installed window IME. An IME that ignores the public TSF/IMM32 mode switch must not crash or block the panel (safe no-op).
+7. **No active IME context** (English-only system, or an IME-less session): enabling the setting must not change any keyboard layout, show no error dialog, and the panel must still appear normally.
 
 ## MVP acceptance checklist
 

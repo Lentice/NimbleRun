@@ -2185,6 +2185,32 @@ void ShowPanel(HWND window) {
     // position the panel against a 0x0 work area.
     if (!GetMonitorInfoW(monitor, &monitor_info)) return;
 
+    // NR-200: reload before any show/activation call can deliver focus. The
+    // input-mode decision is captured once on the UI thread, so a nested
+    // window message cannot make warm-up and mode application disagree.
+    if (g_settings_store) {
+        nimblerun::Settings current;
+        g_settings_store->Load(current);
+        g_theme = current.theme;
+        g_hide_after_launch = current.hide_after_launch;
+        // recent_count only drives the recent rows and the derived icon-cache
+        // cap below, so it can follow the same "apply on next show" rule. The
+        // catalog-source fields are deliberately not copied here: they are read
+        // by rebuild workers and only change through a rebuild.
+        g_settings.recent_count = current.recent_count;
+        g_settings.english_input_on_show = current.english_input_on_show;
+    }
+    const bool should_set_input_mode =
+        g_search_edit != nullptr &&
+        nimblerun::ShouldSetEnglishInputMode(
+            g_settings.english_input_on_show, was_visible);
+    if (should_set_input_mode) {
+        // Warm up before showing the window. SetWindowPos/SetForegroundWindow
+        // may activate a child synchronously; TSF must already be active before
+        // the explicit SetFocus below.
+        nimblerun::WarmUpInputMode();
+    }
+
     // NR-015: size the panel in DIPs scaled to the cursor monitor's DPI, then
     // clamp it to the work area. Width/height stay 640x510 DIPs at any DPI, so
     // the same layout math gives predictable bounds at 100/150/200%.
@@ -2206,24 +2232,6 @@ void ShowPanel(HWND window) {
     SetWindowPos(window, HWND_TOPMOST, left, top, size.width, size.height, SWP_SHOWWINDOW);
     SyncSearchSpinnerAnimation(window);
     SetForegroundWindow(window);
-    // NR-015: the theme applies on the next panel show; reload so a settings
-    // change is picked up without a restart (same "apply on next launch" rule
-    // the existing code used for hide-after-launch).
-    if (g_settings_store) {
-        nimblerun::Settings current;
-        g_settings_store->Load(current);
-        g_theme = current.theme;
-        g_hide_after_launch = current.hide_after_launch;
-        // recent_count only drives the recent rows and the derived icon-cache
-        // cap below, so it can follow the same "apply on next show" rule. The
-        // catalog-source fields are deliberately not copied here: they are read
-        // by rebuild workers and only change through a rebuild.
-        g_settings.recent_count = current.recent_count;
-        // NR-190: the input-mode switch is a show-time action; the field is
-        // copied here so an Apply (or a hand-edited settings.ini) affects the
-        // next hidden->visible show without a restart.
-        g_settings.english_input_on_show = current.english_input_on_show;
-    }
     // Clear the retained query first: the empty-query row build is a short pin
     // and recent walk, so the model refreshes below cost nothing, whereas with a
     // stale query each of them would re-run a full SearchApps on this warm-show
@@ -2282,8 +2290,7 @@ void ShowPanel(HWND window) {
         // transition, so a re-show while the panel is already visible never
         // repeats the switch and a disabled setting never calls the IME APIs.
         // Runs after SetFocus; TSF/IMM operate on the focused input context.
-        if (nimblerun::ShouldSetEnglishInputMode(
-                g_settings.english_input_on_show, was_visible)) {
+        if (should_set_input_mode) {
             nimblerun::SetEnglishInputMode(g_search_edit);
         }
         if (g_test_input_ready_event) {

@@ -36,7 +36,10 @@ bool SetEnglishInputMode(HWND edit);
 // with an immediate Deactivate, which dropped the count back to zero and undid
 // the very hooks it was installing. This now acquires an activation that is
 // held for the life of the process, on the thread that calls it. Best-effort
-// and silent: no return value, never touches settings, never blocks.
+// and silent: no return value, never touches settings, never blocks. NR-200:
+// ShowPanel also calls this before showing/activating the window when the live
+// setting was enabled after startup, so no child-focus notification can race
+// ahead of TSF readiness.
 void WarmUpInputMode();
 
 } // namespace nimblerun
