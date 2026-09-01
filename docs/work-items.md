@@ -237,6 +237,7 @@
 | NR-198 | 暖機 TSF 以修復開啟英文輸入設定後第一次顯示不生效 | 3 | `done` | NR-190 | [NR-198](work-items/NR-198-tsf-warmup-first-show.md) |
 | NR-199 | 持有 TSF activation 以修復英文輸入切換間歇失效 | 3 | `done` | NR-190, NR-198 | [NR-199](work-items/NR-199-tsf-activation-lifetime.md) |
 | NR-200 | 將 hidden→visible 的 TSF 暖機提前到視窗顯示前，覆寫 NR-199 Apply-toggle non-goal | 2 | `done` | NR-190, NR-199 | [NR-200](work-items/NR-200-input-mode-show-transition.md) |
+| NR-201 | English input mode lifecycle seam：收斂暖機／顯示／focus 後切換契約 | 3 | `done` | NR-200 | [NR-201](work-items/NR-201-english-input-mode-lifecycle-seam.md) |
 
 ## Dependency lanes
 

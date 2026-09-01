@@ -12,6 +12,23 @@ inline constexpr LONG kTsfConversionModeAlphanumeric = 0x00000000;
 
 } // namespace input_mode_detail
 
+// NR-201: captures one hidden->visible show. Prepare warms TSF before any
+// window show/activation call; Apply consumes the transition after the search
+// EDIT has focus and never runs the native operation twice.
+class EnglishInputModeTransition {
+public:
+    static EnglishInputModeTransition Prepare(bool enabled, bool was_visible);
+
+    bool WillApply() const noexcept { return will_apply_; }
+    bool Apply(HWND edit);
+
+private:
+    explicit EnglishInputModeTransition(bool will_apply)
+        : will_apply_(will_apply) {}
+
+    bool will_apply_ = false;
+};
+
 // NR-190: optional "switch the search box to English/alphanumeric on show".
 // True only for a genuine hidden->visible panel show with the setting enabled,
 // so a re-show while the panel is already visible never repeats the switch.

@@ -13,8 +13,7 @@
 
 namespace {
 
-using nimblerun::SetEnglishInputMode;
-using nimblerun::ShouldSetEnglishInputMode;
+using nimblerun::EnglishInputModeTransition;
 using nimblerun::WarmUpInputMode;
 
 void TestTsfConversionModeContract() {
@@ -22,23 +21,47 @@ void TestTsfConversionModeContract() {
            "TSF alphanumeric mode must be zero, not the soft-keyboard flag");
 }
 
-void TestPredicateTruthTable() {
-    Expect(!ShouldSetEnglishInputMode(false, false),
+void TestTransitionTruthTable() {
+    const EnglishInputModeTransition disabled_hidden =
+        EnglishInputModeTransition::Prepare(false, false);
+    Expect(!disabled_hidden.WillApply(),
            "disabled + hidden: no switch (setting is the gate)");
-    Expect(!ShouldSetEnglishInputMode(false, true),
+
+    const EnglishInputModeTransition disabled_visible =
+        EnglishInputModeTransition::Prepare(false, true);
+    Expect(!disabled_visible.WillApply(),
            "disabled + visible: no switch");
-    Expect(!ShouldSetEnglishInputMode(true, true),
+
+    const EnglishInputModeTransition already_visible =
+        EnglishInputModeTransition::Prepare(true, true);
+    Expect(!already_visible.WillApply(),
            "enabled + already visible: no repeat switch");
-    Expect(ShouldSetEnglishInputMode(true, false),
+
+    const EnglishInputModeTransition hidden_to_visible =
+        EnglishInputModeTransition::Prepare(true, false);
+    Expect(hidden_to_visible.WillApply(),
            "enabled + hidden->visible: switch exactly once");
 }
 
-void TestSetEnglishInputModeFailureSafe() {
-    // NR-190: the null/invalid guards return false before any TSF/IMM/COM call,
-    // so these are deterministic on any machine and never touch a live IME.
-    Expect(!SetEnglishInputMode(nullptr), "nullptr HWND is a safe no-op");
-    Expect(!SetEnglishInputMode(reinterpret_cast<HWND>(static_cast<uintptr_t>(1))),
+void TestTransitionApplyFailureSafe() {
+    // NR-190/NR-201: Apply's null/invalid guard runs before TSF/IMM, so these
+    // checks are deterministic on any machine and never touch a live IME.
+    EnglishInputModeTransition null_transition =
+        EnglishInputModeTransition::Prepare(true, false);
+    Expect(null_transition.WillApply(), "prepared transition starts active");
+    Expect(!null_transition.Apply(nullptr), "nullptr HWND is a safe no-op");
+    Expect(!null_transition.WillApply(),
+           "a failed apply still consumes the transition");
+    Expect(!null_transition.Apply(nullptr),
+           "a consumed transition cannot run twice");
+
+    EnglishInputModeTransition invalid_transition =
+        EnglishInputModeTransition::Prepare(true, false);
+    Expect(!invalid_transition.Apply(
+               reinterpret_cast<HWND>(static_cast<uintptr_t>(1))),
            "invalid HWND is a safe no-op");
+    Expect(!invalid_transition.WillApply(),
+           "invalid HWND apply is still consumed exactly once");
 }
 
 void TestWarmUpInputModeDoesNotCrash() {
@@ -46,12 +69,14 @@ void TestWarmUpInputModeDoesNotCrash() {
     // CoCreateInstance is expected to fail -- the point is that a warm-up
     // call before COM/TSF is even usable stays a silent, safe no-op.
     // NR-199: the warm-up now caches a process-lifetime activated thread
-    // manager. Call it repeatedly, and call SetEnglishInputMode across it, to
-    // cover the "acquire failed, do not cache or double-release" path -- a
+    // manager. Call it repeatedly, and apply a transition across it, to cover
+    // the "acquire failed, do not cache or double-release" path -- a
     // cached-failure or double-Release bug here crashes this process.
     WarmUpInputMode();
     WarmUpInputMode();
-    Expect(!SetEnglishInputMode(nullptr),
+    EnglishInputModeTransition transition =
+        EnglishInputModeTransition::Prepare(true, false);
+    Expect(!transition.Apply(nullptr),
            "warm-up must not change the null-HWND guard");
     WarmUpInputMode();
 }
@@ -60,9 +85,9 @@ void TestWarmUpInputModeDoesNotCrash() {
 
 int wmain() {
     TestTsfConversionModeContract();
-    TestPredicateTruthTable();
-    TestSetEnglishInputModeFailureSafe();
+    TestTransitionTruthTable();
+    TestTransitionApplyFailureSafe();
     TestWarmUpInputModeDoesNotCrash();
-    std::printf("NR-190 input mode check PASSED\n");
+    std::printf("NR-201 input mode lifecycle check PASSED\n");
     return 0;
 }

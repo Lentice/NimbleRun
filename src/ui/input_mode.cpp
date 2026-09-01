@@ -126,6 +126,15 @@ bool ShouldSetEnglishInputMode(bool enabled, bool was_visible) {
     return enabled && !was_visible;
 }
 
+EnglishInputModeTransition EnglishInputModeTransition::Prepare(
+    bool enabled, bool was_visible) {
+    const bool will_apply = ShouldSetEnglishInputMode(enabled, was_visible);
+    if (will_apply) {
+        WarmUpInputMode();
+    }
+    return EnglishInputModeTransition(will_apply);
+}
+
 bool SetEnglishInputMode(HWND edit) {
     if (edit == nullptr || IsWindow(edit) == FALSE) {
         return false;
@@ -146,6 +155,16 @@ void WarmUpInputMode() {
     // real SetFocus, so TSF's focus-tracking hooks are installed in time for
     // the first hidden->visible show. Idempotent and cheap after the first call.
     ActivatedThreadMgr();
+}
+
+bool EnglishInputModeTransition::Apply(HWND edit) {
+    if (!will_apply_) {
+        return false;
+    }
+    // Consume before entering native code so even a failure cannot make a
+    // repeated caller run TSF/IMM32 a second time.
+    will_apply_ = false;
+    return SetEnglishInputMode(edit);
 }
 
 } // namespace nimblerun

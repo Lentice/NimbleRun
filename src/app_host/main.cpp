@@ -2185,9 +2185,8 @@ void ShowPanel(HWND window) {
     // position the panel against a 0x0 work area.
     if (!GetMonitorInfoW(monitor, &monitor_info)) return;
 
-    // NR-200: reload before any show/activation call can deliver focus. The
-    // input-mode decision is captured once on the UI thread, so a nested
-    // window message cannot make warm-up and mode application disagree.
+    // NR-200/NR-201: reload before any show/activation call can deliver focus,
+    // then capture the complete input-mode transition on the UI thread.
     if (g_settings_store) {
         nimblerun::Settings current;
         g_settings_store->Load(current);
@@ -2200,16 +2199,9 @@ void ShowPanel(HWND window) {
         g_settings.recent_count = current.recent_count;
         g_settings.english_input_on_show = current.english_input_on_show;
     }
-    const bool should_set_input_mode =
-        g_search_edit != nullptr &&
-        nimblerun::ShouldSetEnglishInputMode(
+    nimblerun::EnglishInputModeTransition input_mode_transition =
+        nimblerun::EnglishInputModeTransition::Prepare(
             g_settings.english_input_on_show, was_visible);
-    if (should_set_input_mode) {
-        // Warm up before showing the window. SetWindowPos/SetForegroundWindow
-        // may activate a child synchronously; TSF must already be active before
-        // the explicit SetFocus below.
-        nimblerun::WarmUpInputMode();
-    }
 
     // NR-015: size the panel in DIPs scaled to the cursor monitor's DPI, then
     // clamp it to the work area. Width/height stay 640x510 DIPs at any DPI, so
@@ -2285,14 +2277,8 @@ void ShowPanel(HWND window) {
     if (g_search_edit) {
         SetWindowTextW(g_search_edit, L"");
         SetFocus(g_search_edit);
-        // NR-190: optional switch of the search box's IME to English/alphanumeric
-        // mode. Gated on the live setting and the captured hidden->visible
-        // transition, so a re-show while the panel is already visible never
-        // repeats the switch and a disabled setting never calls the IME APIs.
-        // Runs after SetFocus; TSF/IMM operate on the focused input context.
-        if (should_set_input_mode) {
-            nimblerun::SetEnglishInputMode(g_search_edit);
-        }
+        // NR-201: native input-mode application is consumed only after focus.
+        input_mode_transition.Apply(g_search_edit);
         if (g_test_input_ready_event) {
             SetEvent(g_test_input_ready_event);
         }
@@ -3501,15 +3487,6 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     g_settings = settings;
     g_hide_after_launch = settings.hide_after_launch;
     g_theme = settings.theme;
-    // NR-198: warm up TSF's focus-tracking hooks now, before the search EDIT
-    // ever receives real focus, so the first hidden->visible ShowPanel's
-    // SetEnglishInputMode call (main.cpp ShowPanel) does not miss that focus
-    // change. Gated on the setting -- disabled means no input-mode API calls
-    // at all (NR-190).
-    if (g_settings.english_input_on_show) {
-        nimblerun::WarmUpInputMode();
-    }
-
     nimblerun::CatalogRefreshCoordinator refresh;
     g_refresh = &refresh;
     std::vector<nimblerun::AppEntry> cached;
