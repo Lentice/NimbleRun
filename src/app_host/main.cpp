@@ -2673,8 +2673,13 @@ LRESULT CALLBACK SearchEditProc(HWND edit, UINT message, WPARAM w_param, LPARAM 
         // WM_SYSKEYDOWN above already handled the launch. NR-186: the swallow
         // mirrors the WM_SYSKEYDOWN guard -- only a digit with a matching
         // visible row is swallowed, everything else falls through to the
-        // default (system beep / other apps).
-        if ((l_param & (1 << 29)) != 0 && g_model != nullptr) {
+        // default (system beep / other apps). That mirror includes the
+        // Ctrl-is-up test: without it a Ctrl+Alt+digit that does reach here
+        // (layout-dependent) would be swallowed even though WM_SYSKEYDOWN
+        // deliberately let it through, so the combo would become a silent
+        // no-op instead of keeping its default processing.
+        if ((l_param & (1 << 29)) != 0 && GetKeyState(VK_CONTROL) >= 0 &&
+            g_model != nullptr) {
             const int slot =
                 nimblerun::ui::QuickSelectSlotForKey(static_cast<int>(w_param));
             if (slot >= 0 && g_model->RowForVisibleSlot(slot) >= 0) {
