@@ -2449,6 +2449,15 @@ void ShowItemMenu(HWND window, int cell, POINT screen_pos) {
     if (!g_model || !g_pins) {
         return;
     }
+    // Both callers already range-check `cell` (the right-click path through
+    // CellAtPoint, the keyboard path against Rows().size()), but the guard
+    // belongs here too: this comment promises callers they may call
+    // unconditionally, and every other Rows()[] site in this file bounds-checks
+    // locally. Without it a future caller passing -1 indexes Rows() at
+    // SIZE_MAX.
+    if (cell < 0 || cell >= static_cast<int>(g_model->Rows().size())) {
+        return;
+    }
     const nimblerun::AppEntry entry = g_model->Rows()[static_cast<std::size_t>(cell)];
     const bool pinned = g_pins->IsPinned(entry.stable_id);
 
