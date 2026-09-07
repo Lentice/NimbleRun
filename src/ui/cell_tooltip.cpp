@@ -39,11 +39,20 @@ TooltipGeometry ComputeTooltipGeometryDip(
     float panel_left_dip, float panel_right_dip) {
     TooltipGeometry geometry;
     const float center_x = (cell_dip.left + cell_dip.right) / 2.0f;
-    // Clamp horizontally into the panel content area; the caller guarantees
-    // tip_width_dip <= panel_right_dip - panel_left_dip.
+    // Clamp horizontally into the panel content area. The upper bound is itself
+    // clamped to panel_left_dip because tip_width_dip can legitimately exceed
+    // the content width: the caller sets TTM_SETMAXTIPWIDTH to the content
+    // width, but that bounds the tooltip's *text* rect while TTM_GETBUBBLESIZE
+    // reports the whole bubble including the control's borders and margins. A
+    // wrapped long name -- the only case a cell tooltip is shown at all -- can
+    // therefore report a few px wider than the panel content. Passing
+    // panel_right_dip - tip_width_dip < panel_left_dip straight to std::clamp
+    // is undefined behavior (lo > hi), so an over-wide tip left-aligns at the
+    // content edge instead.
+    const float max_left_dip =
+        std::max(panel_left_dip, panel_right_dip - tip_width_dip);
     geometry.left_dip = std::clamp(
-        center_x - tip_width_dip / 2.0f, panel_left_dip,
-        panel_right_dip - tip_width_dip);
+        center_x - tip_width_dip / 2.0f, panel_left_dip, max_left_dip);
     // NR-179: below-first placement. Below (arrow up at the cell) wins as long
     // as the tooltip stays above `max_bottom_dip` (the panel's client height,
     // so the last row's tooltip never covers the footer); otherwise flip above

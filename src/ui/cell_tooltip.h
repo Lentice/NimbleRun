@@ -20,9 +20,13 @@ namespace ui {
 // panel's client height, so the last grid row's tooltip never covers the
 // footer), it flips above the cell (the top position must not rise above
 // `min_top_dip`, the grid area's top edge). Horizontally centered on the cell
-// and clamped to [panel_left_dip, panel_right_dip - tip_width_dip]. When
-// neither side fits, the side with more room wins. `above` tells the caller
-// which side the tooltip ends up on.
+// and clamped to [panel_left_dip, max(panel_left_dip, panel_right_dip -
+// tip_width_dip)] -- a `tip_width_dip` wider than the content area left-aligns
+// at panel_left_dip instead of being treated as a caller error, because the
+// native control's reported bubble size includes borders that the caller's
+// TTM_SETMAXTIPWIDTH does not bound. When neither side fits vertically, the
+// side with more room wins. `above` tells the caller which side the tooltip
+// ends up on.
 struct TooltipGeometry {
     float left_dip = 0.0f;
     float top_dip = 0.0f;

@@ -78,6 +78,39 @@ void TestGeometryClampsToPanelBounds() {
     Expect(left.left_dip == 16.0f, "clamped inside the panel's left edge");
 }
 
+void TestGeometryTipWiderThanContentArea() {
+    // The caller sets TTM_SETMAXTIPWIDTH to the content width, but that bounds
+    // the tooltip's text rect while TTM_GETBUBBLESIZE reports the whole bubble
+    // including borders -- so a wrapped long name can measure wider than the
+    // 608 DIP content area. The upper clamp bound must not go below the lower
+    // one (std::clamp with lo > hi is undefined behavior); an over-wide tip
+    // left-aligns at the content edge.
+    const float content_width = 624.0f - 16.0f;  // 608 DIP
+    // A right-edge cell, so the centered position lands right of panel_left and
+    // the *upper* bound is the one that decides -- that is the only arrangement
+    // where the inverted bound is observable. Without the max(), the result is
+    // panel_right_dip - tip_width_dip, i.e. left of the content edge.
+    const D2D1_RECT_F right_cell{500.0f, 100.0f, 600.0f, 150.0f};
+    for (const float overshoot : {0.5f, 4.0f, 64.0f}) {
+        const auto geometry = ComputeTooltipGeometryDip(
+            right_cell, content_width + overshoot, 30.0f, 6.0f, 0.0f, 488.0f,
+            16.0f, 624.0f);
+        Expect(geometry.left_dip == 16.0f,
+               "an over-wide tip left-aligns at the content edge, never left of it");
+        Expect(geometry.left_dip >= 16.0f, "the tip never starts outside the panel");
+    }
+    // A far-over-wide tip clamps to the same edge from the other direction.
+    const auto huge = ComputeTooltipGeometryDip(
+        right_cell, content_width + 1000.0f, 30.0f, 6.0f, 0.0f, 488.0f, 16.0f,
+        624.0f);
+    Expect(huge.left_dip == 16.0f, "a far over-wide tip still starts at the edge");
+    // Exactly the content width is the boundary and is unchanged.
+    const auto exact = ComputeTooltipGeometryDip(
+        right_cell, content_width, 30.0f, 6.0f, 0.0f, 488.0f, 16.0f, 624.0f);
+    Expect(exact.left_dip == 16.0f,
+           "a tip exactly the content width fills it from the left edge");
+}
+
 void TestGeometryGapRespected() {
     const D2D1_RECT_F cell{100.0f, 100.0f, 200.0f, 150.0f};
     const auto below = ComputeTooltipGeometryDip(
@@ -170,6 +203,7 @@ int wmain() {
     TestGeometryLastRowFlipsAbove();
     TestGeometryTopRowStaysBelow();
     TestGeometryClampsToPanelBounds();
+    TestGeometryTipWiderThanContentArea();
     TestGeometryGapRespected();
     TestGeometryNeitherSideFits();
     TestNameTruncatedBasics(*factory, *format);
