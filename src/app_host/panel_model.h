@@ -12,14 +12,6 @@
 
 namespace nimblerun {
 
-// Result of activating the current selection: launch is false for an empty
-// result or no selection. NR-189: identity was the entry to hand to the Shell,
-// but no production path read it (ActivateRow re-reads the selected row), so
-// the field is gone; the launch flag is the whole payload.
-struct PanelAction {
-    bool launch = false;
-};
-
 // Pure interaction model for the list panel (NR-010). No HWND, Shell, or COM
 // dependencies: the Win32 window translates keys and clicks into calls on this
 // model and renders the rows it exposes. Points at the host's current catalog
@@ -160,9 +152,6 @@ public:
 
     // Selects a specific row (mouse click); no-op when out of range.
     void SelectRow(std::size_t index);
-
-    // Enter on the current selection; no-op when nothing is selected.
-    PanelAction Activate() const;
 
     // Esc: returns true when the panel should hide (query already empty);
     // otherwise clears the query and returns false.

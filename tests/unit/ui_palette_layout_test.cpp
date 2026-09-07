@@ -21,6 +21,8 @@ using nimblerun::PanelModel;
 using nimblerun::PanelAccessibilityElement;
 using nimblerun::PanelAccessibilityProvider;
 using nimblerun::PanelAccessibilitySnapshot;
+using nimblerun::PanelNarration;
+using nimblerun::BuildPanelNarration;
 using nimblerun::Theme;
 using nimblerun::layout::ClampWindowSize;
 using nimblerun::layout::FooterTopDip;
@@ -243,6 +245,86 @@ VARIANT ChildId(LONG child) {
     id.vt = VT_I4;
     id.lVal = child;
     return id;
+}
+
+// The paging/selection/footer narration that used to live inside
+// SyncAccessibility, where no test could reach it.
+void TestPanelNarrationPagingAndFooter() {
+    // Empty list: one page, nothing selected, no Selected clause.
+    const PanelNarration empty =
+        BuildPanelNarration(L"", 0, 0, 24, -1, false, L"");
+    Expect(empty.page == 1 && empty.page_count == 1,
+           "an empty list narrates page 1 of 1");
+    Expect(empty.selected_row == -1, "no selection means no slot");
+    Expect(empty.footer == L"Query: ; Page 1 of 1", "empty footer has no clauses");
+
+    // 50 items, 24-cell page: three pages.
+    const PanelNarration first_page =
+        BuildPanelNarration(L"beta", 50, 0, 24, 3, false, L"Beta");
+    Expect(first_page.page == 1 && first_page.page_count == 3,
+           "ceil(50/24) is three pages");
+    Expect(first_page.selected_row == 3, "an on-page selection maps to its slot");
+    Expect(first_page.footer == L"Query: beta; Page 1 of 3; Selected: Beta",
+           "footer carries query, paging and the selected name");
+
+    // The scanning clause sits between the paging and the selection clause.
+    Expect(BuildPanelNarration(L"b", 50, 0, 24, 3, true, L"Beta").footer ==
+               L"Query: b; Page 1 of 3; Scanning apps; Selected: Beta",
+           "the rebuild clause precedes the selection clause");
+    Expect(BuildPanelNarration(L"b", 50, 0, 24, -1, true, L"").footer ==
+               L"Query: b; Page 1 of 3; Scanning apps",
+           "scanning narrates without a selection");
+}
+
+void TestPanelNarrationSelectionOffPage() {
+    // The mouse wheel scrolls the view without moving the selection, so the
+    // selection can sit outside the visible page: no slot, but the footer still
+    // names it (design-spec §4.8/§NFR-006).
+    const PanelNarration scrolled =
+        BuildPanelNarration(L"", 50, 24, 24, 3, false, L"Beta");
+    Expect(scrolled.selected_row == -1, "a selection above the page has no slot");
+    Expect(scrolled.footer.find(L"Selected: Beta") != std::wstring::npos,
+           "an off-page selection is still narrated");
+
+    const PanelNarration below =
+        BuildPanelNarration(L"", 50, 0, 24, 30, false, L"Zeta");
+    Expect(below.selected_row == -1, "a selection below the page has no slot");
+
+    // Exact page boundaries: first slot in, one past the last slot out.
+    Expect(BuildPanelNarration(L"", 50, 24, 24, 24, false, L"x").selected_row == 0,
+           "the first item of the page is slot 0");
+    Expect(BuildPanelNarration(L"", 50, 24, 24, 47, false, L"x").selected_row == 23,
+           "the last item of the page is the last slot");
+    Expect(BuildPanelNarration(L"", 50, 24, 24, 48, false, L"x").selected_row == -1,
+           "one past the page is off-page");
+}
+
+void TestPanelNarrationPageNeverExceedsCount() {
+    // first_visible aligns to whole rows, not whole pages (NR-084), so a
+    // row-granular scroll can land mid-page. The reported page must still stay
+    // within page_count for every reachable scroll position.
+    const int columns = 6;
+    const int viewport_rows = 4;
+    const int page_size = viewport_rows * columns;  // 24
+    for (int count = 0; count <= 120; ++count) {
+        const int row_count = (count + columns - 1) / columns;
+        const int max_first = std::max(0, (row_count - viewport_rows) * columns);
+        for (int first = 0; first <= max_first; first += columns) {
+            const PanelNarration n =
+                BuildPanelNarration(L"", count, first, page_size, -1, false, L"");
+            Expect(n.page >= 1 && n.page <= n.page_count,
+                   "page stays within page_count at every scroll position");
+        }
+    }
+}
+
+void TestPanelNarrationDegeneratePageSize() {
+    // A zero/negative page size must not divide by zero; it clamps to one item
+    // per page.
+    const PanelNarration zero =
+        BuildPanelNarration(L"", 5, 0, 0, 0, false, L"a");
+    Expect(zero.page == 1 && zero.page_count == 5, "page size clamps to 1");
+    Expect(zero.selected_row == 0, "the single visible slot is slot 0");
 }
 
 void TestAccessibleProviderMapping() {
@@ -672,6 +754,10 @@ int wmain() {
     TestThemeNeverTouchesCatalogIdentity();
     TestAccessibleNamesPerRow();
     TestSelectedAccessibleNameEmptyState();
+    TestPanelNarrationPagingAndFooter();
+    TestPanelNarrationSelectionOffPage();
+    TestPanelNarrationPageNeverExceedsCount();
+    TestPanelNarrationDegeneratePageSize();
     TestAccessibleProviderMapping();
     TestAccessibleProviderWindowSmoke();
     TestSearchFieldGeometry();

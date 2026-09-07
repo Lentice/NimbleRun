@@ -964,26 +964,21 @@ void SyncAccessibility(HWND window) {
     const auto dpi = static_cast<float>(GetDpiForWindow(window));
     const auto layout = nimblerun::layout::LayoutForDpi(dpi);
     const int columns = std::max(1, g_model->Columns());
-    const int page_size = std::max(1, g_model->ViewportRows() * columns);
+    const int visible = std::max(1, g_model->ViewportRows() * columns);
     const int first = g_model->FirstVisibleRow();
-    const int visible = g_model->ViewportRows() * columns;
     const int selected_index = g_model->HasSelection()
         ? static_cast<int>(g_model->SelectionIndex()) : -1;
-    snapshot.selected_row = selected_index >= first && selected_index < first + visible
-        ? selected_index - first : -1;
-    const int row_count = (static_cast<int>(g_model->Rows().size()) + page_size - 1) /
-                          page_size;
-    snapshot.page = first / page_size + 1;
-    snapshot.page_count = std::max(1, row_count);
-    snapshot.footer = L"Query: " + snapshot.query + L"; Page " +
-                      std::to_wstring(snapshot.page) + L" of " +
-                      std::to_wstring(snapshot.page_count);
-    if (g_search_spinner_timer_active) {
-        snapshot.footer += L"; Scanning apps";
-    }
-    if (selected_index >= 0) {
-        snapshot.footer += L"; Selected: " + g_model->SelectedAccessibleName();
-    }
+    // The paging/selection/footer derivation is pure arithmetic and lives in
+    // panel_accessibility so it can be tested; only the bounds below need the
+    // window.
+    const nimblerun::PanelNarration narration = nimblerun::BuildPanelNarration(
+        snapshot.query, static_cast<int>(g_model->Rows().size()), first, visible,
+        selected_index, g_search_spinner_timer_active,
+        selected_index >= 0 ? g_model->SelectedAccessibleName() : std::wstring{});
+    snapshot.selected_row = narration.selected_row;
+    snapshot.page = narration.page;
+    snapshot.page_count = narration.page_count;
+    snapshot.footer = narration.footer;
 
     RECT window_rect{};
     GetWindowRect(window, &window_rect);
@@ -2731,13 +2726,11 @@ LRESULT CALLBACK SearchEditProc(HWND edit, UINT message, WPARAM w_param, LPARAM 
                 g_model->ScrollBy(g_model->ViewportRows(), true);
                 InvalidateRect(GetParent(edit), nullptr, FALSE);
                 return 0;
-            case VK_RETURN: {
-                const nimblerun::PanelAction action = g_model->Activate();
-                if (action.launch) {
+            case VK_RETURN:
+                if (g_model->HasSelection()) {
                     ActivateRow(g_model->SelectionIndex(), GetParent(edit));
                 }
                 return 0;
-            }
             case VK_ESCAPE:
                 // NR-052: Esc's two-stage behavior lives in PanelModel::Esc()
                 // (design-spec §4.7), but the model's query is a derived value
@@ -2863,12 +2856,20 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
             const bool applied = nimblerun::ShowSettingsDialog(window, *g_settings_store,
                                                        *g_usage, g_hotkey, g_log_directory,
                                                        g_diag);
-            // Reload so the live panel picks up hide-after-launch without
-            // waiting for a restart (recent_count/theme apply on next launch).
+            // Reload so the live panel picks up the accepted settings without
+            // waiting for a restart. g_theme is a separate mirror that
+            // ResolveCurrentColors() reads, so it must be updated here too:
+            // setting only g_settings left g_settings.theme holding the new
+            // value while the renderer kept painting the old one until the next
+            // hidden->visible show happened to repair it. Render compares the
+            // resolved palette against g_brush_colors every frame and rebuilds
+            // the brushes itself, so the invalidate below is the whole apply.
             nimblerun::Settings reloaded;
             g_settings_store->Load(reloaded);
             g_settings = reloaded;
             g_hide_after_launch = reloaded.hide_after_launch;
+            g_theme = reloaded.theme;
+            InvalidateRect(window, nullptr, FALSE);
             if (applied) {
                 StartWatchers(window);
                 RefreshPanelSnapshot();

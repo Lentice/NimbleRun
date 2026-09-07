@@ -120,21 +120,13 @@ bool TryImm(HWND edit) {
     return ok;
 }
 
-} // namespace
-
-bool ShouldSetEnglishInputMode(bool enabled, bool was_visible) {
-    return enabled && !was_visible;
-}
-
-EnglishInputModeTransition EnglishInputModeTransition::Prepare(
-    bool enabled, bool was_visible) {
-    const bool will_apply = ShouldSetEnglishInputMode(enabled, was_visible);
-    if (will_apply) {
-        WarmUpInputMode();
-    }
-    return EnglishInputModeTransition(will_apply);
-}
-
+// Best-effort switch of the search EDIT's IME input mode to alphanumeric
+// (English). NR-199: runs BOTH the TSF thread-manager keyboard-input
+// compartment and the IMM32 path -- a successful TSF SetValue is not proof the
+// focused TIP changed mode, so it must not suppress IMM32. Returns true if
+// either path reported success, false for a null/invalid HWND or when neither
+// is usable; never throws, never blocks, never touches settings, and never
+// changes the keyboard layout.
 bool SetEnglishInputMode(HWND edit) {
     if (edit == nullptr || IsWindow(edit) == FALSE) {
         return false;
@@ -148,6 +140,20 @@ bool SetEnglishInputMode(HWND edit) {
     const bool tsf_ok = TryTsf();
     const bool imm_ok = TryImm(edit);
     return tsf_ok || imm_ok;
+}
+
+} // namespace
+
+EnglishInputModeTransition EnglishInputModeTransition::Prepare(
+    bool enabled, bool was_visible) {
+    // NR-190's gate, inlined: the switch happens only for a genuine
+    // hidden->visible show with the setting enabled, so a re-show while the
+    // panel is already visible never repeats it.
+    const bool will_apply = enabled && !was_visible;
+    if (will_apply) {
+        WarmUpInputMode();
+    }
+    return EnglishInputModeTransition(will_apply);
 }
 
 void WarmUpInputMode() {

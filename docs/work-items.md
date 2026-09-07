@@ -396,7 +396,7 @@ NR-117（GetMessageW error result 被誤當成可 dispatch）── 依賴 NR-11
 | 用 Catalog 項目把空白狀態的格狀填滿（NR-053 的 §4.2 規則 3） | NR-061 的使用者決策（2026-08-07） | 實機上填出 40 格 `3D Vision 相...`／`AccessPort`／`AlertMail48` 這類從未開過的項目，把「我釘的或我用過的」這個唯一語意稀釋掉，且這些格子的右鍵「Remove from recent」按了毫無反應。空白狀態的內容一律只來自釘選清單與使用紀錄；沒有就顯示一行提示。**NR-053 依 `usage_score` 排序的那一半保留。**（2026-08-07 由 NR-071 覆寫：常用區改依最後啟動時間排序、最新在最前，`usage_score` 僅留給 §4.5 搜尋結果的次要排序。「不用其他 App 填充」這條不受影響，仍然有效。） |
 | 把 icons 疊層（icon_cache／icon_pack_format／png_codec／icon_store／icon_worker／shell_icon_provider）重寫成單一「icon acquisition」深模組 | 2026-08-10 三方架構審查 | 這不是碎片化，是真正的分層：每層有各自的存在理由與各自的測試，Shell／COM 邊界恰好收在單一執行緒上。重寫換不到 locality，只會把六份可測的介面換成一份不可測的大介面。**真正的問題是 token 交接註冊表沒有模組**，那一條已由 NR-131 處理；UI 端的 pending-key 集合若仍是負擔，開新 item 時必須提出 icons 疊層本身造成的具體 bug 或修補紀錄作為新證據。 |
 | 抽一個泛用的「versioned persistence policy」深模組，讓 settings／pin／usage 三個 store 共用 schema 守門與 atomic commit | 2026-08-10 三方架構審查 | 機制層已經共用（`src/storage/atomic_text_file.h`），NR-057／NR-127 也已把 `kSchemaPrefix` 等常數收斂到一份。剩下的重複只是每個 store 各自幾行的守門呼叫，套用刪除測試——刪掉這層抽象，複雜度**不集中**，只是回到三個各自正確且各自有測試的 store。要重開必須先指出一個「三份守門已經漂移」的具體實例（NR-072／NR-080／NR-096 修的是三個**不同**的邊界，不是同一條規則的三份拷貝）。**特別不得**把三種 domain 格式壓成一個泛用 parser。 |
-| 把 `main.cpp` 的子系統全域收成一個 `PanelHost` struct（含 RAII 化建構／銷毀順序、消掉 `if (!g_x) return;` 守門） | 2026-08-10 NR-132／NR-134 落地後的重新評估 | 這條原本記為「必須排在 NR-132 與 NR-134 之後」；兩者已 done，條件已成立，實測結果是**前提不成立**。`main.cpp` 由 3955 降到 3222 行，但檔案層級全域仍有 55 個，其中 `PanelHost` 真正要吸收的**只有 12 個子系統指標**（`g_model`／`g_accessibility`／`g_usage`／`g_pins`／`g_settings_store`／`g_icon_cache`／`g_icon_worker`／`g_refresh`／`g_snapshot_assembler`／`g_watcher`／`g_diag`／`g_rebuild_pipeline`）。其餘是 20 個 D2D/DWrite 資源、14 個 Win32 handle 與滑鼠／視窗狀態、7 個 settings／theme 值、以及三個**已經是值模組**的成員（`g_icon_request_session`／`g_pin_drag_state`／`g_launch_failure_refresh`）——沒有一類是 `PanelHost` 該吸收的。套用刪除測試：把 12 個指標搬進一個 struct，複雜度**不集中**，只是換個名字；12 個 `if (!g_x) return;` 守門一個都不會消失（它們擋的是 wndproc 在 `wWinMain` 發佈前／`:3210` 清空後被呼叫，struct 化不改變那個時間窗），銷毀順序仍然由 `wWinMain` 的 stack local 宣告順序決定，那正是 C++ 已經保證的機制。要重開必須提出**建構／銷毀順序真的出過一次事**的修補紀錄。原本掛在此候選下的 applied-settings 三份鏡像已獨立留在 §候選。 |
+| 把 `main.cpp` 的子系統全域收成一個 `PanelHost` struct（含 RAII 化建構／銷毀順序、消掉 `if (!g_x) return;` 守門） | 2026-08-10 NR-132／NR-134 落地後的重新評估 | 這條原本記為「必須排在 NR-132 與 NR-134 之後」；兩者已 done，條件已成立，實測結果是**前提不成立**。`main.cpp` 由 3955 降到 3222 行，但檔案層級全域仍有 55 個，其中 `PanelHost` 真正要吸收的**只有 12 個子系統指標**（`g_model`／`g_accessibility`／`g_usage`／`g_pins`／`g_settings_store`／`g_icon_cache`／`g_icon_worker`／`g_refresh`／`g_snapshot_assembler`／`g_watcher`／`g_diag`／`g_rebuild_pipeline`）。其餘是 20 個 D2D/DWrite 資源、14 個 Win32 handle 與滑鼠／視窗狀態、7 個 settings／theme 值、以及三個**已經是值模組**的成員（`g_icon_request_session`／`g_pin_drag_state`／`g_launch_failure_refresh`）——沒有一類是 `PanelHost` 該吸收的。套用刪除測試：把 12 個指標搬進一個 struct，複雜度**不集中**，只是換個名字；12 個 `if (!g_x) return;` 守門一個都不會消失（它們擋的是 wndproc 在 `wWinMain` 發佈前／`:3210` 清空後被呼叫，struct 化不改變那個時間窗），銷毀順序仍然由 `wWinMain` 的 stack local 宣告順序決定，那正是 C++ 已經保證的機制。要重開必須提出**建構／銷毀順序真的出過一次事**的修補紀錄。原本掛在此候選下的 applied-settings 三份鏡像已獨立留在 §候選。**2026-09-07 二次確認維持否決**：該次架構審查（churn 加權，`main.cpp` 101 個 commit）在不知道本節的情況下又把 `PanelHost` 提為首選，理由是「12 個 null 守門會消失」與「銷毀順序只活在註解裡」——這兩點本欄早已逐條駁回，且複查程式碼後駁回仍然成立（守門擋的是 wndproc 在發佈前／清空後被呼叫的時間窗，與 struct 化無關；銷毀順序由 stack local 宣告順序保證，那就是 C++ 的機制）。唯一的**新**證據是 `c022991`（Keep detached workers' objects alive past teardown）與 NR-123／NR-184 的無界 join 修補，確實是生命週期修補紀錄；但它們修的是「worker 被 detach 後其物件必須活過 teardown」，`PanelHost` 的成員宣告順序**不能**表達那條規則（detach 的重點正是壽命不再跟著 frame），所以這些紀錄不滿足本欄的重開門檻。要重開仍需「建構／銷毀**順序**本身出事」的紀錄，而不是「detach 後壽命」的紀錄。 |
 | 把 FR-004a 的 program-like 判準套用到 FR-005 使用者自訂資料夾 | `docs/design-spec.md:354` | 明文「此判準**不套用於** FR-005 的使用者自訂資料夾」。該來源的把關者是使用者自己勾選的副檔名清單；二次過濾會無聲擋掉使用者手動加入的副檔名。 |
 
 ## 稽核修補 lane 10（NR-118，2026-08-09 第十二次 fresh audit 產出）
@@ -516,10 +516,52 @@ NR-132／NR-134 已落地，`PanelHost` 候選已於 2026-08-10 重新評估並*
   對話框套用、`wWinMain` 各寫一份）：「catalog 來源欄位只能經由 rebuild 改變」這條規則
   目前只活在註解裡。原本掛在 `PanelHost` 候選底下；`PanelHost` 否決後這條**獨立留存**為候選
   ——它是一條真實的不變式，與收全域無關，若日後 settings 欄位增加就開成獨立 item。
+  **2026-09-07 更新：漂移已經發生過一次並已修掉，本候選的證據強度因此升級。**
+  `kSettingsMessage`（當時 `main.cpp:2866-2871`）重載後只寫 `g_settings` 與
+  `g_hide_after_launch`，**沒有寫 `g_theme`**——而 `ResolveCurrentColors()`（`:511`）讀的是
+  `g_theme`。後果：在設定對話框改主題並按確定後，`g_settings.theme` 已是新值但畫面仍用舊色盤，
+  要等下一次 hidden→visible show 的 `ShowPanel`（`:2193`）順手補寫 `g_theme` 才會生效；
+  面板當時可見時使用者看到的就是「改了主題沒反應」。修法是同處補 `g_theme = reloaded.theme;`
+  加一次 `InvalidateRect`（`Render` 每幀比對 `g_brush_colors` 會自行重建筆刷，不需另外處置）。
+  這正是本候選預言的「三份鏡像各自列欄位名，新欄位預設不會被套用」的實例：三處同步點
+  （`:3486` 啟動寫三份、對話框返回寫兩份、`ShowPanel` 寫 theme 加兩個具名欄位）沒有任何一處
+  能看出漏了誰。要開成 item 的話，範圍是把「哪個欄位在哪個時機生效」變成一份可測的表，
+  而不是再補一次手寫賦值。design-spec 對主題生效時機沒有任何條文，所以上述時機差是實作意外
+  而非規格決定。
 - **`Render()`（`main.cpp:1939-2400`，460 行）抽出 `std::vector<RowVisual>` builder**：
   把「畫什麼」與「怎麼畫」分開，`SyncAccessibility` 可共用同一份決策（目前獨立重推
   `selected`／`disabled`，是與 NR-133 同型的第三份分歧）。**不是** render command list。
   近期無任何 bug 修補指向 `Render` 的狀態邏輯，故列候選不開 item；若它開始出現在 bug 報告再開。
+- **grid hover 狀態沒有模組**（2026-09-07 架構審查產出）：`CONTEXT.md` 把 **hover** 定義成
+  一個概念，程式裡卻是三份互不相干的全域（`g_grid_hover_index`、`g_tracking_mouse_leave`、
+  tooltip timer），且「清掉 hover ⇒ 重繪 **且** 收掉 cell tooltip」這條不變式在每個
+  wndproc 分支各寫一次：`HideCellTooltip(window)` 有 **10 個呼叫點**，
+  `g_grid_hover_index = -1` 有 **4 個**，其中只有兩個順手 `InvalidateRect`。
+  逐一核對後**四處目前都是對的**（`ShowPanel` 尾端統一 invalidate、drag 路徑自己 invalidate、
+  `WM_COMMAND` 不清 leave flag 是正確的因為 `TrackMouseEvent` 仍然掛著），所以**這不是 bug，
+  是重複**——與 NR-133 收斂 slot 幾何、NR-119 收斂 modal 狀態同型。可仿照
+  `PinDragState`（已是值模組且有測試）做成 `GridHover`，`MoveTo`／`Clear`／`Dismiss` 回傳
+  `{repaint, rearm_timer, hide_tooltip}`，Win32 呼叫留在 host。純幾何那半
+  （`ComputeTooltipGeometryDip`／`NameIsTruncated`）已深且有測試，缺的是「何時顯示」那半。
+  **與 ADR-0002 不衝突**：該 ADR 定的是 tooltip 的繪製機制（原生 `TOOLTIPS_CLASS`），
+  並明文把 150 ms hover timer 留在應用層碼；本候選只改應用層那份 timing 由誰持有。
+  列候選不開 item：**沒有第二次出事的證據**（與 `ModalScope` 同一條門檻）；
+  若 hover／tooltip 再出一次修補紀錄就開。
+- **settings 邊界檢查散在三層**（2026-09-07 架構審查產出）：常數本身已單一來源
+  （`settings_store.h:25-27,43-44,65-66`，NR-057／NR-127 收斂過），但**檢查**沒有：
+  `recentCount` 三份、`catalogDepth` 四份、`kMaxCatalogRoots` 三份，且其中一份在
+  **對話框**裡（`settings_dialog.cpp:602` 預先擋 cap，只為挑不同的提示字串——該處註解自己
+  承認）。兩個 blur clamp 各把同一個 buffer **parse 兩次**
+  （`ClampCatalogDepthText` 解析後 `:564` 再 `ParseInt` 一次比對，`:507` 同型）；
+  `ParseHotkey` 每次接受一個熱鍵跑三次，其中 setter 那次被自己的註解標為 unreachable
+  （`settings_editor.cpp:235`）。另外 `SettingsEditor` 有五個 setter
+  （`.cpp:358-396`）是五份逐字相同的 7 行、不驗證任何東西、永遠回不了 `false`，
+  卻用 `bool` 回傳值暗示有驗證。真正的痛點是 `settings_dialog.cpp` 746 行**零單元測試**，
+  而它僅剩的決策就是「顯示哪一則提示」——把 editor 的拒絕**理由**做成 outcome enum 交給
+  對話框，就能把那個決策移進既有的 `settings_editor_test.cpp`。
+  **範圍限定在驗證層**，不要碰持久化：§已否決的方向的「泛用 versioned persistence」
+  仍然有效。列候選不開 item：目前無使用者可見症狀（三份檢查的**寬鬆方向不一致**——
+  載入端超界靜靜忽略、setter 超界拒絕——但兩者都不會產出非法值）。
 - **`ModalScope` RAII**（`g_context_menu_active`／`g_dialog_active` 的五處手動 set/clear，
   `main.cpp:201-205`、`:928-931`、`:980-983`、`:2697-2700`、`:3459-3462`）：與 NR-119 修掉的
   是同一類共用狀態覆寫，但**沒有第二次出事的證據**，NR-119 的一行入口守門已經擋住那個 crash。

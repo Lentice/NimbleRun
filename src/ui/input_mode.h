@@ -29,19 +29,13 @@ private:
     bool will_apply_ = false;
 };
 
-// NR-190: optional "switch the search box to English/alphanumeric on show".
-// True only for a genuine hidden->visible panel show with the setting enabled,
-// so a re-show while the panel is already visible never repeats the switch.
-bool ShouldSetEnglishInputMode(bool enabled, bool was_visible);
-
-// Best-effort switch of the search EDIT's IME input mode to alphanumeric
-// (English). NR-199: runs BOTH the TSF thread-manager keyboard-input
-// compartment and the IMM32 path -- a successful TSF SetValue is not proof the
-// focused TIP changed mode, so it must not suppress IMM32. Returns true if
-// either path reported success, false for a null/invalid HWND or when neither
-// is usable; never throws, never blocks, never touches settings, and never
-// changes the keyboard layout.
-bool SetEnglishInputMode(HWND edit);
+// NR-190's transition predicate (enabled && !was_visible) and the best-effort
+// native switch are both internal to input_mode.cpp now: NR-201 made
+// EnglishInputModeTransition the module's only entry point for a panel show,
+// and after it landed nothing outside called either one. Keeping them exported
+// made the interface wider than the behavior and left the predicate as the only
+// unit-tested part of a file whose bugs were all in activation lifetime and
+// call ordering -- the transition class is what the tests exercise instead.
 
 // NR-198: TSF installs the hooks it uses to track focus when a thread calls
 // ITfThreadMgr::Activate. Calling SetEnglishInputMode for the first time only

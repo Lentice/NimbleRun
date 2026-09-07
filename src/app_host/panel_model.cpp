@@ -274,15 +274,6 @@ void PanelModel::SelectRow(std::size_t index) {
     EnsureSelectionVisible();
 }
 
-PanelAction PanelModel::Activate() const {
-    if (!HasSelection()) {
-        return {};
-    }
-    PanelAction action;
-    action.launch = true;
-    return action;
-}
-
 bool PanelModel::Esc() {
     if (!query_.empty()) {
         SetQuery(L"");

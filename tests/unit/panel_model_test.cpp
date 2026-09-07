@@ -14,7 +14,6 @@
 
 using nimblerun::AppEntry;
 using nimblerun::AppSource;
-using nimblerun::PanelAction;
 using nimblerun::PanelModel;
 using nimblerun::ShouldOfferRemoveFromRecent;
 
@@ -77,8 +76,7 @@ void TestEmptyStateNoRecords() {
     PanelModel model(&catalog, {});
     Expect(model.Rows().empty(), "no records -> empty state");
     Expect(!model.HasSelection(), "empty state has no selection");
-    const PanelAction action = model.Activate();
-    Expect(!action.launch, "empty state never launches");
+    Expect(!model.HasSelection(), "empty state never launches");
 }
 
 void TestQuerySwitchesToFilteredRows() {
@@ -89,7 +87,8 @@ void TestQuerySwitchesToFilteredRows() {
     Expect(model.Rows().size() == 1, "query filters to one row");
     Expect(model.Rows()[0].display_name == L"Calculator", "query row is the match");
     Expect(model.HasSelection(), "first result selected");
-    // Selecting a row never auto-launches: only an explicit Activate() does.
+    // Selecting a row never auto-launches: only the host's explicit
+    // ActivateRow() on the current selection does.
     model.MoveRow(0);
     model.MoveRow(0);
     Expect(model.HasSelection(), "moving selection keeps it selected");
@@ -117,8 +116,7 @@ void TestEnterLaunchesSelectedOnly() {
         Entry(L"1", L"One"), Entry(L"2", L"Two")};
     PanelModel model(&catalog, {});
     model.SetQuery(L"two");
-    const PanelAction action = model.Activate();
-    Expect(action.launch, "Enter on a selection launches");
+    Expect(model.HasSelection(), "Enter on a selection launches");
 }
 
 void TestEnterEmptyResultNoLaunch() {
@@ -127,8 +125,7 @@ void TestEnterEmptyResultNoLaunch() {
     model.SetQuery(L"zzz-no-match");
     Expect(model.Rows().empty(), "no match -> empty rows");
     Expect(!model.HasSelection(), "no selection on empty rows");
-    const PanelAction action = model.Activate();
-    Expect(!action.launch, "no launch on empty result");
+    Expect(!model.HasSelection(), "no launch on empty result");
 }
 
 void TestEscClearsThenHides() {
@@ -233,7 +230,7 @@ void TestFailureKeepsModelIntact() {
     // (caller) keeps showing rows.
     Expect(model.Rows().size() == 1, "rows visible before failure");
     Expect(model.HasSelection(), "selection present before failure");
-    Expect(model.Activate().launch, "activation succeeds at model level");
+    Expect(model.HasSelection(), "activation succeeds at model level");
     Expect(model.Rows().size() == 1, "rows still visible after a failed launch");
     Expect(model.SelectionIndex() == 0, "selection intact after a failed launch");
 }

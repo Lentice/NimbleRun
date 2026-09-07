@@ -10,10 +10,12 @@ namespace {
 constexpr LONG kSearchChild = 1;
 constexpr LONG kFirstRowChild = 2;
 
-std::wstring PageValue(const PanelAccessibilitySnapshot& snapshot) {
-    return L"Query: " + snapshot.query + L"; Page " +
-           std::to_wstring(snapshot.page) + L" of " +
-           std::to_wstring(snapshot.page_count);
+// The "Query: ...; Page N of M" prefix, shared by get_accValue and by the
+// footer sentence BuildPanelNarration composes -- previously two copies, one
+// here and one in the host's snapshot builder.
+std::wstring PageValue(const std::wstring& query, int page, int page_count) {
+    return L"Query: " + query + L"; Page " + std::to_wstring(page) + L" of " +
+           std::to_wstring(page_count);
 }
 
 bool IsChildId(VARIANT id) noexcept {
@@ -26,6 +28,40 @@ bool SameRect(const RECT& left, const RECT& right) noexcept {
 }
 
 }  // namespace
+
+PanelNarration BuildPanelNarration(const std::wstring& query, int row_total,
+                                   int first_visible, int page_size,
+                                   int selected_index, bool scanning,
+                                   const std::wstring& selected_name) {
+    // One clamped page size drives both the paging and the on-page test. The
+    // host previously kept two expressions for this -- a clamped page_size for
+    // the page number and an unclamped viewport x columns for the range check.
+    // They are always equal (both factors are clamped >= 1 by PanelModel), so
+    // collapsing them is behavior-preserving and removes the trap.
+    const int page = std::max(1, page_size);
+    const int rows = std::max(0, row_total);
+    const int first = std::max(0, first_visible);
+
+    PanelNarration narration;
+    narration.selected_row =
+        selected_index >= first && selected_index < first + page
+            ? selected_index - first
+            : -1;
+    // first_visible is aligned to whole rows, not whole pages (NR-084), so the
+    // last page number is only announced once the view actually starts inside
+    // it. page <= page_count always holds: the model clamps first_visible to
+    // (ceil(rows/columns) - viewport_rows) * columns.
+    narration.page = first / page + 1;
+    narration.page_count = std::max(1, (rows + page - 1) / page);
+    narration.footer = PageValue(query, narration.page, narration.page_count);
+    if (scanning) {
+        narration.footer += L"; Scanning apps";
+    }
+    if (selected_index >= 0) {
+        narration.footer += L"; Selected: " + selected_name;
+    }
+    return narration;
+}
 
 struct PanelAccessibilityProvider::State {
     PanelAccessibilitySnapshot snapshot;
@@ -293,7 +329,9 @@ HRESULT STDMETHODCALLTYPE PanelAccessibilityProvider::get_accValue(VARIANT id, B
     }
     *value = nullptr;
     if (IsRoot() && IsChildId(id) && id.lVal == CHILDID_SELF) {
-        return PutString(value, PageValue(state_->snapshot));
+        return PutString(value, PageValue(state_->snapshot.query,
+                                          state_->snapshot.page,
+                                          state_->snapshot.page_count));
     }
     if (!IsChildId(id)) {
         return E_INVALIDARG;

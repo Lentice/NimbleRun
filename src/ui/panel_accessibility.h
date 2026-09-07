@@ -30,6 +30,29 @@ struct PanelAccessibilitySnapshot {
     std::vector<PanelAccessibilityElement> rows;
 };
 
+// The narration half of a snapshot: paging, the selection's slot within the
+// visible page, and the footer sentence a screen reader announces
+// (design-spec §NFR-006). Pure value -- bounds are the only part of a snapshot
+// that needs a window, so the host fills those in and this stays testable.
+struct PanelNarration {
+    int page = 1;
+    int page_count = 1;
+    // Slot of the selection within the visible page, or -1 when the selection
+    // is scrolled off-page (the mouse wheel moves the view, not the selection).
+    int selected_row = -1;
+    std::wstring footer;
+};
+
+// `row_total` is the model's total row count, `first_visible` its first visible
+// row index and `page_size` one page of items (viewport rows x columns,
+// clamped to >= 1 here so a degenerate layout cannot divide by zero).
+// `selected_index` is -1 when nothing is selected; `selected_name` is only read
+// when it is not. `scanning` adds the rebuild-in-progress clause.
+PanelNarration BuildPanelNarration(const std::wstring& query, int row_total,
+                                   int first_visible, int page_size,
+                                   int selected_index, bool scanning,
+                                   const std::wstring& selected_name);
+
 class PanelAccessibilityProvider final : public IAccessible {
 public:
     static PanelAccessibilityProvider* Create(HWND window) noexcept;
