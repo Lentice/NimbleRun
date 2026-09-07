@@ -517,15 +517,16 @@ NR-132／NR-134 已落地，`PanelHost` 候選已於 2026-08-10 重新評估並*
   目前只活在註解裡。原本掛在 `PanelHost` 候選底下；`PanelHost` 否決後這條**獨立留存**為候選
   ——它是一條真實的不變式，與收全域無關，若日後 settings 欄位增加就開成獨立 item。
   **2026-09-07 更新：漂移已經發生過一次並已修掉，本候選的證據強度因此升級。**
-  `kSettingsMessage`（當時 `main.cpp:2866-2871`）重載後只寫 `g_settings` 與
-  `g_hide_after_launch`，**沒有寫 `g_theme`**——而 `ResolveCurrentColors()`（`:511`）讀的是
+  `kSettingsMessage`（修前 `main.cpp:2866-2871`）重載後只寫 `g_settings` 與
+  `g_hide_after_launch`，**沒有寫 `g_theme`**——而 `ResolveCurrentColors()` 讀的是
   `g_theme`。後果：在設定對話框改主題並按確定後，`g_settings.theme` 已是新值但畫面仍用舊色盤，
-  要等下一次 hidden→visible show 的 `ShowPanel`（`:2193`）順手補寫 `g_theme` 才會生效；
+  要等下一次 hidden→visible show 的 `ShowPanel` 順手補寫 `g_theme` 才會生效；
   面板當時可見時使用者看到的就是「改了主題沒反應」。修法是同處補 `g_theme = reloaded.theme;`
   加一次 `InvalidateRect`（`Render` 每幀比對 `g_brush_colors` 會自行重建筆刷，不需另外處置）。
   這正是本候選預言的「三份鏡像各自列欄位名，新欄位預設不會被套用」的實例：三處同步點
-  （`:3486` 啟動寫三份、對話框返回寫兩份、`ShowPanel` 寫 theme 加兩個具名欄位）沒有任何一處
-  能看出漏了誰。要開成 item 的話，範圍是把「哪個欄位在哪個時機生效」變成一份可測的表，
+  （`wWinMain` 啟動寫三份、對話框返回寫兩份、`ShowPanel` 寫 theme 加兩個具名欄位）沒有任何一處
+  能看出漏了誰。修後（`f100a3b`）`g_theme` 的三個寫入點是 `main.cpp:2188`（ShowPanel）、
+  `:2871`（對話框返回，本次新增）、`:3490`（啟動）；`ResolveCurrentColors()` 在 `:508`。要開成 item 的話，範圍是把「哪個欄位在哪個時機生效」變成一份可測的表，
   而不是再補一次手寫賦值。design-spec 對主題生效時機沒有任何條文，所以上述時機差是實作意外
   而非規格決定。
 - **`Render()`（`main.cpp:1939-2400`，460 行）抽出 `std::vector<RowVisual>` builder**：
@@ -535,8 +536,11 @@ NR-132／NR-134 已落地，`PanelHost` 候選已於 2026-08-10 重新評估並*
 - **grid hover 狀態沒有模組**（2026-09-07 架構審查產出）：`CONTEXT.md` 把 **hover** 定義成
   一個概念，程式裡卻是三份互不相干的全域（`g_grid_hover_index`、`g_tracking_mouse_leave`、
   tooltip timer），且「清掉 hover ⇒ 重繪 **且** 收掉 cell tooltip」這條不變式在每個
-  wndproc 分支各寫一次：`HideCellTooltip(window)` 有 **10 個呼叫點**，
-  `g_grid_hover_index = -1` 有 **4 個**，其中只有兩個順手 `InvalidateRect`。
+  wndproc 分支各寫一次：`HideCellTooltip(...)` 有 **13 個呼叫點**（`main.cpp:793`、`:847`、
+  `:1181`、`:2250`、`:2720`、`:2725`、`:2950`、`:2973`、`:3008`、`:3069`、`:3073`、`:3161`、
+  `:3286`；其中 `:2720`／`:2725` 在 `SearchEditProc` 裡傳 `GetParent(edit)`），
+  `g_grid_hover_index = -1` 有 **4 個**（`:2246`、`:2946`、`:3021`、`:3064`），
+  其中只有兩個順手 `InvalidateRect`。
   逐一核對後**四處目前都是對的**（`ShowPanel` 尾端統一 invalidate、drag 路徑自己 invalidate、
   `WM_COMMAND` 不清 leave flag 是正確的因為 `TrackMouseEvent` 仍然掛著），所以**這不是 bug，
   是重複**——與 NR-133 收斂 slot 幾何、NR-119 收斂 modal 狀態同型。可仿照
@@ -549,12 +553,16 @@ NR-132／NR-134 已落地，`PanelHost` 候選已於 2026-08-10 重新評估並*
   若 hover／tooltip 再出一次修補紀錄就開。
 - **settings 邊界檢查散在三層**（2026-09-07 架構審查產出）：常數本身已單一來源
   （`settings_store.h:25-27,43-44,65-66`，NR-057／NR-127 收斂過），但**檢查**沒有：
-  `recentCount` 三份、`catalogDepth` 四份、`kMaxCatalogRoots` 三份，且其中一份在
-  **對話框**裡（`settings_dialog.cpp:602` 預先擋 cap，只為挑不同的提示字串——該處註解自己
-  承認）。兩個 blur clamp 各把同一個 buffer **parse 兩次**
-  （`ClampCatalogDepthText` 解析後 `:564` 再 `ParseInt` 一次比對，`:507` 同型）；
-  `ParseHotkey` 每次接受一個熱鍵跑三次，其中 setter 那次被自己的註解標為 unreachable
-  （`settings_editor.cpp:235`）。另外 `SettingsEditor` 有五個 setter
+  `recentCount` 三份（`settings_editor.cpp:324-328` clamp、`:348` setter、
+  `settings_store.cpp:224` 載入）、`catalogDepth` 四份（`settings_editor.cpp:338-342`、
+  `:441` AddRoot、`:478` SetRootMaxDepth、`settings_store.cpp:266` 載入）、
+  `kMaxCatalogRoots` 三份（`settings_editor.cpp:448`、`settings_store.cpp:243`、
+  `settings_dialog.cpp:602`），且第三份在**對話框**裡（預先擋 cap，只為挑不同的提示字串
+  ——該處註解自己承認）。兩個 blur clamp 各把同一個 buffer **parse 兩次**
+  （`settings_dialog.cpp:563-564`：`ClampCatalogDepthText` 解析後再 `ParseInt` 一次比對；
+  `:507` 以 `ParseCountText` 同型）；`ParseHotkey` 每次接受一個熱鍵跑三次，
+  其中一條分支被自己的註解標為 unreachable（`settings_dialog.cpp:235`
+  「capture verified ParseHotkey」）。另外 `SettingsEditor` 有五個 setter
   （`.cpp:358-396`）是五份逐字相同的 7 行、不驗證任何東西、永遠回不了 `false`，
   卻用 `bool` 回傳值暗示有驗證。真正的痛點是 `settings_dialog.cpp` 746 行**零單元測試**，
   而它僅剩的決策就是「顯示哪一則提示」——把 editor 的拒絕**理由**做成 outcome enum 交給
