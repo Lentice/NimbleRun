@@ -370,6 +370,7 @@ bool RebuildPipeline::Shutdown(DWORD timeout_ms) {
         // poisons the next one.
         for (std::thread& worker : workers_) if (worker.joinable()) worker.detach();
         workers_.clear();
+        workers_ever_detached_ = true;
     }
     handoffs_.Clear();
     {

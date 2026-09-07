@@ -556,6 +556,10 @@ void TestShutdownBounded() {
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - begin).count();
     Expect(elapsed < 1000, "shutdown returns after its bounded wait");
+    Expect(pipeline->WorkersEverDetached(),
+           "a timed-out shutdown records that workers were detached");
+    Expect(pipeline->Shutdown(INFINITE) && pipeline->WorkersEverDetached(),
+           "the detached record is sticky across a later clean shutdown");
     SetEvent(gate);
     Expect(WaitForSingleObject(finished, 1000) == WAIT_OBJECT_0,
            "detached worker finishes before its owner is destroyed");

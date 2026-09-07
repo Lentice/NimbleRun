@@ -3513,7 +3513,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     // different directories.
     g_log_directory = persistence_available
         ? nimblerun::JoinPath(data_directory, L"logs") : std::wstring{};
-    nimblerun::DiagnosticLog diag(g_log_directory, L"nimblerun.log");
+    // Heap-owned, not a stack local: a detached rebuild worker (NR-123) or a
+    // detached icon worker (NR-184) still writes through this log after
+    // wWinMain's frame would be gone, so the teardown path below leaks it
+    // instead of destroying it whenever either worker was detached.
+    auto* diag_owner = new nimblerun::DiagnosticLog(g_log_directory, L"nimblerun.log");
+    nimblerun::DiagnosticLog& diag = *diag_owner;
     g_diag = &diag;
 
     g_rebuild_pipeline = std::make_unique<nimblerun::RebuildPipeline>(
@@ -3602,7 +3607,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     // its own STA); the UI thread only posts requests and receives results
     // through kIconReadyMessage.
     nimblerun::IconCache icon_cache;
-    nimblerun::ShellIconProvider shell_icon_provider;
+    // Heap-owned for the same reason as diag above: IconWorker::Stop() may
+    // detach a worker that is still inside a Shell icon load or a store flush,
+    // and that worker keeps using the provider, the store and the worker object
+    // itself. See the leak-on-detach branch in the teardown below.
+    auto* shell_icon_provider_owner = new nimblerun::ShellIconProvider();
+    nimblerun::ShellIconProvider& shell_icon_provider = *shell_icon_provider_owner;
     g_icon_cache = &icon_cache;
 
     // NR-036: file-backed decoded-icon cache (%LOCALAPPDATA%\NimbleRun\icons.cache,
@@ -3613,14 +3623,16 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     if (persistence_available) {
         icon_store_paths.pack = std::filesystem::path(data_directory) / L"icons.cache";
     }
-    nimblerun::IconStore icon_store(icon_store_paths,
-                                    nimblerun::IconStore::kMaxPackBytes, &diag);
+    auto* icon_store_owner = new nimblerun::IconStore(
+        icon_store_paths, nimblerun::IconStore::kMaxPackBytes, &diag);
+    nimblerun::IconStore& icon_store = *icon_store_owner;
 
     // NR-032: one persistent icon worker. Both it and the provider are function
     // locals destroyed after the message loop exits; WM_DESTROY stops the worker
     // while both are still alive.
-    nimblerun::IconWorker icon_worker(window, kIconReadyMessage, shell_icon_provider,
-                                      &icon_store);
+    auto* icon_worker_owner = new nimblerun::IconWorker(
+        window, kIconReadyMessage, shell_icon_provider, &icon_store);
+    nimblerun::IconWorker& icon_worker = *icon_worker_owner;
     g_icon_worker = &icon_worker;
     icon_worker.Start();
 
@@ -3756,7 +3768,20 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     g_test_show_semaphore = nullptr;
     g_test_input_ready_event = nullptr;
     g_test_visible_ready_event = nullptr;
-    if (g_rebuild_shutdown_timed_out) {
+    // NR-184: Stop() timed out and detached the icon worker, which is still
+    // running on the worker object, the provider, the store and the diagnostic
+    // log. Leak all four; the process is exiting and the OS reclaims them.
+    const bool icon_worker_detached = icon_worker.ThreadDetached();
+    if (!icon_worker_detached) {
+        delete icon_worker_owner;
+        delete icon_store_owner;
+        delete shell_icon_provider_owner;
+    }
+    g_icon_worker = nullptr;
+    const bool rebuild_detached =
+        g_rebuild_shutdown_timed_out ||
+        (g_rebuild_pipeline && g_rebuild_pipeline->WorkersEverDetached());
+    if (rebuild_detached) {
         // NR-146: Shutdown timed out and detached the workers (rebuild_pipeline.cpp
         // timeout branch, NR-123), which may still be running on this object's
         // members. Deliberately leak it instead of destroying: the process is
@@ -3766,12 +3791,16 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     } else {
         g_rebuild_pipeline.reset();
     }
-    // NR-156: g_diag points at a stack local destroyed when wWinMain returns.
-    // NR-146's timeout path leaked the pipeline so detached workers keep a live
-    // `this`, but their on_exception_ callback (main.cpp:3072) dereferences
-    // g_diag; null it after the last UI-thread use so a late callback becomes a
-    // no-op (the callback checks for null) instead of touching freed memory.
+    // NR-156: the detach paths leak the pipeline / icon worker so their
+    // threads keep a live `this`, but the rebuild on_exception_ callback
+    // dereferences g_diag; null it after the last UI-thread use so a late
+    // callback becomes a no-op (the callback checks for null).
     g_diag = nullptr;
+    // Only safe to destroy the log once no detached worker can still write
+    // through it (both keep their own pointer, not g_diag).
+    if (!icon_worker_detached && !rebuild_detached) {
+        delete diag_owner;
+    }
     com.reset();
     return static_cast<int>(message.wParam);
 }

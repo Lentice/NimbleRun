@@ -115,6 +115,11 @@ public:
     // (design-spec §9.4). Stop() is only ever called on the exit path, where
     // the OS reclaims the detached thread.
     void Stop();
+    // Sticky: true once Stop() timed out and detached the worker thread. A
+    // detached worker keeps using this object, the provider, the store and the
+    // diagnostic log, so the teardown path must leak all of them instead of
+    // destroying them (NR-184 bounded join, design-spec 9.4).
+    bool ThreadDetached() const { return thread_detached_; }
     // Never blocks. visible requests push_front, prewarm requests push_back.
     bool Post(IconRequest request);
     // Never blocks. Lower priority than any visible request; the worker calls
@@ -140,6 +145,7 @@ private:
     std::condition_variable cv_;
     std::deque<IconTask> queue_;
     bool stop_ = false;
+    bool thread_detached_ = false;
     // Buffered-but-unflushed puts since the last Flush, counted on the worker
     // thread only; bounds the final flush so shutdown never hangs.
     std::size_t pending_puts_ = 0;

@@ -86,6 +86,12 @@ public:
     // object outlives Start, and each generation captures its own cancel flag,
     // so a detached worker's stale flag never cancels the next generation.
     bool Shutdown(DWORD timeout_ms = INFINITE);
+    // Sticky: true once any Shutdown() timed out and detached workers, which
+    // may still touch this object's members. The teardown path must leak the
+    // pipeline instead of destroying it whenever this is true -- an in-session
+    // Start() detach is not visible in the WM_DESTROY Shutdown() return, whose
+    // workers_ list only holds the current generation.
+    bool WorkersEverDetached() const { return workers_ever_detached_; }
 
     HANDLE FailureEvent() const { return failure_event_; }
     void SetCacheWritesDisabled(bool disabled) { cache_writes_disabled_ = disabled; }
@@ -130,6 +136,7 @@ private:
     std::vector<RebuildWatchSource> watch_sources_;
     std::uint64_t completed_generation_ = 0;
     bool cache_writes_disabled_ = false;
+    bool workers_ever_detached_ = false;
 };
 
 } // namespace nimblerun

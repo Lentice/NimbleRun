@@ -112,6 +112,7 @@ void IconWorker::Stop() {
         thread_.join();
     } else {
         thread_.detach();
+        thread_detached_ = true;
     }
     std::lock_guard<std::mutex> lock(mutex_);
     // Safe in both branches: once stop_ is set the worker's wait predicate
