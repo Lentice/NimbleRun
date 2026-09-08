@@ -81,20 +81,20 @@ std::vector<std::uint8_t> EncodeIconPng(const IconBitmap& bitmap) {
                                 IID_PPV_ARGS(&factory_raw)))) {
         return out;
     }
-    std::unique_ptr<IWICImagingFactory, ComRelease> factory(factory_raw);
+    ComPtr<IWICImagingFactory> factory(factory_raw);
 
     // Memory-backed stream the encoder writes into; read back after Commit.
     IStream* hglobal_raw = nullptr;
     if (FAILED(CreateStreamOnHGlobal(nullptr, TRUE, &hglobal_raw)) || hglobal_raw == nullptr) {
         return out;
     }
-    std::unique_ptr<IStream, ComRelease> hglobal(hglobal_raw);
+    ComPtr<IStream> hglobal(hglobal_raw);
 
     IWICStream* wic_stream_raw = nullptr;
     if (FAILED(factory->CreateStream(&wic_stream_raw)) || wic_stream_raw == nullptr) {
         return out;
     }
-    std::unique_ptr<IWICStream, ComRelease> wic_stream(wic_stream_raw);
+    ComPtr<IWICStream> wic_stream(wic_stream_raw);
     if (FAILED(wic_stream->InitializeFromIStream(hglobal.get()))) {
         return out;
     }
@@ -104,7 +104,7 @@ std::vector<std::uint8_t> EncodeIconPng(const IconBitmap& bitmap) {
         encoder_raw == nullptr) {
         return out;
     }
-    std::unique_ptr<IWICBitmapEncoder, ComRelease> encoder(encoder_raw);
+    ComPtr<IWICBitmapEncoder> encoder(encoder_raw);
     if (FAILED(encoder->Initialize(wic_stream.get(), WICBitmapEncoderNoCache))) {
         return out;
     }
@@ -114,8 +114,8 @@ std::vector<std::uint8_t> EncodeIconPng(const IconBitmap& bitmap) {
     if (FAILED(encoder->CreateNewFrame(&frame_raw, &props_raw)) || frame_raw == nullptr) {
         return out;
     }
-    std::unique_ptr<IWICBitmapFrameEncode, ComRelease> frame(frame_raw);
-    std::unique_ptr<IPropertyBag2, ComRelease> props(props_raw);
+    ComPtr<IWICBitmapFrameEncode> frame(frame_raw);
+    ComPtr<IPropertyBag2> props(props_raw);
     if (FAILED(frame->Initialize(props.get()))) {
         return out;
     }
@@ -137,7 +137,7 @@ std::vector<std::uint8_t> EncodeIconPng(const IconBitmap& bitmap) {
             &src_raw)) || src_raw == nullptr) {
         return out;
     }
-    std::unique_ptr<IWICBitmap, ComRelease> src(src_raw);
+    ComPtr<IWICBitmap> src(src_raw);
 
     // Premultiplied -> straight is an unpremultiply. Let WIC do it rather than
     // reimplementing the rounding (NR-034: a hand-rolled loop disagrees with
@@ -146,7 +146,7 @@ std::vector<std::uint8_t> EncodeIconPng(const IconBitmap& bitmap) {
     if (FAILED(factory->CreateFormatConverter(&converter_raw)) || converter_raw == nullptr) {
         return out;
     }
-    std::unique_ptr<IWICFormatConverter, ComRelease> converter(converter_raw);
+    ComPtr<IWICFormatConverter> converter(converter_raw);
     if (FAILED(converter->Initialize(src.get(), GUID_WICPixelFormat32bppBGRA,
                                      WICBitmapDitherTypeNone, nullptr, 0.0,
                                      WICBitmapPaletteTypeCustom))) {
@@ -191,13 +191,13 @@ IconBitmap DecodeIconPng(const std::uint8_t* data, std::size_t size, int expecte
                                 IID_PPV_ARGS(&factory_raw)))) {
         return {};
     }
-    std::unique_ptr<IWICImagingFactory, ComRelease> factory(factory_raw);
+    ComPtr<IWICImagingFactory> factory(factory_raw);
 
     IWICStream* stream_raw = nullptr;
     if (FAILED(factory->CreateStream(&stream_raw)) || stream_raw == nullptr) {
         return {};
     }
-    std::unique_ptr<IWICStream, ComRelease> stream(stream_raw);
+    ComPtr<IWICStream> stream(stream_raw);
     if (FAILED(stream->InitializeFromMemory(const_cast<BYTE*>(data),
                                             static_cast<UINT>(size)))) {
         return {};
@@ -209,7 +209,7 @@ IconBitmap DecodeIconPng(const std::uint8_t* data, std::size_t size, int expecte
         decoder_raw == nullptr) {
         return {};
     }
-    std::unique_ptr<IWICBitmapDecoder, ComRelease> decoder(decoder_raw);
+    ComPtr<IWICBitmapDecoder> decoder(decoder_raw);
 
     UINT frame_count = 0;
     if (FAILED(decoder->GetFrameCount(&frame_count)) || frame_count == 0) {
@@ -220,7 +220,7 @@ IconBitmap DecodeIconPng(const std::uint8_t* data, std::size_t size, int expecte
     if (FAILED(decoder->GetFrame(0, &frame_raw)) || frame_raw == nullptr) {
         return {};
     }
-    std::unique_ptr<IWICBitmapFrameDecode, ComRelease> frame(frame_raw);
+    ComPtr<IWICBitmapFrameDecode> frame(frame_raw);
 
     UINT width = 0;
     UINT height = 0;
@@ -239,7 +239,7 @@ IconBitmap DecodeIconPng(const std::uint8_t* data, std::size_t size, int expecte
     if (FAILED(factory->CreateFormatConverter(&converter_raw)) || converter_raw == nullptr) {
         return {};
     }
-    std::unique_ptr<IWICFormatConverter, ComRelease> converter(converter_raw);
+    ComPtr<IWICFormatConverter> converter(converter_raw);
     if (FAILED(converter->Initialize(frame.get(), GUID_WICPixelFormat32bppPBGRA,
                                      WICBitmapDitherTypeNone, nullptr, 0.0,
                                      WICBitmapPaletteTypeCustom))) {

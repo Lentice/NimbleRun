@@ -12,17 +12,20 @@ if(MSVC OR CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
 
-add_library(nimblerun_search STATIC
-    src/search/search_engine.cpp
-)
+# Every target in this project compiled with the same include path, the same
+# Windows macros and the same warning flags; that block used to be copied
+# verbatim per target (~14 libraries plus the tests), so a toolchain change was
+# a 14-line edit and a missed target silently compiled under different flags.
+# An INTERFACE target is the CMake-native way to say it once.
+add_library(nimblerun_common INTERFACE)
 
-target_include_directories(nimblerun_search
-    PUBLIC
+target_include_directories(nimblerun_common
+    INTERFACE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
-target_compile_definitions(nimblerun_search
-    PRIVATE
+target_compile_definitions(nimblerun_common
+    INTERFACE
         UNICODE
         _UNICODE
         WIN32_LEAN_AND_MEAN
@@ -30,28 +33,29 @@ target_compile_definitions(nimblerun_search
         WINVER=0x0A00
         _WIN32_WINNT=0x0A00
 )
+
+if(MSVC OR CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
+    target_compile_options(nimblerun_common INTERFACE /W4 /permissive- /EHsc)
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    target_compile_options(nimblerun_common INTERFACE -Wall -Wextra -Wpedantic)
+    # Static libraries ignore link options; these reach the executables that
+    # consume them (NimbleRun and every test target).
+    target_link_options(nimblerun_common INTERFACE -municode -static)
+endif()
+
+add_library(nimblerun_search STATIC
+    src/search/search_engine.cpp
+)
+
+target_link_libraries(nimblerun_search PUBLIC nimblerun_common)
 
 add_library(nimblerun_hotkey STATIC
     src/app_host/hotkey.cpp
 )
 
-target_include_directories(nimblerun_hotkey
-    PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-)
-
-target_compile_definitions(nimblerun_hotkey
-    PRIVATE
-        UNICODE
-        _UNICODE
-        WIN32_LEAN_AND_MEAN
-        NOMINMAX
-        WINVER=0x0A00
-        _WIN32_WINNT=0x0A00
-)
-
 target_link_libraries(nimblerun_hotkey
     PUBLIC
+        nimblerun_common
         user32
 )
 
@@ -66,23 +70,9 @@ add_library(nimblerun_catalog STATIC
     src/catalog/catalog_cache.cpp
 )
 
-target_include_directories(nimblerun_catalog
-    PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-)
-
-target_compile_definitions(nimblerun_catalog
-    PRIVATE
-        UNICODE
-        _UNICODE
-        WIN32_LEAN_AND_MEAN
-        NOMINMAX
-        WINVER=0x0A00
-        _WIN32_WINNT=0x0A00
-)
-
 target_link_libraries(nimblerun_catalog
     PUBLIC
+        nimblerun_common
         ole32
         shell32
         uuid
@@ -95,23 +85,9 @@ add_library(nimblerun_settings STATIC
     src/settings/startup_option.cpp
 )
 
-target_include_directories(nimblerun_settings
-    PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-)
-
-target_compile_definitions(nimblerun_settings
-    PRIVATE
-        UNICODE
-        _UNICODE
-        WIN32_LEAN_AND_MEAN
-        NOMINMAX
-        WINVER=0x0A00
-        _WIN32_WINNT=0x0A00
-)
-
 target_link_libraries(nimblerun_settings
     PUBLIC
+        nimblerun_common
         kernel32
         advapi32
         shell32
@@ -131,23 +107,9 @@ add_library(nimblerun_launch STATIC
     src/launch/shell_launch.cpp
 )
 
-target_include_directories(nimblerun_launch
-    PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-)
-
-target_compile_definitions(nimblerun_launch
-    PRIVATE
-        UNICODE
-        _UNICODE
-        WIN32_LEAN_AND_MEAN
-        NOMINMAX
-        WINVER=0x0A00
-        _WIN32_WINNT=0x0A00
-)
-
 target_link_libraries(nimblerun_launch
     PUBLIC
+        nimblerun_common
         shell32
 )
 
@@ -155,46 +117,19 @@ add_library(nimblerun_usage STATIC
     src/usage/usage_store.cpp
 )
 
-target_include_directories(nimblerun_usage
-    PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-)
-
-target_compile_definitions(nimblerun_usage
-    PRIVATE
-        UNICODE
-        _UNICODE
-        WIN32_LEAN_AND_MEAN
-        NOMINMAX
-        WINVER=0x0A00
-        _WIN32_WINNT=0x0A00
-)
-
 target_link_libraries(nimblerun_usage
     PUBLIC
+        nimblerun_common
         kernel32
 )
 
 add_library(nimblerun_pins STATIC
     src/pins/pin_store.cpp
 )
-target_include_directories(nimblerun_pins
-    PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-)
-
-target_compile_definitions(nimblerun_pins
-    PRIVATE
-        UNICODE
-        _UNICODE
-        WIN32_LEAN_AND_MEAN
-        NOMINMAX
-        WINVER=0x0A00
-        _WIN32_WINNT=0x0A00
-)
 
 target_link_libraries(nimblerun_pins
     PUBLIC
+        nimblerun_common
         kernel32
 )
 
@@ -207,23 +142,9 @@ add_library(nimblerun_icons STATIC
     src/icons/shell_icon_provider.cpp
 )
 
-target_include_directories(nimblerun_icons
-    PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-)
-
-target_compile_definitions(nimblerun_icons
-    PRIVATE
-        UNICODE
-        _UNICODE
-        WIN32_LEAN_AND_MEAN
-        NOMINMAX
-        WINVER=0x0A00
-        _WIN32_WINNT=0x0A00
-)
-
 target_link_libraries(nimblerun_icons
     PUBLIC
+        nimblerun_common
         shell32
         ole32
         uuid
@@ -242,23 +163,9 @@ add_library(nimblerun_ui STATIC
     src/ui/input_mode.cpp
 )
 
-target_include_directories(nimblerun_ui
-    PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-)
-
-target_compile_definitions(nimblerun_ui
-    PRIVATE
-        UNICODE
-        _UNICODE
-        WIN32_LEAN_AND_MEAN
-        NOMINMAX
-        WINVER=0x0A00
-        _WIN32_WINNT=0x0A00
-)
-
 target_link_libraries(nimblerun_ui
     PUBLIC
+        nimblerun_common
         nimblerun_settings
         oleacc
         # NR-190: input_mode.cpp -- TSF (ole32/uuid, CoCreateInstance +
@@ -268,70 +175,27 @@ target_link_libraries(nimblerun_ui
         uuid
 )
 
+# icon_request_session.cpp is a 33-line UI-thread-owned model with no
+# dependencies; it lived in a static library of its own until it was folded in
+# here, next to the other app_host panel-side model code.
 add_library(nimblerun_panel_model STATIC
     src/app_host/panel_model.cpp
-)
-
-target_include_directories(nimblerun_panel_model
-    PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-)
-
-target_compile_definitions(nimblerun_panel_model
-    PRIVATE
-        UNICODE
-        _UNICODE
-        WIN32_LEAN_AND_MEAN
-        NOMINMAX
-        WINVER=0x0A00
-        _WIN32_WINNT=0x0A00
+    src/app_host/icon_request_session.cpp
 )
 
 target_link_libraries(nimblerun_panel_model
     PUBLIC
+        nimblerun_common
         nimblerun_search
-)
-
-add_library(nimblerun_icon_request_session STATIC
-    src/app_host/icon_request_session.cpp
-)
-
-target_include_directories(nimblerun_icon_request_session
-    PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-)
-
-target_compile_definitions(nimblerun_icon_request_session
-    PRIVATE
-        UNICODE
-        _UNICODE
-        WIN32_LEAN_AND_MEAN
-        NOMINMAX
-        WINVER=0x0A00
-        _WIN32_WINNT=0x0A00
 )
 
 add_library(nimblerun_snapshot_assembler STATIC
     src/app_host/snapshot_assembler.cpp
 )
 
-target_include_directories(nimblerun_snapshot_assembler
-    PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-)
-
-target_compile_definitions(nimblerun_snapshot_assembler
-    PRIVATE
-        UNICODE
-        _UNICODE
-        WIN32_LEAN_AND_MEAN
-        NOMINMAX
-        WINVER=0x0A00
-        _WIN32_WINNT=0x0A00
-)
-
 target_link_libraries(nimblerun_snapshot_assembler
     PUBLIC
+        nimblerun_common
         nimblerun_catalog
         nimblerun_usage
         nimblerun_pins
@@ -342,23 +206,9 @@ add_library(nimblerun_diagnostics STATIC
     src/diagnostics/diagnostic_log.cpp
 )
 
-target_include_directories(nimblerun_diagnostics
-    PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-)
-
-target_compile_definitions(nimblerun_diagnostics
-    PRIVATE
-        UNICODE
-        _UNICODE
-        WIN32_LEAN_AND_MEAN
-        NOMINMAX
-        WINVER=0x0A00
-        _WIN32_WINNT=0x0A00
-)
-
 target_link_libraries(nimblerun_diagnostics
     PUBLIC
+        nimblerun_common
         kernel32
 )
 
@@ -366,9 +216,7 @@ add_library(nimblerun_rebuild_pipeline STATIC
     src/app_host/rebuild_pipeline.cpp
 )
 
-target_include_directories(nimblerun_rebuild_pipeline PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_compile_definitions(nimblerun_rebuild_pipeline PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX WINVER=0x0A00 _WIN32_WINNT=0x0A00)
-target_link_libraries(nimblerun_rebuild_pipeline PUBLIC nimblerun_catalog kernel32 user32)
+target_link_libraries(nimblerun_rebuild_pipeline PUBLIC nimblerun_common nimblerun_catalog kernel32 user32)
 
 add_executable(NimbleRun WIN32
     src/app_host/main.cpp
@@ -379,6 +227,7 @@ add_executable(NimbleRun WIN32
 
 target_link_libraries(NimbleRun
     PRIVATE
+        nimblerun_common
         nimblerun_panel_model
         nimblerun_catalog
         nimblerun_settings
@@ -390,7 +239,6 @@ target_link_libraries(NimbleRun
         nimblerun_diagnostics
         nimblerun_snapshot_assembler
         nimblerun_rebuild_pipeline
-        nimblerun_icon_request_session
         nimblerun_hotkey
         comctl32
         d2d1
@@ -403,49 +251,11 @@ target_link_libraries(NimbleRun
         version
 )
 
-target_compile_definitions(NimbleRun
-    PRIVATE
-        UNICODE
-        _UNICODE
-        WIN32_LEAN_AND_MEAN
-        NOMINMAX
-        WINVER=0x0A00
-        _WIN32_WINNT=0x0A00
-)
-
 if(MSVC OR CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
-    target_compile_options(NimbleRun PRIVATE /W4 /permissive- /EHsc)
-    target_compile_options(nimblerun_search PRIVATE /W4 /permissive- /EHsc)
-    target_compile_options(nimblerun_hotkey PRIVATE /W4 /permissive- /EHsc)
-    target_compile_options(nimblerun_catalog PRIVATE /W4 /permissive- /EHsc)
-    target_compile_options(nimblerun_settings PRIVATE /W4 /permissive- /EHsc)
-    target_compile_options(nimblerun_launch PRIVATE /W4 /permissive- /EHsc)
-    target_compile_options(nimblerun_usage PRIVATE /W4 /permissive- /EHsc)
-    target_compile_options(nimblerun_pins PRIVATE /W4 /permissive- /EHsc)
-    target_compile_options(nimblerun_panel_model PRIVATE /W4 /permissive- /EHsc)
-    target_compile_options(nimblerun_icon_request_session PRIVATE /W4 /permissive- /EHsc)
-    target_compile_options(nimblerun_snapshot_assembler PRIVATE /W4 /permissive- /EHsc)
-    target_compile_options(nimblerun_diagnostics PRIVATE /W4 /permissive- /EHsc)
-    target_compile_options(nimblerun_icons PRIVATE /W4 /permissive- /EHsc)
-    target_compile_options(nimblerun_ui PRIVATE /W4 /permissive- /EHsc)
     target_link_options(NimbleRun PRIVATE /DYNAMICBASE /NXCOMPAT /HIGHENTROPYVA)
     set_property(TARGET NimbleRun PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    target_compile_options(NimbleRun PRIVATE -Wall -Wextra -Wpedantic)
-    target_compile_options(nimblerun_search PRIVATE -Wall -Wextra -Wpedantic)
-    target_compile_options(nimblerun_hotkey PRIVATE -Wall -Wextra -Wpedantic)
-    target_compile_options(nimblerun_catalog PRIVATE -Wall -Wextra -Wpedantic)
-    target_compile_options(nimblerun_settings PRIVATE -Wall -Wextra -Wpedantic)
-    target_compile_options(nimblerun_launch PRIVATE -Wall -Wextra -Wpedantic)
-    target_compile_options(nimblerun_usage PRIVATE -Wall -Wextra -Wpedantic)
-    target_compile_options(nimblerun_pins PRIVATE -Wall -Wextra -Wpedantic)
-    target_compile_options(nimblerun_panel_model PRIVATE -Wall -Wextra -Wpedantic)
-    target_compile_options(nimblerun_icon_request_session PRIVATE -Wall -Wextra -Wpedantic)
-    target_compile_options(nimblerun_snapshot_assembler PRIVATE -Wall -Wextra -Wpedantic)
-    target_compile_options(nimblerun_diagnostics PRIVATE -Wall -Wextra -Wpedantic)
-    target_compile_options(nimblerun_icons PRIVATE -Wall -Wextra -Wpedantic)
-    target_compile_options(nimblerun_ui PRIVATE -Wall -Wextra -Wpedantic)
-    target_link_options(NimbleRun PRIVATE -municode -static -Wl,--dynamicbase -Wl,--nxcompat)
+    target_link_options(NimbleRun PRIVATE -Wl,--dynamicbase -Wl,--nxcompat)
 endif()
 
 if(BUILD_TESTING)
