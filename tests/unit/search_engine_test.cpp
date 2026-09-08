@@ -105,6 +105,53 @@ int wmain() {
         Expect(miss.empty(), "prefilled normalized_name replaces display name for search");
     }
 
+    // NR-203: a deliberate abbreviation ("vsc") must not share the lowest tier
+    // with accidental letter-scatter matches. Initialism sits below WordPrefix
+    // and above Substring.
+    {
+        const std::vector<AppEntry> abbrev{
+            {.stable_id = L"vscode", .display_name = L"Visual Studio Code", .normalized_name = L"visual studio code"},
+            {.stable_id = L"vs", .display_name = L"Visual Studio", .normalized_name = L"visual studio"},
+            {.stable_id = L"avs", .display_name = L"AvsCleaner", .normalized_name = L"avscleaner"},
+            {.stable_id = L"paint", .display_name = L"Paint 3D", .normalized_name = L"paint 3d"},
+        };
+
+        const auto vsc = nimblerun::SearchApps(abbrev, L"vsc");
+        Expect(vsc.size() == 2, "vsc matches the initialism and the substring entry");
+        Expect(vsc[0].stable_id == L"vscode", "initialism outranks a mid-word substring hit");
+        Expect(vsc[1].stable_id == L"avs", "substring hit is second");
+
+        // A word prefix is more precise than an abbreviation and still wins.
+        const auto code = nimblerun::SearchApps(abbrev, L"code");
+        Expect(code.size() == 1 && code[0].stable_id == L"vscode",
+               "word prefix keeps matching Visual Studio Code");
+
+        // The query is a prefix of the initials, so "vs" hits both; the existing
+        // shorter-name tie-break orders them without a new sort rule.
+        const auto vs = nimblerun::SearchApps(abbrev, L"vs");
+        Expect(vs.size() == 3, "vs matches both Visual Studio entries and the substring");
+        Expect(vs[0].stable_id == L"vs", "shorter name wins the initialism tie");
+        Expect(vs[1].stable_id == L"vscode", "the longer initialism hit is second");
+        Expect(vs[2].stable_id == L"avs", "the substring hit stays below both initialisms");
+
+        // Initials come from word starts only, never from mid-word letters.
+        const auto p3 = nimblerun::SearchApps(abbrev, L"p3");
+        Expect(p3.size() == 1 && p3[0].stable_id == L"paint",
+               "Paint 3D is reachable by its initials");
+
+        // "vc" skips a word, so it is not an initialism. Both hits fall to
+        // Subsequence and the shorter name wins -- the order proves Visual
+        // Studio Code was not promoted.
+        const auto vc = nimblerun::SearchApps(abbrev, L"vc");
+        Expect(vc.size() == 2, "vc is a subsequence of both Visual entries");
+        Expect(vc[0].stable_id == L"avs", "skipping a word does not earn the initialism tier");
+
+        // A query longer than the initials is not an initialism match. "vscx"
+        // is not a subsequence either, so it finds nothing.
+        Expect(nimblerun::SearchApps(abbrev, L"vscx").empty(),
+               "query longer than the initials is not an initialism match");
+    }
+
     // NR-038: worst-path latency on 5000 pre-normalized entries. The threshold
     // is two orders of magnitude above the measured time so it only flags a
     // regression that re-introduces per-entry normalization per keystroke.

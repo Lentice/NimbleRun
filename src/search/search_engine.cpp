@@ -34,10 +34,11 @@ enum class MatchRank : int {
     Exact = 0,
     NamePrefix = 1,
     WordPrefix = 2,
-    Substring = 3,
-    Subsequence = 4,
-    Alias = 5,    // NR-047: matched the target/AUMID, not the name
-    NoMatch = 6,
+    Initialism = 3,  // NR-203: query is a prefix of the word initials
+    Substring = 4,
+    Subsequence = 5,
+    Alias = 6,    // NR-047: matched the target/AUMID, not the name
+    NoMatch = 7,
 };
 
 MatchRank Rank(std::wstring_view name, std::wstring_view query) {
@@ -58,6 +59,33 @@ MatchRank Rank(std::wstring_view name, std::wstring_view query) {
             break;
         }
         word_start = separator + 1;
+    }
+
+    // NR-203: "vsc" for "visual studio code" is a deliberate abbreviation, but
+    // without this tier it falls all the way to Subsequence, where it shares a
+    // bucket with accidental letter-scatter matches and can never be lifted out
+    // (§4.5 keeps usage score inside a tier). Sits below WordPrefix, which is
+    // more precise, and above Substring: an abbreviation beats a mid-word
+    // accident. Compared in place -- building an initials string would add a
+    // per-entry heap allocation to the hot scan.
+    std::size_t initial_index = 0;
+    bool at_word_start = true;
+    bool initials_match = true;
+    for (const wchar_t character : name) {
+        if (at_word_start) {
+            if (initial_index == query.size()) {
+                break;  // query already consumed: it is a prefix of the initials
+            }
+            if (character != query[initial_index]) {
+                initials_match = false;
+                break;
+            }
+            ++initial_index;
+        }
+        at_word_start = (character == L' ');
+    }
+    if (initials_match && initial_index == query.size()) {
+        return MatchRank::Initialism;
     }
 
     if (name.find(query) != std::wstring_view::npos) {
