@@ -519,6 +519,7 @@ bool IconStore::Flush(const std::vector<std::wstring>& pinned_ids, std::uint64_t
         in_use_[write.slot] = true;
         entries_by_slot_[write.slot] = write.entry;
     }
+    live = LivePayloadBytes();
 
     // 3. Evict until the live payload fits the budget. Pinned entries are
     //    exempt unless nothing else is left (hard limits still apply).
