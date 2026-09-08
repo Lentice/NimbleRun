@@ -2,7 +2,7 @@
 
 這是 NimbleRun 的實作追蹤總覽。產品行為唯一以 [design-spec.md](design-spec.md) 為準；本頁與 item 文件只同步拆分、依賴與驗收證據。若 Spec 後續變更，先更新 Spec，再調整受影響的 item。
 
-需求腦暴與已確認決策：[work-item planning requirements](requirements/2026-08-04_1739_nimblerun_work_item_planning_requirements.md)。相關 hotkey 研究：[hotkey-override-research.md](hotkey-override-research.md)。
+相關 hotkey 研究：[hotkey-override-research.md](hotkey-override-research.md)。
 
 ## 使用方式
 
@@ -641,8 +641,7 @@ NR-159（spec 措辭）── 純文件，最後做
 
 ## 稽核修補 lane 17（NR-181～NR-189，2026-08-12 第十七次全 repo 稽核產出）
 
-2026-08-12 以 herdr 開 claude 與 codex 兩個 agent 平行對全 repo 做唯讀稽核（ponytail／重要問題／主要使用者流程三軸），
-報告存於 `docs/audit-herdr-claude.md` 與 `docs/audit-herdr-codex.md`。兩份報告結論一致：無結構性過度設計
+2026-08-12 以 herdr 開 claude 與 codex 兩個 agent 平行對全 repo 做唯讀稽核（ponytail／重要問題／主要使用者流程三軸）。兩份報告結論一致：無結構性過度設計
 （§已否決的方向 已擋掉六條抽象化衝動），主要風險在生命週期（無界 join ×3）與訊息驅動邊界（tooltip 訊息常數錯、
 Explicit 無節流）。主 Agent 逐項對原始碼驗證後收斂成 9 個 item。**排序依「先修壞掉的 HEAD、再生命週期有界、
 再使用者可見契約、再失敗可見性、最後清理」**：
