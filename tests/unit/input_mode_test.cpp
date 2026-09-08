@@ -14,7 +14,6 @@
 namespace {
 
 using nimblerun::EnglishInputModeTransition;
-using nimblerun::WarmUpInputMode;
 
 void TestTsfConversionModeContract() {
     Expect(nimblerun::input_mode_detail::kTsfConversionModeAlphanumeric == 0x00000000,
@@ -69,16 +68,17 @@ void TestWarmUpInputModeDoesNotCrash() {
     // CoCreateInstance is expected to fail -- the point is that a warm-up
     // call before COM/TSF is even usable stays a silent, safe no-op.
     // NR-199: the warm-up now caches a process-lifetime activated thread
-    // manager. Call it repeatedly, and apply a transition across it, to cover
-    // the "acquire failed, do not cache or double-release" path -- a
-    // cached-failure or double-Release bug here crashes this process.
-    WarmUpInputMode();
-    WarmUpInputMode();
+    // manager, and Prepare is the only thing that triggers it. Prepare
+    // repeatedly, and apply a transition across it, to cover the "acquire
+    // failed, do not cache or double-release" path -- a cached-failure or
+    // double-Release bug here crashes this process.
+    EnglishInputModeTransition::Prepare(true, false);
+    EnglishInputModeTransition::Prepare(true, false);
     EnglishInputModeTransition transition =
         EnglishInputModeTransition::Prepare(true, false);
     Expect(!transition.Apply(nullptr),
            "warm-up must not change the null-HWND guard");
-    WarmUpInputMode();
+    EnglishInputModeTransition::Prepare(true, false);
 }
 
 } // namespace

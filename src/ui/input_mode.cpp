@@ -151,16 +151,12 @@ EnglishInputModeTransition EnglishInputModeTransition::Prepare(
     // panel is already visible never repeats it.
     const bool will_apply = enabled && !was_visible;
     if (will_apply) {
-        WarmUpInputMode();
+        // NR-198/NR-199: acquire the process-lifetime activation now, before
+        // any real SetFocus, so TSF's focus-tracking hooks are installed in
+        // time for this show. Idempotent and cheap after the first call.
+        ActivatedThreadMgr();
     }
     return EnglishInputModeTransition(will_apply);
-}
-
-void WarmUpInputMode() {
-    // NR-198/NR-199: acquire the process-lifetime activation now, before any
-    // real SetFocus, so TSF's focus-tracking hooks are installed in time for
-    // the first hidden->visible show. Idempotent and cheap after the first call.
-    ActivatedThreadMgr();
 }
 
 bool EnglishInputModeTransition::Apply(HWND edit) {

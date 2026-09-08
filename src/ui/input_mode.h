@@ -37,20 +37,10 @@ private:
 // unit-tested part of a file whose bugs were all in activation lifetime and
 // call ordering -- the transition class is what the tests exercise instead.
 
-// NR-198: TSF installs the hooks it uses to track focus when a thread calls
-// ITfThreadMgr::Activate. Calling SetEnglishInputMode for the first time only
-// after SetFocus has already fired misses that focus change, so the very first
-// hidden->visible show never switches. Call this once, early on the UI thread
-// and before any real SetFocus.
-//
-// NR-199: Activate is a reference count. The original implementation paired it
-// with an immediate Deactivate, which dropped the count back to zero and undid
-// the very hooks it was installing. This now acquires an activation that is
-// held for the life of the process, on the thread that calls it. Best-effort
-// and silent: no return value, never touches settings, never blocks. NR-200:
-// ShowPanel also calls this before showing/activating the window when the live
-// setting was enabled after startup, so no child-focus notification can race
-// ahead of TSF readiness.
-void WarmUpInputMode();
+// NR-198/NR-199/NR-200: the TSF warm-up (activating the thread manager so its
+// focus-tracking hooks exist before any real SetFocus, held for the process
+// lifetime because Activate is a reference count) is internal to
+// input_mode.cpp. Prepare performs it, so callers own no ordering rule beyond
+// "Prepare before showing the window, Apply after the EDIT has focus".
 
 } // namespace nimblerun
