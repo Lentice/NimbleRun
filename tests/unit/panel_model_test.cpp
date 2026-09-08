@@ -313,8 +313,14 @@ void TestResetOperationsClearScroll() {
     model.MoveRow(1);
     model.MoveRow(1);
     Expect(model.FirstVisibleRow() == 1, "viewport scrolled down again");
+    // A pins/recent/catalog refresh is not a reset: the selection and the
+    // window it scrolled into stay put unless the selection falls out of range.
     model.SetPins({Pin(L"id0")});
-    Expect(model.FirstVisibleRow() == 0, "SetPins resets first visible");
+    Expect(model.SelectionIndex() == 3, "SetPins keeps the selection");
+    Expect(model.FirstVisibleRow() == 1, "SetPins keeps first visible");
+    model.SetCatalog(nullptr);
+    Expect(!model.HasSelection(), "an emptied catalog drops the selection");
+    Expect(model.FirstVisibleRow() == 0, "an emptied catalog resets first visible");
 }
 
 void TestViewportLargerThanRowsNeverNegative() {

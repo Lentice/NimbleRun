@@ -2682,8 +2682,10 @@ LRESULT CALLBACK SearchEditProc(HWND edit, UINT message, WPARAM w_param, LPARAM 
         // WM_SYSKEYDOWN above already handled the launch. NR-186: the swallow
         // mirrors the WM_SYSKEYDOWN guard -- only a digit with a matching
         // visible row is swallowed, everything else falls through to the
-        // default (system beep / other apps). That mirror includes the
-        // Ctrl-is-up test: without it a Ctrl+Alt+digit that does reach here
+        // default (system beep / other apps). The row test is now gone: a
+        // digit shortcut with no matching visible row is an unused shortcut,
+        // not an error, and the panel beeps only at errors. The Ctrl-is-up
+        // test stays: without it a Ctrl+Alt+digit that does reach here
         // (layout-dependent) would be swallowed even though WM_SYSKEYDOWN
         // deliberately let it through, so the combo would become a silent
         // no-op instead of keeping its default processing.
@@ -2691,9 +2693,23 @@ LRESULT CALLBACK SearchEditProc(HWND edit, UINT message, WPARAM w_param, LPARAM 
             g_model != nullptr) {
             const int slot =
                 nimblerun::ui::QuickSelectSlotForKey(static_cast<int>(w_param));
-            if (slot >= 0 && g_model->RowForVisibleSlot(slot) >= 0) {
+            if (slot >= 0) {
                 return 0;
             }
+        }
+        break;
+    case WM_CHAR:
+        // TranslateMessage posts the WM_CHAR before we ever see the matching
+        // WM_KEYDOWN, so handling a key as a command below and returning 0 is
+        // not enough -- the single-line EDIT still gets the control character
+        // and beeps at it. Tab (0x09), Enter (0x0D), Esc (0x1B) and Ctrl+R
+        // (0x12) are commands, not text, and the same is true of every other
+        // control character: a search query never contains one, so swallow the
+        // whole class here rather than listing the bound keys and re-beeping
+        // the next time one is added. Backspace (0x08) is the exception -- the
+        // EDIT does its own editing through that WM_CHAR.
+        if (w_param < 0x20 && w_param != VK_BACK) {
+            return 0;
         }
         break;
     case WM_KEYDOWN:
@@ -2729,6 +2745,25 @@ LRESULT CALLBACK SearchEditProc(HWND edit, UINT message, WPARAM w_param, LPARAM 
                     return 0;
                 }
                 break;
+            case VK_TAB: {
+                // Tab walks the visible order (left to right, then down);
+                // Shift+Tab walks it backwards. Selection index is already
+                // linear in reading order, so this is a plain +/-1 with wrap.
+                // Ctrl+Tab is not a navigation key here, but it is still
+                // swallowed: letting it through would hand the EDIT a tab
+                // WM_CHAR, and that control character is what makes it beep.
+                const std::size_t count = g_model->Rows().size();
+                if (count == 0 || GetKeyState(VK_CONTROL) < 0) {
+                    return 0;
+                }
+                const std::size_t step =
+                    (GetKeyState(VK_SHIFT) & 0x8000) != 0 ? count - 1 : 1;
+                const std::size_t cur =
+                    g_model->HasSelection() ? g_model->SelectionIndex() : 0;
+                g_model->SelectRow((cur + step) % count);
+                InvalidateRect(GetParent(edit), nullptr, FALSE);
+                return 0;
+            }
             case VK_PRIOR:
                 // NR-178: paging dismisses the tooltip (design-spec §4.8).
                 HideCellTooltip(GetParent(edit));

@@ -36,11 +36,17 @@ void PanelModel::SetPins(std::vector<PinRecord> pins) {
 void PanelModel::Reset() {
     query_.clear();
     RefreshRows();
+    selected_ = rows_.empty() ? -1 : 0;
+    first_visible_ = 0;
 }
 
 void PanelModel::SetQuery(const std::wstring& query) {
     query_ = query;
     RefreshRows();
+    // Each edit of the query builds a new result set; the selection belongs on
+    // its first (best-ranked) row, not wherever the old set had it.
+    selected_ = rows_.empty() ? -1 : 0;
+    first_visible_ = 0;
 }
 
 void PanelModel::RefreshRows() {
@@ -120,8 +126,19 @@ void PanelModel::RefreshRows() {
         recent_end_ = -1;
         rows_.clear();
     }
-    selected_ = rows_.empty() ? -1 : 0;
-    first_visible_ = 0;
+    // A background catalog/pins/recent refresh keeps the selection where the
+    // user left it -- it used to snap back to the first cell, so a watcher
+    // refresh could yank the highlight out from under an in-progress
+    // keyboard walk. Only an out-of-range index falls back to the first row.
+    // A query change is not a refresh in this sense: SetQuery() resets the
+    // selection afterwards, so typing always lands on the best match.
+    if (rows_.empty()) {
+        selected_ = -1;
+        first_visible_ = 0;
+        return;
+    }
+    selected_ = std::min(std::max(selected_, 0), static_cast<int>(rows_.size()) - 1);
+    EnsureSelectionVisible();
 }
 
 void PanelModel::SetViewportRows(int rows) {
