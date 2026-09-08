@@ -81,7 +81,16 @@ UserFolderEnumerateResult EnumerateUserFolderCatalog(const Settings& settings,
         const bool ok = WalkDirectory(
             root.path, {root.max_depth, cancel},
             [&](const std::wstring& path, DWORD attributes) {
-                if (ExtensionAllowed(path, extensions)) {
+                // NR-202: the only FR-004a rule that reaches this source. A
+                // recursive scan of a Program Files tree otherwise picks up the
+                // unins000.exe/uninst.exe stub every Inno Setup and NSIS install
+                // leaves behind, and those crowd out real apps in every query
+                // that can match them. IsProgramLikeTarget() must NOT be used
+                // here: its extension whitelist would silently drop the
+                // extensions the user added themselves (design-spec §FR-004a).
+                // A filtered file is ordinary filtering, not a skip: it must not
+                // reach skipped_directories or a diagnostic.
+                if (ExtensionAllowed(path, extensions) && !IsUninstallerStem(path)) {
                     ProcessFile(path, attributes, result.entries);
                 }
             },

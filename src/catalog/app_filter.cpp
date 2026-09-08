@@ -47,6 +47,24 @@ bool IsFileScheme(std::wstring_view target) {
 
 } // namespace
 
+bool IsUninstallerStem(std::wstring_view target) {
+    const std::wstring stem = ToLower(FileStem(target));
+    if (stem == L"uninst" || stem == L"uninstall" || stem == L"uninstaller") {
+        return true;
+    }
+    // "unins" followed by at least one digit and nothing else: unins000.exe is
+    // Inno Setup's fixed name, and some installers bump it to unins001 upward.
+    if (stem.size() <= 5 || stem.compare(0, 5, L"unins") != 0) {
+        return false;
+    }
+    for (std::size_t i = 5; i < stem.size(); ++i) {
+        if (!iswdigit(static_cast<wint_t>(stem[i]))) {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool IsProgramLikeTarget(std::wstring_view target) {
     if (target.empty()) {
         return false;
@@ -61,10 +79,9 @@ bool IsProgramLikeTarget(std::wstring_view target) {
     if (IsUrlTarget(target) && !IsFileScheme(target)) {
         return false;
     }
-    // Uninstallers are excluded regardless of their (possibly whitelisted)
-    // extension: mistargeting a removal prompt is too costly.
-    const std::wstring stem = ToLower(FileStem(target));
-    if (stem.compare(0, 5, L"unins") == 0) {
+    // Uninstaller stubs are excluded regardless of their (possibly whitelisted)
+    // extension.
+    if (IsUninstallerStem(target)) {
         return false;
     }
     // Whitelist (FR-004a) rather than a blacklist: anything not explicitly a

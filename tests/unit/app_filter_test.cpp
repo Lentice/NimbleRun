@@ -81,6 +81,46 @@ void TestUninstallers() {
     ExpectNotProgramLike(L"C:\\App\\uninstaller.exe", "uninstaller.exe is not program-like");
 }
 
+// NR-202: the rule was a "unins" prefix, which also hid real uninstaller-manager
+// apps. It is now the fixed set of names Inno Setup and NSIS generate, and this
+// test is the regression guard for both halves of that narrowing.
+void TestUninstallerStem() {
+    using nimblerun::IsUninstallerStem;
+
+    // Setup-generated stubs: the six rows a recursive Program Files scan
+    // surfaced for the query "uni".
+    Expect(IsUninstallerStem(L"D:\\Program files\\SuperTSC64\\uninst.exe"),
+           "uninst.exe is a generated uninstaller stub");
+    Expect(IsUninstallerStem(L"D:\\Program files\\Revo Uninstaller\\unins000.exe"),
+           "unins000.exe is a generated uninstaller stub");
+    Expect(IsUninstallerStem(L"D:\\Program files\\PotPlayer\\uninstall.exe"),
+           "uninstall.exe is a generated uninstaller stub");
+    Expect(IsUninstallerStem(L"C:\\App\\unins001.exe"), "unins001.exe is a stub");
+    Expect(IsUninstallerStem(L"C:\\App\\UNINS000.EXE"), "stem match is case-insensitive");
+    Expect(IsUninstallerStem(L"C:\\App\\uninstaller.exe"), "uninstaller.exe is a stub");
+
+    // Real apps the old prefix rule silently killed. A wrongly hidden app is
+    // invisible to the user, so these matter more than a leaked stub.
+    Expect(!IsUninstallerStem(L"C:\\App\\Uninstall Tool.exe"),
+           "Uninstall Tool is a real app, not a stub");
+    Expect(!IsUninstallerStem(L"C:\\App\\UninstallView.exe"),
+           "UninstallView is a real app, not a stub");
+    Expect(!IsUninstallerStem(L"C:\\App\\Uninstalr.exe"),
+           "Uninstalr is a real app, not a stub");
+    Expect(!IsUninstallerStem(L"D:\\Program files\\Revo Uninstaller\\RevoUninst.exe"),
+           "RevoUninst is the app the user actually wants");
+    Expect(!IsUninstallerStem(L"C:\\App\\unins.exe"),
+           "bare unins has no digits and is not a generated stub");
+    Expect(!IsUninstallerStem(L"C:\\App\\unins00a.exe"),
+           "unins followed by a non-digit is not a generated stub");
+    Expect(!IsUninstallerStem(L"C:\\App\\Notepad.exe"), "an ordinary app is not a stub");
+    Expect(!IsUninstallerStem(L""), "empty target is not a stub");
+
+    // The narrowed rule keeps the whole IsProgramLikeTarget contract working.
+    ExpectProgramLike(L"C:\\App\\Uninstall Tool.exe",
+                      "Uninstall Tool passes the program-like filter");
+}
+
 void TestEmpty() {
     ExpectNotProgramLike(L"", "empty target is not program-like");
 }
@@ -113,6 +153,7 @@ int wmain() {
     TestPathWhitelistMisses();
     TestUrlScheme();
     TestUninstallers();
+    TestUninstallerStem();
     TestEmpty();
     std::printf("NR-028 app filter check PASSED\n");
     return 0;

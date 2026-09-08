@@ -52,6 +52,20 @@ bool IsUrlTarget(std::wstring_view target);
 // separator and a Known Folder GUID-relative path starts with '{'.
 bool IsDisplayablePath(std::wstring_view target);
 
+// NR-202: true when the file stem is a setup-generated uninstaller stub
+// (design-spec §FR-004a rule 4). Matches the fixed names Inno Setup and NSIS
+// produce -- "uninst", "uninstall", "uninstaller", and "unins" followed by
+// digits -- rather than a "unins" prefix family: a prefix also kills real
+// uninstaller-manager apps such as "Uninstall Tool" and "UninstallView".
+// Non-fixed stubs like "Uninstall_ProductName.exe" deliberately leak: one extra
+// row is visible and ignorable, a wrongly hidden app is silent.
+//
+// The only FR-004a rule that also applies to the FR-005 user-folder source. The
+// extension whitelist must never reach that source -- its gate is the user's own
+// extension list -- but this rule is orthogonal to extensions and blocks none of
+// them.
+bool IsUninstallerStem(std::wstring_view target);
+
 // True when the target looks like a launchable program rather than a document,
 // website, or uninstaller (design-spec §FR-004a). `target` is a Start Menu
 // shortcut's resolved target or an AppsFolder item's Shell parsing name.
@@ -60,7 +74,7 @@ bool IsDisplayablePath(std::wstring_view target);
 //   1. empty -> false;
 //   2. no '\' and no '/' -> an AUMID, true (never run extension logic on it);
 //   3. URL scheme (scheme://, except file:/FILE:) -> false;
-//   4. file stem starting with "unins" (case-insensitive) -> false;
+//   4. IsUninstallerStem(target) -> false;
 //   5. final extension in the whitelist .exe .com .bat .cmd .lnk .appref-ms
 //      .msc (case-insensitive) -> true; no-extension paths -> false.
 // Pure value logic: no HWND, no Shell COM, no <windows.h>.
