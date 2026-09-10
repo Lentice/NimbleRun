@@ -76,3 +76,8 @@ The setting "Switch input to English on show" (`english_input_on_show`, default 
 ## Required test environments
 
 Use at least one Windows 11 x64 development machine and one lower-end or virtualized Windows 11 x64 environment. Include synthetic catalogs of 100, 500, and 2,000 entries and test at 100%, 150%, and 200% DPI.
+
+### Windows 10 22H2 validation
+
+- 2026-09-10, commit `91d6fa4`, Release x64 build: manual smoke test (the seven steps above) run on Windows 10 22H2 x64 hardware — all steps passed. The panel keeps square corners there, as decided in NR-044 (`DWMWA_WINDOW_CORNER_PREFERENCE` is unknown to Windows 10 and the failed call is ignored).
+- Not covered on Windows 10: the CTest suite and the NFR-001 resource budgets; both remain measured on Windows 11 only.
