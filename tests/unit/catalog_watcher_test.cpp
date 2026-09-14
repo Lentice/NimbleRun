@@ -113,6 +113,34 @@ bool ArmWatch(HWND window, const fs::path& dir, DWORD timeout_ms = 5000) {
     return false;
 }
 
+// A content change to a file the catalog never indexes must not wake the host:
+// a clipboard manager's database inside a watched program folder is rewritten on
+// every copy, and each wake costs a full source rebuild.
+void TestContentChangeOutsideTheAllowlistIsIgnored() {
+    const fs::path dir = TestDir();
+    const HWND window = CreateMessageWindow();
+    {
+        const fs::path ignored = dir / L"Ditto.db";
+        const fs::path indexed = dir / L"App.lnk";
+        WriteWatchFile(ignored);
+        WriteWatchFile(indexed);
+        nimblerun::CatalogWatcher watcher(window, kWatchChangedMessage);
+        watcher.SetRoots({dir}, {true}, {L".lnk", L".exe"});
+        Expect(ArmWatch(window, dir), "the watch is live");
+
+        WriteWatchFile(ignored);  // rewrite: FILE_ACTION_MODIFIED, unlisted ext
+        Expect(!ReceiveChange(window, 1000),
+               "rewriting an unindexed file does not notify");
+
+        WriteWatchFile(indexed);  // rewrite: FILE_ACTION_MODIFIED, listed ext
+        Expect(ReceiveChange(window, 5000),
+               "rewriting an indexed file still notifies");
+        watcher.Stop();
+    }
+    DestroyWindow(window);
+    fs::remove_all(dir);
+}
+
 void TestWatchDeliversChange() {
     const fs::path dir = TestDir();
     const HWND window = CreateMessageWindow();
@@ -197,6 +225,7 @@ int wmain() {
     g_instance = GetModuleHandleW(nullptr);
 
     TestWatchDeliversChange();
+    TestContentChangeOutsideTheAllowlistIsIgnored();
     TestPendingNotificationRecoversWithoutEvent();
     TestWatchStopsQuietly();
 

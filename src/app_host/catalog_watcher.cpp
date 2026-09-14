@@ -1,5 +1,9 @@
 #include "app_host/catalog_watcher.h"
 
+#include <cstddef>
+#include <cstring>
+#include <string_view>
+
 #include <windows.h>
 
 #include <thread>
@@ -49,6 +53,59 @@ void PostNotification(CatalogWatcher::Watch& watch, int level) {
             return;
         }
         Sleep(kPostRetrySleepMs);
+    }
+}
+
+// True when this batch of change records contains anything the catalog cares
+// about. Every add/remove/rename counts; a content change counts only for a
+// file whose extension is in the allowlist. Without this, a single unrelated
+// file rewrite inside a watched tree (Ditto's clipboard database living under a
+// watched program folder -- one rewrite per copy) drives a full rebuild of that
+// source, several hundred ms of work plus its diagnostic writes, on a loop.
+bool HasCatalogRelevantChange(const BYTE* buffer, DWORD bytes,
+                              const std::vector<std::wstring>& extensions) {
+    if (extensions.empty() || bytes < sizeof(FILE_NOTIFY_INFORMATION)) {
+        return true;  // no allowlist (or nothing parseable): keep the old behavior
+    }
+    DWORD offset = 0;
+    for (;;) {
+        if (bytes - offset < offsetof(FILE_NOTIFY_INFORMATION, FileName)) {
+            return true;  // truncated record: cannot classify, so do not drop it
+        }
+        FILE_NOTIFY_INFORMATION info{};
+        std::memcpy(&info, buffer + offset, offsetof(FILE_NOTIFY_INFORMATION, FileName));
+        const DWORD name_bytes = info.FileNameLength;
+        if (name_bytes > bytes - offset - offsetof(FILE_NOTIFY_INFORMATION, FileName)) {
+            return true;
+        }
+        if (info.Action != FILE_ACTION_MODIFIED) {
+            return true;  // a name appeared, vanished or changed: always relevant
+        }
+        const std::wstring_view name(
+            reinterpret_cast<const wchar_t*>(buffer + offset +
+                                             offsetof(FILE_NOTIFY_INFORMATION, FileName)),
+            name_bytes / sizeof(wchar_t));
+        const std::size_t dot = name.find_last_of(L'.');
+        if (dot != std::wstring_view::npos) {
+            const std::wstring_view extension = name.substr(dot);
+            for (const std::wstring& allowed : extensions) {
+                if (extension.size() == allowed.size() &&
+                    CompareStringOrdinal(extension.data(),
+                                         static_cast<int>(extension.size()),
+                                         allowed.c_str(),
+                                         static_cast<int>(allowed.size()),
+                                         TRUE) == CSTR_EQUAL) {
+                    return true;
+                }
+            }
+        }
+        if (info.NextEntryOffset == 0) {
+            return false;  // every record was an unrelated content change
+        }
+        if (info.NextEntryOffset > bytes - offset) {
+            return true;
+        }
+        offset += info.NextEntryOffset;
     }
 }
 
@@ -162,7 +219,10 @@ void WatchLoop(std::shared_ptr<CatalogWatcher::Watch> watch) {
                 PostNotification(*watch, kNotifyFullRescan);
                 continue;
             }
-            PostNotification(*watch, kNotifyChange);
+            if (HasCatalogRelevantChange(buffer.data(), bytes_returned,
+                                         watch->extensions)) {
+                PostNotification(*watch, kNotifyChange);
+            }
         }
         CloseHandle(completion);
     } catch (...) {
@@ -183,7 +243,8 @@ CatalogWatcher::~CatalogWatcher() {
 }
 
 void CatalogWatcher::SetRoots(const std::vector<std::wstring>& roots,
-                              const std::vector<bool>& recursive) {
+                              const std::vector<bool>& recursive,
+                              const std::vector<std::wstring>& extensions) {
     Stop();
     watches_.clear();
     const std::size_t count = roots.size();
@@ -191,6 +252,7 @@ void CatalogWatcher::SetRoots(const std::vector<std::wstring>& roots,
         auto watch = std::make_unique<Watch>();
         watch->path = roots[i];
         watch->recursive = i < recursive.size() ? recursive[i] : true;
+        watch->extensions = extensions;
         watch->directory = CreateFileW(
             watch->path.c_str(),
             FILE_LIST_DIRECTORY,

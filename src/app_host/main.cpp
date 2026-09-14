@@ -1602,7 +1602,19 @@ void StartWatchers(HWND window) {
     while (PeekMessageW(&leftover, window, kWatchChangedMessage,
                         kWatchChangedMessage, PM_REMOVE)) {
     }
-    g_watcher->SetRoots(roots, recursive);
+    // The filter is applied to every watched root, so it must be the UNION of
+    // what any source indexes: the Start Menu accepts a fixed .lnk/.appref-ms/
+    // .exe set that the user-editable catalog_extensions does not have to
+    // contain, and dropping a Start Menu shortcut's content change would leave
+    // a retargeted shortcut stale. Over-notifying one root is harmless.
+    std::vector<std::wstring> watch_extensions = g_settings.catalog_extensions;
+    for (const std::wstring& extension : nimblerun::kStartMenuExtensions) {
+        if (std::find(watch_extensions.begin(), watch_extensions.end(), extension) ==
+            watch_extensions.end()) {
+            watch_extensions.push_back(extension);
+        }
+    }
+    g_watcher->SetRoots(roots, recursive, watch_extensions);
 }
 
 // NR-045: the grid's per-cell digit boxes and the footer's Alt+1~N group are

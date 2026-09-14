@@ -88,8 +88,9 @@ bool WriteCache(const std::wstring& directory, const std::vector<AppEntry>& entr
     // The cache is written from the UI thread only.
     static std::wstring last_directory;
     static std::size_t last_hash = 0;
+    static std::size_t last_size = 0;
     const std::size_t hash = std::hash<std::wstring>{}(text);
-    if (hash == last_hash && directory == last_directory &&
+    if (hash == last_hash && text.size() == last_size && directory == last_directory &&
         GetFileAttributesW(JoinPath(directory, kFileName).c_str()) !=
             INVALID_FILE_ATTRIBUTES) {
         return true;
@@ -99,6 +100,7 @@ bool WriteCache(const std::wstring& directory, const std::vector<AppEntry>& entr
     }
     last_directory = directory;
     last_hash = hash;
+    last_size = text.size();
     return true;
 }
 

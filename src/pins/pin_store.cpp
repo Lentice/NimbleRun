@@ -236,8 +236,16 @@ bool PinStore::Reconcile(const std::vector<AppEntry>& catalog, std::int64_t now)
 
     std::vector<PinRecord> kept;
     kept.reserve(pins_.size());
+    bool last_seen_drifted = false;
     for (PinRecord& pin : pins_) {
         if (present.find(pin.stable_id) != present.end()) {
+            // Same overflow rule as the expiry comparison below: compare against
+            // (now - window) instead of subtracting a hand-edited timestamp. A
+            // FUTURE last_seen does not by itself earn a write: it only delays
+            // expiry. It is still normalized to `now` in memory below and
+            // reaches disk with the next save, like any other pin.
+            last_seen_drifted =
+                last_seen_drifted || pin.last_seen_utc < now - kPinLastSeenRefreshSeconds;
             pin.last_seen_utc = now;  // seen again: restart the retention clock
             kept.push_back(std::move(pin));
         } else if (pin.last_seen_utc == 0 ||
@@ -255,7 +263,7 @@ bool PinStore::Reconcile(const std::vector<AppEntry>& catalog, std::int64_t now)
     }
     const bool dropped = kept.size() != pins_.size();
     pins_ = std::move(kept);
-    return dropped;
+    return dropped || last_seen_drifted;
 }
 
 } // namespace nimblerun

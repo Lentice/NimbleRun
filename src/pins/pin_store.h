@@ -35,6 +35,14 @@ enum class PinLoadResult {
 // explicit Reconcile, never on the first failed scan.
 inline constexpr std::int64_t kPinRetentionSeconds = 30LL * 24 * 60 * 60;
 
+// How stale a present pin's PERSISTED last_seen may get before Reconcile asks
+// to be saved. Refreshing last_seen on disk every time would be one write per
+// panel show; never refreshing it would restart the app with a months-old
+// timestamp, so a pin whose app disappears right after a restart would be
+// dropped immediately instead of surviving the retention window. One write a
+// day bounds that error to a day out of thirty.
+inline constexpr std::int64_t kPinLastSeenRefreshSeconds = 24LL * 60 * 60;
+
 // Pure per-user pin store. No HWND, Shell, or COM dependencies.
 //
 // File format: design-spec §10.2 names `favorites.txt` (UTF-8, one pin per
@@ -110,10 +118,10 @@ public:
     // its age is within the retention window, and an empty catalog is never a
     // reason to drop anything, so a single failed scan never deletes a pin
     // (design-spec §FR-011). Mutates in-memory state; call Save() to persist.
-    // Returns true only when the pin SET changed (a pin was dropped). Refreshing
-    // last_seen of a still-present pin is not a change worth a disk write: it
-    // happens on every panel show, and the field only gates the retention of
-    // ABSENT pins, whose last_seen is never refreshed here anyway.
+    // Returns true when the caller should Save(): a pin was dropped, or a
+    // present pin's last_seen had drifted more than kPinLastSeenRefreshSeconds
+    // from `now` before this call. A smaller last_seen refresh is deliberately
+    // not worth a disk write -- Reconcile runs on every panel show.
     bool Reconcile(const std::vector<AppEntry>& catalog, std::int64_t now);
 
 private:

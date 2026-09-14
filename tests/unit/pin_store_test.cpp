@@ -19,6 +19,7 @@ namespace fs = std::filesystem;
 
 using nimblerun::AppEntry;
 using nimblerun::AppSource;
+using nimblerun::kPinLastSeenRefreshSeconds;
 using nimblerun::kPinRetentionSeconds;
 using nimblerun::PanelModel;
 using nimblerun::PinLoadResult;
@@ -195,6 +196,12 @@ void TestAbsentPinSurvivesReconcile() {
     std::vector<AppEntry> catalog = {Entry(L"present_app", L"Present")};
     Expect(!store.Reconcile(catalog, 1005),
            "refreshing last_seen alone is not a change worth saving");
+    // ...but a present pin whose PERSISTED last_seen has drifted a day must be
+    // saved, or a restart would load a stale stamp and expire the pin early.
+    Expect(store.Reconcile(catalog, 2000 + kPinLastSeenRefreshSeconds + 1),
+           "a day-stale last_seen asks to be saved");
+    Expect(!store.Reconcile(catalog, 2000 + kPinLastSeenRefreshSeconds + 2),
+           "the refreshed last_seen does not ask again");
     Expect(store.IsPinned(L"ghost_app"), "absent app's pin kept on first scan");
     Expect(store.IsPinned(L"present_app"), "present app's pin kept");
     fs::remove_all(dir);

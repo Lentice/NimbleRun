@@ -26,14 +26,24 @@ public:
     CatalogWatcher& operator=(const CatalogWatcher&) = delete;
 
     // Replaces the watched set. Any previous watches are stopped first.
+    // `extensions` is the catalog's file-extension allowlist (".lnk", ".exe",
+    // ...). It filters CONTENT-change events only: a watched tree usually holds
+    // files the catalog never indexes (a clipboard manager's database inside a
+    // program folder, a build tree), and rewriting one of those must not cost a
+    // full source rebuild. Name changes (add/remove/rename) always notify, and
+    // an empty list disables the filter.
     void SetRoots(const std::vector<std::wstring>& roots,
-                  const std::vector<bool>& recursive);
+                  const std::vector<bool>& recursive,
+                  const std::vector<std::wstring>& extensions = {});
 
     void Stop();
 
     struct Watch {
         std::wstring path;
         bool recursive = true;
+        // Read by the watcher thread only, and never mutated after the thread
+        // starts (SetRoots builds a whole new watch set).
+        std::vector<std::wstring> extensions;
         HANDLE directory = INVALID_HANDLE_VALUE;
         std::atomic<bool> stop{false};
         std::thread thread;

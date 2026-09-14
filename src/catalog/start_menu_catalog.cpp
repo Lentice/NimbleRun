@@ -24,7 +24,12 @@ namespace {
 
 bool AcceptExtension(std::wstring_view path) {
     const std::wstring ext = Extension(path);
-    return ext == L".lnk" || ext == L".appref-ms" || ext == L".exe";
+    for (const std::wstring& accepted : kStartMenuExtensions) {
+        if (ext == accepted) {
+            return true;
+        }
+    }
+    return false;
 }
 
 // SIGDN_URL gives a file:/// URI for local files and the real URL for website

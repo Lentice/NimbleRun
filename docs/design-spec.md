@@ -412,7 +412,7 @@ Start Menu 與 AppsFolder **共用同一份判準**，集中於單一純值模�
 
 - 啟動時先載入有效的 Catalog cache，立即提供舊結果；再背景完整建立一次最新 Catalog。
 - 以 `ReadDirectoryChangesW` 非同步監看兩個 Programs 資料夾及所有已設定的本機資料夾；每個 user-folder watcher 依該路徑的 `max_depth > 0` 設定 `bWatchSubtree`，不按深度逐層縮小監看範圍。
-- `ReadDirectoryChangesW` 不支援以副檔名過濾；只要求檔名、目錄名與最後寫入時間等必要通知，收到事件後在 worker 依路徑與副檔名 allowlist 過濾。
+- `ReadDirectoryChangesW` 不支援以副檔名過濾；只要求檔名、目錄名與最後寫入時間等必要通知。watcher thread 解析事件記錄先做一次粗篩：新增／刪除／改名一律通知，純內容變更（`FILE_ACTION_MODIFIED`）只在副檔名屬於 allowlist（各來源的聯集）時通知；無法解析的批次一律通知。被監看的樹內常有 Catalog 永不收錄的檔案（例如裝在程式資料夾裡的剪貼簿管理員資料庫，每複製一次改寫一次），少了這道粗篩，每次改寫都會換來一次完整來源重建。最終的路徑與副檔名過濾仍由 worker 負責。
 - 收到密集事件時 debounce 500 ms，合併成一次受影響來源的重掃；不因每個檔案事件各建立一次工作。
 - 若通知 buffer 溢位或收到 `ERROR_NOTIFY_ENUM_DIR`，標記來源需要完整重掃；不得假設事件清單仍完整。
 - 設定新增／移除資料夾或變更副檔名清單時，立即取消過期工作並背景重建 Catalog。

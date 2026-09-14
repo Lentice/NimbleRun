@@ -9,6 +9,10 @@
 
 namespace nimblerun {
 
+// The extensions a Start Menu entry may have. Unlike the user-folder roots,
+// this set is fixed: it is not the user-editable settings.catalog_extensions.
+inline const std::wstring kStartMenuExtensions[] = {L".lnk", L".appref-ms", L".exe"};
+
 // Result of one Start Menu enumeration pass. entries are plain copyable
 // AppEntry values with no Shell COM pointer retained. source_ok is false for a
 // source-level failure (COM unavailable, neither Programs known folder could be
