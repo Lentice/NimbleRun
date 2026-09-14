@@ -127,6 +127,28 @@ void TestCorruptPinsAreNotReconciledOrSaved() {
            "corrupt favorites is preserved");
 }
 
+// Refresh() runs on every panel show; an unchanged pin set must not rewrite
+// favorites.txt (the last_seen refresh alone is not worth a disk write).
+void TestUnchangedPinsAreNotRewritten() {
+    Fixture fixture(L"pin_no_rewrite");
+    Expect(fixture.pins.Pin(L"pinned", L"Pinned", 100), "create pin fixture");
+    Expect(fixture.pins.Save(), "save pin fixture");
+    fixture.refresh.SetSnapshot({Entry(L"pinned", L"Pinned")});
+    fixture.assembler.Refresh();
+    const std::string before = ReadBytes(fixture.directory + L"\\favorites.txt");
+    const auto stamp = fs::last_write_time(fixture.directory + L"\\favorites.txt");
+
+    fixture.assembler.Refresh();
+
+    Expect(ReadBytes(fixture.directory + L"\\favorites.txt") == before,
+           "unchanged pin set does not rewrite favorites content");
+    Expect(fs::last_write_time(fixture.directory + L"\\favorites.txt") == stamp,
+           "unchanged pin set does not touch favorites at all");
+
+    // The dropped-pin path still persists: covered by PinStore::Reconcile
+    // returning true (pin_store_test).
+}
+
 // Pins must be loaded and handed to the model before SetRecent is the final
 // RefreshRows trigger; otherwise the pinned-first view loses its stamp.
 void TestPinsAreStampedBeforeRecentRows() {
@@ -219,6 +241,7 @@ void TestRecentRowsAreSnapshotBoundAndCapped() {
 int wmain() {
     TestEmptySnapshotDoesNotWipeUsage();
     TestCorruptPinsAreNotReconciledOrSaved();
+    TestUnchangedPinsAreNotRewritten();
     TestPinsAreStampedBeforeRecentRows();
     TestCatalogIndexIsClearedOnReturn();
     TestPinChangeRefreshMode();

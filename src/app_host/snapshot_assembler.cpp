@@ -33,9 +33,15 @@ CatalogSnapshotAssembler::Result CatalogSnapshotAssembler::RefreshPins() {
     // creates the first empty favorites file.
     if (result.pin_load_result == PinLoadResult::Loaded ||
         result.pin_load_result == PinLoadResult::Missing) {
-        pins_.Reconcile(refresh_.Snapshot(),
-                        static_cast<std::int64_t>(std::time(nullptr)));
-        pins_.Save();
+        const bool dropped = pins_.Reconcile(
+            refresh_.Snapshot(), static_cast<std::int64_t>(std::time(nullptr)));
+        // Refresh() runs on every panel show, so an unconditional Save() was one
+        // favorites.txt rewrite per show. Write only when the pin set actually
+        // changed, or when Missing has to create the first file. (A schema=1
+        // file therefore upgrades on the next real pin edit instead of here.)
+        if (dropped || result.pin_load_result == PinLoadResult::Missing) {
+            pins_.Save();
+        }
     }
     model_.SetPins(pins_.Records());
     return result;

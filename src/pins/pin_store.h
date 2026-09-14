@@ -110,7 +110,11 @@ public:
     // its age is within the retention window, and an empty catalog is never a
     // reason to drop anything, so a single failed scan never deletes a pin
     // (design-spec §FR-011). Mutates in-memory state; call Save() to persist.
-    void Reconcile(const std::vector<AppEntry>& catalog, std::int64_t now);
+    // Returns true only when the pin SET changed (a pin was dropped). Refreshing
+    // last_seen of a still-present pin is not a change worth a disk write: it
+    // happens on every panel show, and the field only gates the retention of
+    // ABSENT pins, whose last_seen is never refreshed here anyway.
+    bool Reconcile(const std::vector<AppEntry>& catalog, std::int64_t now);
 
 private:
     std::wstring directory_;

@@ -654,6 +654,32 @@ void TestCacheRoundTrip() {
     RemoveTreeBestEffort(dir);
 }
 
+// Every completed rebuild generation calls SaveCatalogCache; an unchanged
+// catalog must not rewrite the file. A deleted file is still rewritten.
+void TestUnchangedCatalogCacheIsNotRewritten() {
+    const std::wstring dir = TempDir();
+    const std::vector<AppEntry> entries = {Entry(L"id1", AppSource::UserStartMenu)};
+    Expect(SaveCatalogCache(dir, entries), "first save writes");
+    const std::wstring path = dir + L"\\catalog.cache";
+    const auto stamp = std::filesystem::last_write_time(path);
+
+    Expect(SaveCatalogCache(dir, entries), "identical save reports success");
+    Expect(std::filesystem::last_write_time(path) == stamp,
+           "identical catalog does not rewrite the cache");
+
+    std::filesystem::remove(path);
+    Expect(SaveCatalogCache(dir, entries), "save after external delete writes");
+    Expect(std::filesystem::exists(path), "deleted cache is rebuilt");
+
+    Expect(SaveCatalogCache(dir, {Entry(L"id2", AppSource::UserFolder)}),
+           "changed catalog writes");
+    std::vector<AppEntry> loaded;
+    Expect(LoadCatalogCache(dir, loaded) && loaded.size() == 1 &&
+               loaded[0].stable_id == Entry(L"id2", AppSource::UserFolder).stable_id,
+           "changed catalog reaches disk");
+    RemoveTreeBestEffort(dir);
+}
+
 // NR-113: a cache entry is displayable but not launchable until a current
 // source enumeration produces its identity again. SaveCatalogCache never writes
 // the flag (schema stays at version 2), so every LoadCatalogCache entry comes
@@ -1035,6 +1061,7 @@ int wmain() {
     TestConsecutiveFailuresTriggerOnce();
     TestSuccessNeverTriggers();
     TestSettingsCopyIsIndependent();
+    TestUnchangedCatalogCacheIsNotRewritten();
     TestRebuildDiagnosticLines();
     TestGenerationDiagnosticsDuration();
     TestGenerationDiagnosticsAggregation();

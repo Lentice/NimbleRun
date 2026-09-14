@@ -7,6 +7,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <functional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -78,7 +79,27 @@ bool WriteCache(const std::wstring& directory, const std::vector<AppEntry>& entr
         text += SerializeEntry(entry);
         text += L'\n';
     }
-    return AtomicWriteUtf8Text(directory, kFileName, text);
+    // Every completed rebuild generation asks for a save, and a watcher event
+    // on an unrelated file in a watched folder produces a generation whose
+    // merged entries are byte-identical to the last one. Rewriting the whole
+    // cache for that is pure IO. Remember the last written (directory, hash)
+    // and skip an identical rewrite -- but only while the file is still there,
+    // so an externally deleted cache is rebuilt on the next generation.
+    // The cache is written from the UI thread only.
+    static std::wstring last_directory;
+    static std::size_t last_hash = 0;
+    const std::size_t hash = std::hash<std::wstring>{}(text);
+    if (hash == last_hash && directory == last_directory &&
+        GetFileAttributesW(JoinPath(directory, kFileName).c_str()) !=
+            INVALID_FILE_ATTRIBUTES) {
+        return true;
+    }
+    if (!AtomicWriteUtf8Text(directory, kFileName, text)) {
+        return false;
+    }
+    last_directory = directory;
+    last_hash = hash;
+    return true;
 }
 
 } // namespace

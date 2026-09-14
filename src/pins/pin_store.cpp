@@ -215,12 +215,12 @@ bool PinStore::ReorderPresent(const std::vector<std::wstring>& order) {
     return OrderedPins() != before_ids;
 }
 
-void PinStore::Reconcile(const std::vector<AppEntry>& catalog, std::int64_t now) {
+bool PinStore::Reconcile(const std::vector<AppEntry>& catalog, std::int64_t now) {
     // An empty catalog means "no data yet" (first launch, failed scan, in-flight
     // rebuild), never "all apps are gone". Never drop pins against it: a single
     // failed scan must not delete a pin (design-spec §FR-011).
     if (catalog.empty()) {
-        return;
+        return false;
     }
 
     // NR-122: build a membership set of the catalog's stable ids once, so each
@@ -253,7 +253,9 @@ void PinStore::Reconcile(const std::vector<AppEntry>& catalog, std::int64_t now)
         }
         // else: absent for more than the retention window -> dropped here.
     }
+    const bool dropped = kept.size() != pins_.size();
     pins_ = std::move(kept);
+    return dropped;
 }
 
 } // namespace nimblerun

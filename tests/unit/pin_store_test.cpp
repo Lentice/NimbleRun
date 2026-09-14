@@ -193,7 +193,8 @@ void TestAbsentPinSurvivesReconcile() {
     store.Pin(L"ghost_app", L"", 1000);
     store.Pin(L"present_app", L"", 2000);
     std::vector<AppEntry> catalog = {Entry(L"present_app", L"Present")};
-    store.Reconcile(catalog, 1005);
+    Expect(!store.Reconcile(catalog, 1005),
+           "refreshing last_seen alone is not a change worth saving");
     Expect(store.IsPinned(L"ghost_app"), "absent app's pin kept on first scan");
     Expect(store.IsPinned(L"present_app"), "present app's pin kept");
     fs::remove_all(dir);
@@ -223,7 +224,7 @@ void TestReconcile30DayExpiry() {
     const std::int64_t now = 1000 + kPinRetentionSeconds + 10;
     store.Pin(L"recent_absent", L"", now - 5);        // absent but recent -> keep
     std::vector<AppEntry> catalog = {Entry(L"present", L"Present")};
-    store.Reconcile(catalog, now);
+    Expect(store.Reconcile(catalog, now), "dropping a pin reports a change");
 
     Expect(SameIds(store.OrderedPins(), {L"present", L"recent_absent"}),
            "expired absent pin dropped; present and recent-absent kept");
