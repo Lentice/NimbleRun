@@ -1587,10 +1587,14 @@ void StartWatchers(HWND window) {
         add_root(common_programs, true, nimblerun::CatalogSource::StartMenu);
     }
     if (common_programs) CoTaskMemFree(common_programs);
-    for (const nimblerun::CatalogRoot& root : g_settings.catalog_roots) {
-        add_root(root.path, root.max_depth > nimblerun::kMinCatalogDepth,
-                 nimblerun::CatalogSource::UserFolder);
-    }
+    // User-folder roots are deliberately NOT watched. Unlike the Programs
+    // folders, which only change when something is installed or removed, a
+    // configured root is an ordinary working folder: a clipboard manager's
+    // database, a build tree, an editor's save. Each such write costs a full
+    // rescan of that root, and the extension pre-filter does not help when the
+    // churn is an indexed extension (a rebuilt .exe). They are picked up by the
+    // startup rebuild and by the explicit Ctrl+R / tray "Refresh Apps"
+    // (design-spec §FR-008).
     if (g_rebuild_pipeline) g_rebuild_pipeline->SetWatchSources(std::move(sources));
     // NR-156: kWatchChangedMessage carries a 1-based index into the watch
     // table. After a settings apply the table has been swapped but messages
@@ -1602,18 +1606,11 @@ void StartWatchers(HWND window) {
     while (PeekMessageW(&leftover, window, kWatchChangedMessage,
                         kWatchChangedMessage, PM_REMOVE)) {
     }
-    // The filter is applied to every watched root, so it must be the UNION of
-    // what any source indexes: the Start Menu accepts a fixed .lnk/.appref-ms/
-    // .exe set that the user-editable catalog_extensions does not have to
-    // contain, and dropping a Start Menu shortcut's content change would leave
-    // a retargeted shortcut stale. Over-notifying one root is harmless.
-    std::vector<std::wstring> watch_extensions = g_settings.catalog_extensions;
-    for (const std::wstring& extension : nimblerun::kStartMenuExtensions) {
-        if (std::find(watch_extensions.begin(), watch_extensions.end(), extension) ==
-            watch_extensions.end()) {
-            watch_extensions.push_back(extension);
-        }
-    }
+    // Only Start Menu roots are watched, so the filter is the Start Menu's own
+    // fixed extension set -- not the user-editable settings.catalog_extensions,
+    // which the Start Menu scan does not consult either.
+    const std::vector<std::wstring> watch_extensions(std::begin(nimblerun::kStartMenuExtensions),
+                                                     std::end(nimblerun::kStartMenuExtensions));
     g_watcher->SetRoots(roots, recursive, watch_extensions);
 }
 
@@ -3698,7 +3695,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     g_icon_worker = &icon_worker;
     icon_worker.Start();
 
-    // NR-011: directory watchers over Programs + configured user folders.
+    // NR-011: directory watchers over the two Programs folders. Configured user
+    // folders are deliberately unwatched (design-spec §FR-008).
     nimblerun::CatalogWatcher watcher(window, kWatchChangedMessage);
     g_watcher = &watcher;
     StartWatchers(window);

@@ -411,8 +411,9 @@ Start Menu 與 AppsFolder **共用同一份判準**，集中於單一純值模�
 ### FR-008 Catalog 更新
 
 - 啟動時先載入有效的 Catalog cache，立即提供舊結果；再背景完整建立一次最新 Catalog。
-- 以 `ReadDirectoryChangesW` 非同步監看兩個 Programs 資料夾及所有已設定的本機資料夾；每個 user-folder watcher 依該路徑的 `max_depth > 0` 設定 `bWatchSubtree`，不按深度逐層縮小監看範圍。
-- `ReadDirectoryChangesW` 不支援以副檔名過濾；只要求檔名、目錄名與最後寫入時間等必要通知。watcher thread 解析事件記錄先做一次粗篩：新增／刪除／改名一律通知，純內容變更（`FILE_ACTION_MODIFIED`）只在副檔名屬於 allowlist（各來源的聯集）時通知；無法解析的批次一律通知。被監看的樹內常有 Catalog 永不收錄的檔案（例如裝在程式資料夾裡的剪貼簿管理員資料庫，每複製一次改寫一次），少了這道粗篩，每次改寫都會換來一次完整來源重建。最終的路徑與副檔名過濾仍由 worker 負責。
+- 以 `ReadDirectoryChangesW` 非同步監看兩個 Programs 資料夾（`FOLDERID_Programs`、`FOLDERID_CommonPrograms`），`bWatchSubtree` 為真。
+- **使用者自訂資料夾不監看。** 它們是一般的工作資料夾：裝在程式資料夾裡的剪貼簿管理員資料庫、build 樹、編輯器存檔，每一次寫入都會換來一次整個 root 的重掃，而當噪音本身就是受支援副檔名（重新編譯出的 `.exe`）時，副檔名粗篩也擋不住。改由啟動時的重建與使用者明示的 Ctrl+R／工作列 Refresh Apps 更新。Programs 資料夾沒有這個問題：只有安裝或移除程式才會變動，而那正是清單必須立刻反映的事。
+- `ReadDirectoryChangesW` 不支援以副檔名過濾；只要求檔名、目錄名與最後寫入時間等必要通知。watcher thread 解析事件記錄先做一次粗篩：新增／刪除／改名一律通知，純內容變更（`FILE_ACTION_MODIFIED`）只在副檔名屬於 Start Menu 的固定 allowlist 時通知；無法解析的批次一律通知。最終的路徑與副檔名過濾仍由 worker 負責。
 - 收到密集事件時 debounce 500 ms，合併成一次受影響來源的重掃；不因每個檔案事件各建立一次工作。
 - 若通知 buffer 溢位或收到 `ERROR_NOTIFY_ENUM_DIR`，標記來源需要完整重掃；不得假設事件清單仍完整。
 - 設定新增／移除資料夾或變更副檔名清單時，立即取消過期工作並背景重建 Catalog。
@@ -510,10 +511,10 @@ MVP 設定：
 | 冷啟動至可接收快捷鍵 | ≤ 500 ms | > 1,000 ms |
 | 暖狀態快捷鍵至可輸入 | p95 ≤ 80 ms | p95 > 150 ms |
 | 500 個 App 的單次過濾 | p95 ≤ 8 ms | p95 > 16 ms |
-| 待機 app-owned 執行緒數 | 2 ＋ watcher root 數 | 超出該式 |
+| 待機 app-owned 執行緒數 | 4（1 UI ＋ 1 icon worker ＋ 2 Programs watcher） | 超出該式 |
 | `icons.cache` 檔案大小 | ≤ 32 MiB | > 48 MiB |
 
-待機執行緒數的門檻只綁 NimbleRun 自己建的執行緒，且由 §9.2 的執行緒模型推導，不是固定常數：1 條 UI thread ＋ 1 條**常駐**圖示 worker（負責取得、解碼、pack 檔讀寫與 idle flush，不為每個圖示建 thread，§9 第 658 行不變）＋ 每個 watcher root 一條 directory watcher。root 數隨使用者設定的自訂資料夾變動，訂死成常數必然誤判。Catalog rebuild worker 完成即回收，不計入待機值。
+待機執行緒數的門檻只綁 NimbleRun 自己建的執行緒，且由 §9.2 的執行緒模型推導：1 條 UI thread ＋ 1 條**常駐**圖示 worker（負責取得、解碼、pack 檔讀寫與 idle flush，不為每個圖示建 thread，§9 第 658 行不變）＋ 每個 watcher root 一條 directory watcher。watcher root 固定是兩個 Programs 目錄（使用者自訂資料夾不監看），所以待機值是常數 4，不再隨設定變動。Catalog rebuild worker 完成即回收，不計入待機值。
 
 行程總執行緒數不設門檻：其中還包含 Direct2D/D3D/DXGI 的 device thread、STA COM 與 Shell extension 的 RPC 執行緒、ntdll thread pool worker，皆由 Windows 注入，數量隨 OS build、顯示驅動與已安裝的 Shell extension 變動。仍須記錄，但只作環境參考。量法與已量測值見 `docs/performance-baseline.md`。
 
@@ -725,7 +726,7 @@ flowchart TD
 6. 依設定註冊 `RegisterHotKey`，再建立通知區圖示；失敗時保留 tray 並顯示一次非阻擋提醒。
 7. 載入可選 Catalog cache，若有效可先提供結果。
 8. 背景建立最新 Catalog。
-9. 啟動 Programs 與已設定 user-folder directory watcher。
+9. 啟動兩個 Programs directory watcher（使用者自訂資料夾不監看）。
 10. 主執行緒進入阻塞式 message loop。
 
 即使 Catalog 尚未完成，快捷鍵也應能叫出面板並顯示「正在準備 App」。
@@ -841,7 +842,7 @@ flowchart TD
 - 建立含正常、損壞、參數、Unicode 名稱及深層子目錄的測試 Start Menu。
 - 建立多個含深層子目錄、Unicode 名稱、重疊路徑及非支援副檔名的使用者資料夾 fixture。
 - 修改／新增／刪除捷徑後 watcher 只重建一次。
-- 修改／新增／刪除使用者資料夾內的受支援檔案後，watcher 在 debounce 後更新一次；未選副檔名不進入 Catalog。
+- 修改／新增／刪除使用者資料夾內的受支援檔案後，Catalog 不變；Ctrl+R／Refresh Apps 之後更新一次。未選副檔名不進入 Catalog。
 - 列舉並啟動至少三個 Win32 App。
 - 列舉並啟動至少三個 inbox packaged App，例如 Calculator、Settings 對應項目；實際清單依 OS 映像調整。
 - Hotkey 衝突與重新設定。

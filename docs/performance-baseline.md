@@ -11,7 +11,7 @@ These are Release x64 measurements, not Debug estimates. Record the OS build, CP
 | Cold start to hotkey-ready | ≤ 500 ms | > 1,000 ms | 220.4 ms | `nfr001_probe.ps1`，2026-08-26；由產品 `HotkeyReady` rendezvous 量測，Release x64、無 debugger |
 | Warm hotkey to input-ready, p95 | ≤ 80 ms | > 150 ms | 41.54 ms | `nfr001_probe.ps1`，2026-08-26；20 次 hidden→visible，產品在 `SetFocus(search_edit)` 後發出 test-only `InputReady` rendezvous |
 | Filter 500 apps, p95 | ≤ 8 ms | > 16 ms | 683 µs（5,000 筆、100 次、`L"e"` 查詢） | `search_engine_test`，2026-08-25；以 5,000 筆（大於 500）取 p95，作為保守上界 |
-| Idle app-owned thread count | 2 ＋ watcher root 數 | 超出該式 | 5（已量測，`GetThreadDescription` census） | 見下方「執行緒數的量法」 |
+| Idle app-owned thread count | 4（1 UI ＋ 1 icon worker ＋ 2 Programs watcher） | 超出該式 | 5（於自訂資料夾仍被監看時量得，公式為 2 ＋ 3 roots；自訂資料夾監看已移除，待重新量測） | 見下方「執行緒數的量法」 |
 | Idle process thread count | — | — | 10 | `nfr001_probe.ps1`，2026-08-26；參考值，不設門檻，隨系統注入執行緒數波動 |
 | `icons.cache` file size | ≤ 32 MiB | > 48 MiB | 1.31 MiB（1,376,256 bytes） | `nfr001_probe.ps1`，2026-08-26；20-row `VisibleReady` 完成後隱藏面板並 flush 後量測 |
 | 單次整窗重繪（grid，24 格） | — | — | 1.40 ms（p95 1.94 ms） | 見下方「整窗重繪的成本」，2026-08-07；參考值，不設門檻 |
@@ -79,7 +79,7 @@ fallback 下超過該值），再談改法。
 
 - 1 條 UI thread（阻塞於 message loop）。
 - 1 條常駐 icon worker（§9.2 允許常駐；也是當初把上限從 4 放寬到 5 的原因）。
-- 每個 watcher root 一條 directory watcher，長時間阻塞等待事件，不輪詢。root 數 = 兩個 Start Menu Programs 目錄 ＋ 使用者設定的自訂資料夾數，所以這一項隨設定變動，訂死成常數必然會誤判。
+- 每個 watcher root 一條 directory watcher，長時間阻塞等待事件，不輪詢。root 數固定為兩個 Start Menu Programs 目錄：使用者自訂資料夾不監看（design-spec §FR-008），改由啟動重建與 Ctrl+R／Refresh Apps 更新，所以這一項不隨設定變動。
 - Catalog rebuild worker 是 per-source 的一次性執行緒，完成即回收（§9.2「不得建立常駐 thread pool 只為未來可能的工作」），故不計入待機值。待機時仍看得到它們，就是回收出問題。
 
 判定方式是「數量是否等於上式」與「是否全部處於 Wait、CPU 0%」，而不是與固定上限比大小。行程總數仍要記錄，但只作為環境參考。
